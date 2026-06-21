@@ -4,15 +4,17 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class AuctionLot extends Model
 {
-    protected $table = 'auction_lots';
+    use HasFactory;
 
     protected $fillable = [
         'seller_id',
+        'buyer_id',
         'template_id',
         'quantity',
         'item_instance_id',
@@ -20,15 +22,17 @@ class AuctionLot extends Model
         'price',
         'commission_percent',
         'status',
-        'buyer_id',
-        'sold_at',
     ];
 
     protected $casts = [
+        'seller_id' => 'integer',
+        'buyer_id' => 'integer',
+        'template_id' => 'integer',
+        'quantity' => 'integer',
+        'item_instance_id' => 'integer',
         'item_stats' => 'array',
         'price' => 'integer',
-        'commission' => 'integer',
-        'sold_at' => 'datetime',
+        'commission_percent' => 'integer',
     ];
 
     public function seller(): BelongsTo
@@ -46,20 +50,8 @@ class AuctionLot extends Model
         return $this->belongsTo(ItemTemplate::class, 'template_id');
     }
 
-    // ===== Расчёты =====
-
-    public function getCommissionAttribute(): int
+    public function instance(): BelongsTo
     {
-        return (int) floor($this->price * $this->commission_percent / 100);
-    }
-
-    public function getSellerReceivedAttribute(): int
-    {
-        return $this->price - $this->commission;
-    }
-
-    public function isActive(): bool
-    {
-        return $this->status === 'active';
+        return $this->belongsTo(ItemInstance::class, 'item_instance_id');
     }
 }

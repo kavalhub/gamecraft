@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\GameEvent;
 use App\Models\ItemInstance;
+use App\Models\ItemTemplate;
 use App\Models\TradeItem;
 use App\Models\TradeOffer;
 use App\Models\User;
@@ -19,9 +20,6 @@ class TradeService
         private EventStore $eventStore
     ) {}
 
-    /**
-     * Получить активные обмены игрока
-     */
     public function getActiveTrades(int $userId): array
     {
         return TradeOffer::with(['initiator', 'partner', 'items.template'])
@@ -36,9 +34,6 @@ class TradeService
             ->toArray();
     }
 
-    /**
-     * Получить детали обмена
-     */
     public function getTrade(int $tradeId, int $userId): array
     {
         $trade = TradeOffer::with(['initiator', 'partner', 'items.template', 'items.instance'])
@@ -51,49 +46,28 @@ class TradeService
         return $this->formatTrade($trade, $userId);
     }
 
-    /**
-     * Создать обмен
-     */
     public function createTrade(int $initiatorId, int $partnerId): TradeOffer
     {
         if ($initiatorId === $partnerId) {
             throw new \RuntimeException('Нельзя торговать с самим собой');
         }
 
-        if (!User::find($partnerId)) {
-            throw new \RuntimeException('Партнёр не найден');
+        $initiator = User::find($initiatorId);
+        $partner = User::find($partnerId);
+
+        if (!$initiator || !$partner) {
+            throw new \RuntimeException('Игрок не найден');
         }
 
-        // Проверяем, нет ли уже активного обмена
         $existing = TradeOffer::where(function ($q) use ($initiatorId, $partnerId) {
             $q->where(function ($sub) use ($initiatorId, $partnerId) {
-                $sub->where('initiator_id', $initiatorId)
-                    ->where('partner_id', $partnerId);
+                $sub->where('initiator_id', $initiatorId)->where('partner_id', $partnerId);
             })->orWhere(function ($sub) use ($initiatorId, $partnerId) {
-                $sub->where('initiator_id', $partnerId)
-                    ->where('partner_id', $initiatorId);
+                $sub->where('initiator_id', $partnerId)->where('partner_id', $initiatorId);
             });
         })->whereIn('status', ['pending', 'active'])->first();
 
-        // ЛОГИРОВАНИЕ
         if ($existing) {
-            \Log::warning('Найден существующий обмен', [
-                'initiator_id' => $initiatorId,
-                'partner_id' => $partnerId,
-                'existing_trade' => [
-                    'id' => $existing->id,
-                    'initiator_id' => $existing->initiator_id,
-                    'partner_id' => $existing->partner_id,
-                    'status' => $existing->status,
-                    'created_at' => $existing->created_at,
-                    'updated_at' => $existing->updated_at,
-                ],
-                'sql' => TradeOffer::where(function ($q) use ($initiatorId, $partnerId) {
-                    $q->where('initiator_id', $initiatorId)->where('partner_id', $partnerId);
-                })->orWhere(function ($q) use ($initiatorId, $partnerId) {
-                    $q->where('initiator_id', $partnerId)->where('partner_id', $initiatorId);
-                })->whereIn('status', ['pending', 'active'])->toSql(),
-            ]);
             throw new \RuntimeException('У вас уже есть активный обмен с этим игроком');
         }
 
@@ -103,80 +77,116 @@ class TradeService
             'status' => 'active',
         ]);
 
-        // ... остальной код без изменений
+        $correlationId = Str::uuid()->toString();
+        $payload = [
+            'trade_id' => $trade->id,
+            'initiator_id' => $initiatorId,
+            'initiator_name' => $initiator->name,
+            'partner_id' => $partnerId,
+            'partner_name' => $partner->name,
+        ];
+
+        $this->eventStore->record(
+            GameEvent::TRADE_CREATED, 'trade', $trade->id,
+            $payload, $initiatorId, $correlationId
+        );
+
+        $this->eventStore->record(
+            GameEvent::TRADE_CREATED, 'trade', $trade->id,
+            $payload, $partnerId, $correlationId
+        );
+
+        return $trade;
     }
 
-    /**
-     * Добавить предмет в обмен
-     */
-    public function addItem(int $userId, int $tradeId, int $instanceId, int $quantity = 1): TradeOffer
+    public function addItem(int $userId, int $tradeId, int $templateId, int $quantity): TradeOffer
     {
-        return DB::transaction(function () use ($userId, $tradeId, $instanceId, $quantity) {
+        return DB::transaction(function () use ($userId, $tradeId, $templateId, $quantity) {
             $trade = TradeOffer::findOrFail($tradeId);
             $side = $trade->getSide($userId);
 
-            if (!$side) {
-                throw new \RuntimeException('Вы не участвуете в этом обмене');
-            }
-            if ($trade->status !== 'active') {
-                throw new \RuntimeException('Обмен не активен');
-            }
+            if (!$side) throw new \RuntimeException('Вы не участвуете в этом обмене');
+            if ($trade->status !== 'active') throw new \RuntimeException('Обмен не активен');
+            if ($quantity <= 0) throw new \RuntimeException('Количество должно быть больше 0');
 
-            $item = ItemInstance::with('template')
-                ->where('id', $instanceId)
-                ->where('owner_id', $userId)
-                ->firstOrFail();
+            $template = ItemTemplate::findOrFail($templateId);
 
-            if ($item->template->type === 'recipe') {
+            if ($template->type === 'recipe') {
                 throw new \RuntimeException('Чертежи нельзя обменивать');
             }
 
-            // Проверяем, что такой предмет уже не в обмене
-            $existing = TradeItem::where('trade_id', $tradeId)
+            $items = ItemInstance::where('owner_id', $userId)
+                ->where('template_id', $templateId)
+                ->orderBy('quantity', 'desc')
+                ->get();
+
+            $totalAvailable = $items->sum('quantity');
+
+            if ($totalAvailable < $quantity) {
+                throw new \RuntimeException("В инвентаре только {$totalAvailable} шт., нельзя передать {$quantity}");
+            }
+
+            $existingTradeItem = TradeItem::where('trade_id', $tradeId)
                 ->where('side', $side)
-                ->where('item_instance_id', $instanceId)
+                ->where('template_id', $templateId)
                 ->first();
 
-            if ($existing) {
-                throw new \RuntimeException('Этот предмет уже в обмене');
+            if ($existingTradeItem) {
+                $existingTradeItem->quantity += $quantity;
+                $existingTradeItem->save();
+            } else {
+                $firstInstance = $items->first();
+                TradeItem::create([
+                    'trade_id' => $tradeId,
+                    'side' => $side,
+                    'template_id' => $templateId,
+                    'item_instance_id' => $firstInstance->id,
+                    'quantity' => $quantity,
+                ]);
             }
 
-            // Для стакуемых — можно указать количество
-            $addQuantity = $item->template->is_stackable ? $quantity : 1;
-
-            if ($addQuantity > $item->quantity) {
-                throw new \RuntimeException('Недостаточно количества');
-            }
-
-            TradeItem::create([
-                'trade_id' => $tradeId,
-                'side' => $side,
-                'template_id' => $item->template_id,
-                'item_instance_id' => $instanceId,
-                'quantity' => $addQuantity,
-            ]);
-
-            // Сбрасываем подтверждения (защита от обмана)
             $this->resetAcceptances($trade);
-
             $this->emitTradeUpdated($trade, $userId);
 
             return $trade->fresh();
         });
     }
 
-    /**
-     * Убрать предмет из обмена
-     */
+    public function reduceItem(int $userId, int $tradeId, int $tradeItemId, int $quantity): TradeOffer
+    {
+        return DB::transaction(function () use ($userId, $tradeId, $tradeItemId, $quantity) {
+            $trade = TradeOffer::findOrFail($tradeId);
+            $side = $trade->getSide($userId);
+
+            if (!$side) throw new \RuntimeException('Вы не участвуете в этом обмене');
+            if ($quantity <= 0) throw new \RuntimeException('Количество должно быть больше 0');
+
+            $tradeItem = TradeItem::where('id', $tradeItemId)
+                ->where('trade_id', $tradeId)
+                ->where('side', $side)
+                ->firstOrFail();
+
+            if ($tradeItem->quantity > $quantity) {
+                $tradeItem->quantity -= $quantity;
+                $tradeItem->save();
+            } else {
+                $tradeItem->delete();
+            }
+
+            $this->resetAcceptances($trade);
+            $this->emitTradeUpdated($trade, $userId);
+
+            return $trade->fresh();
+        });
+    }
+
     public function removeItem(int $userId, int $tradeId, int $tradeItemId): TradeOffer
     {
         return DB::transaction(function () use ($userId, $tradeId, $tradeItemId) {
             $trade = TradeOffer::findOrFail($tradeId);
             $side = $trade->getSide($userId);
 
-            if (!$side) {
-                throw new \RuntimeException('Вы не участвуете в этом обмене');
-            }
+            if (!$side) throw new \RuntimeException('Вы не участвуете в этом обмене');
 
             $tradeItem = TradeItem::where('id', $tradeItemId)
                 ->where('trade_id', $tradeId)
@@ -192,24 +202,15 @@ class TradeService
         });
     }
 
-    /**
-     * Добавить золото в обмен
-     */
     public function addGold(int $userId, int $tradeId, int $amount): TradeOffer
     {
         return DB::transaction(function () use ($userId, $tradeId, $amount) {
             $trade = TradeOffer::findOrFail($tradeId);
             $side = $trade->getSide($userId);
 
-            if (!$side) {
-                throw new \RuntimeException('Вы не участвуете в этом обмене');
-            }
-            if ($trade->status !== 'active') {
-                throw new \RuntimeException('Обмен не активен');
-            }
-            if ($amount < 0) {
-                throw new \RuntimeException('Сумма должна быть положительной');
-            }
+            if (!$side) throw new \RuntimeException('Вы не участвуете в этом обмене');
+            if ($trade->status !== 'active') throw new \RuntimeException('Обмен не активен');
+            if ($amount < 0) throw new \RuntimeException('Сумма должна быть положительной');
 
             $user = User::findOrFail($userId);
             if ($user->gold < $amount) {
@@ -226,42 +227,36 @@ class TradeService
         });
     }
 
-    /**
-     * Подтвердить обмен
-     */
     public function accept(int $userId, int $tradeId): TradeOffer
     {
         return DB::transaction(function () use ($userId, $tradeId) {
             $trade = TradeOffer::findOrFail($tradeId);
             $side = $trade->getSide($userId);
 
-            if (!$side) {
-                throw new \RuntimeException('Вы не участвуете в этом обмене');
-            }
-            if ($trade->status !== 'active') {
-                throw new \RuntimeException('Обмен не активен');
-            }
+            if (!$side) throw new \RuntimeException('Вы не участвуете в этом обмене');
+            if ($trade->status !== 'active') throw new \RuntimeException('Обмен не активен');
 
             $field = $side === 'initiator' ? 'initiator_accepted' : 'partner_accepted';
             $trade->update([$field => true]);
 
             $correlationId = Str::uuid()->toString();
+            $payload = [
+                'trade_id' => $trade->id,
+                'user_id' => $userId,
+                'side' => $side,
+            ];
+
             $this->eventStore->record(
-                GameEvent::TRADE_ACCEPTED,
-                'trade',
-                $trade->id,
-                [
-                    'trade_id' => $trade->id,
-                    'user_id' => $userId,
-                    'side' => $side,
-                ],
-                $userId,
-                $correlationId
+                GameEvent::TRADE_ACCEPTED, 'trade', $trade->id,
+                $payload, $trade->initiator_id, $correlationId
+            );
+            $this->eventStore->record(
+                GameEvent::TRADE_ACCEPTED, 'trade', $trade->id,
+                $payload, $trade->partner_id, $correlationId
             );
 
             $trade = $trade->fresh();
 
-            // Если обе стороны подтвердили — выполняем обмен
             if ($trade->initiator_accepted && $trade->partner_accepted) {
                 $this->executeTrade($trade);
             } else {
@@ -272,17 +267,12 @@ class TradeService
         });
     }
 
-    /**
-     * Отменить обмен
-     */
     public function cancel(int $userId, int $tradeId): TradeOffer
     {
         $trade = TradeOffer::findOrFail($tradeId);
         $side = $trade->getSide($userId);
 
-        if (!$side) {
-            throw new \RuntimeException('Вы не участвуете в этом обмене');
-        }
+        if (!$side) throw new \RuntimeException('Вы не участвуете в этом обмене');
         if (!in_array($trade->status, ['pending', 'active'])) {
             throw new \RuntimeException('Обмен уже завершён');
         }
@@ -290,24 +280,20 @@ class TradeService
         $trade->update(['status' => 'cancelled']);
 
         $correlationId = Str::uuid()->toString();
+        $payload = ['trade_id' => $trade->id, 'cancelled_by' => $userId];
+
         $this->eventStore->record(
-            GameEvent::TRADE_CANCELLED,
-            'trade',
-            $trade->id,
-            [
-                'trade_id' => $trade->id,
-                'cancelled_by' => $userId,
-            ],
-            $userId,
-            $correlationId
+            GameEvent::TRADE_CANCELLED, 'trade', $trade->id,
+            $payload, $trade->initiator_id, $correlationId
+        );
+        $this->eventStore->record(
+            GameEvent::TRADE_CANCELLED, 'trade', $trade->id,
+            $payload, $trade->partner_id, $correlationId
         );
 
         return $trade;
     }
 
-    /**
-     * Выполнить обмен (атомарно)
-     */
     private function executeTrade(TradeOffer $trade): void
     {
         DB::transaction(function () use ($trade) {
@@ -316,29 +302,27 @@ class TradeService
             $initiator = User::findOrFail($trade->initiator_id);
             $partner = User::findOrFail($trade->partner_id);
 
-            // 1. Проверяем, что все предметы всё ещё в инвентарях
             $initiatorItems = $trade->initiatorItems;
             $partnerItems = $trade->partnerItems;
 
+            // Проверка наличия предметов по template_id
             foreach ($initiatorItems as $ti) {
-                $instance = ItemInstance::where('id', $ti->item_instance_id)
-                    ->where('owner_id', $trade->initiator_id)
-                    ->first();
-                if (!$instance || $instance->quantity < $ti->quantity) {
-                    throw new \RuntimeException('Предметы инициатора больше недоступны');
+                $available = ItemInstance::where('owner_id', $trade->initiator_id)
+                    ->where('template_id', $ti->template_id)
+                    ->sum('quantity');
+                if ($available < $ti->quantity) {
+                    throw new \RuntimeException("Предметы инициатора больше недоступны ({$ti->template->name})");
                 }
             }
-
             foreach ($partnerItems as $ti) {
-                $instance = ItemInstance::where('id', $ti->item_instance_id)
-                    ->where('owner_id', $trade->partner_id)
-                    ->first();
-                if (!$instance || $instance->quantity < $ti->quantity) {
-                    throw new \RuntimeException('Предметы партнёра больше недоступны');
+                $available = ItemInstance::where('owner_id', $trade->partner_id)
+                    ->where('template_id', $ti->template_id)
+                    ->sum('quantity');
+                if ($available < $ti->quantity) {
+                    throw new \RuntimeException("Предметы партнёра больше недоступны ({$ti->template->name})");
                 }
             }
 
-            // 2. Проверяем золото
             if ($initiator->gold < $trade->initiator_gold) {
                 throw new \RuntimeException('У инициатора недостаточно золота');
             }
@@ -346,100 +330,132 @@ class TradeService
                 throw new \RuntimeException('У партнёра недостаточно золота');
             }
 
-            // 3. Обмен золотом (разница)
             $initiatorDelta = $trade->partner_gold - $trade->initiator_gold;
             $partnerDelta = $trade->initiator_gold - $trade->partner_gold;
 
-            if ($initiatorDelta !== 0) {
-                $initiator->increment('gold', $initiatorDelta);
-            }
-            if ($partnerDelta !== 0) {
-                $partner->increment('gold', $partnerDelta);
-            }
+            if ($initiatorDelta !== 0) $initiator->increment('gold', $initiatorDelta);
+            if ($partnerDelta !== 0) $partner->increment('gold', $partnerDelta);
 
-            // 4. Обмен предметами: инициатор → партнёру
+            // Обмен предметами: инициатор → партнёру
             foreach ($initiatorItems as $ti) {
-                // Снимаем у инициатора (без события)
-                $this->inventoryService->removeItem(
-                    $trade->initiator_id,
-                    $ti->item_instance_id,
-                    $ti->quantity,
-                    $correlationId,
-                    'trade',
-                    false
-                );
-                // Добавляем партнёру (без события)
+                $remaining = $ti->quantity;
+                $stacks = ItemInstance::where('owner_id', $trade->initiator_id)
+                    ->where('template_id', $ti->template_id)
+                    ->orderBy('quantity', 'desc')
+                    ->get();
+
+                foreach ($stacks as $stack) {
+                    if ($remaining <= 0) break;
+                    $toRemove = min($remaining, $stack->quantity);
+                    $this->inventoryService->removeItem(
+                        $trade->initiator_id, $stack->id, $toRemove,
+                        $correlationId, 'trade', false
+                    );
+                    $remaining -= $toRemove;
+                }
+
                 $this->inventoryService->addItem(
-                    $trade->partner_id,
-                    $ti->template_id,
-                    $ti->quantity,
-                    $correlationId,
-                    false
+                    $trade->partner_id, $ti->template_id, $ti->quantity,
+                    $correlationId, false
                 );
             }
 
-            // 5. Обмен предметами: партнёр → инициатору
+            // Обмен предметами: партнёр → инициатору
             foreach ($partnerItems as $ti) {
-                $this->inventoryService->removeItem(
-                    $trade->partner_id,
-                    $ti->item_instance_id,
-                    $ti->quantity,
-                    $correlationId,
-                    'trade',
-                    false
-                );
+                $remaining = $ti->quantity;
+                $stacks = ItemInstance::where('owner_id', $trade->partner_id)
+                    ->where('template_id', $ti->template_id)
+                    ->orderBy('quantity', 'desc')
+                    ->get();
+
+                foreach ($stacks as $stack) {
+                    if ($remaining <= 0) break;
+                    $toRemove = min($remaining, $stack->quantity);
+                    $this->inventoryService->removeItem(
+                        $trade->partner_id, $stack->id, $toRemove,
+                        $correlationId, 'trade', false
+                    );
+                    $remaining -= $toRemove;
+                }
+
                 $this->inventoryService->addItem(
-                    $trade->initiator_id,
-                    $ti->template_id,
-                    $ti->quantity,
-                    $correlationId,
-                    false
+                    $trade->initiator_id, $ti->template_id, $ti->quantity,
+                    $correlationId, false
                 );
             }
 
-            // 6. Обновляем статус
             $trade->update(['status' => 'completed']);
 
-            // 7. События для обоих игроков
+            // Формируем received_items с золотом
+            $initiatorReceived = $partnerItems->map(fn($i) => [
+                'template_id' => $i->template_id,
+                'template_name' => $i->template->name,
+                'template_type' => $i->template->type,
+                'template_icon' => $i->template->icon,
+                'description' => $i->template->description ?? '',
+                'quantity' => $i->quantity,
+            ])->toArray();
+            if ($initiatorDelta > 0) {
+                $initiatorReceived[] = ['template_name' => '💰 Золото', 'quantity' => $initiatorDelta];
+            }
+
+            $partnerReceived = $initiatorItems->map(fn($i) => [
+                'template_id' => $i->template_id,
+                'template_name' => $i->template->name,
+                'template_type' => $i->template->type,
+                'template_icon' => $i->template->icon,
+                'description' => $i->template->description ?? '',
+                'quantity' => $i->quantity,
+            ])->toArray();
+            if ($partnerDelta > 0) {
+                $partnerReceived[] = ['template_name' => '💰 Золото', 'quantity' => $partnerDelta];
+            }
+
+            $initiatorGiven = $initiatorItems->map(fn($i) => [
+                'template_id' => $i->template_id,
+                'template_name' => $i->template->name,
+                'template_type' => $i->template->type,
+                'template_icon' => $i->template->icon,
+                'description' => $i->template->description ?? '',
+                'quantity' => $i->quantity,
+            ])->toArray();
+            if ($trade->initiator_gold > 0) {
+                $initiatorGiven[] = ['template_name' => '💰 Золото', 'quantity' => $trade->initiator_gold];
+            }
+
+            $partnerGiven = $partnerItems->map(fn($i) => [
+                'template_id' => $i->template_id,
+                'template_name' => $i->template->name,
+                'template_type' => $i->template->type,
+                'template_icon' => $i->template->icon,
+                'description' => $i->template->description ?? '',
+                'quantity' => $i->quantity,
+            ])->toArray();
+            if ($trade->partner_gold > 0) {
+                $partnerGiven[] = ['template_name' => '💰 Золото', 'quantity' => $trade->partner_gold];
+            }
+
             $this->eventStore->record(
-                GameEvent::TRADE_COMPLETED,
-                'trade',
-                $trade->id,
+                GameEvent::TRADE_COMPLETED, 'trade', $trade->id,
                 [
                     'trade_id' => $trade->id,
                     'side' => 'initiator',
                     'opponent_name' => $partner->name,
-                    'received_items' => $partnerItems->map(fn($i) => [
-                        'name' => $i->template->name,
-                        'quantity' => $i->quantity,
-                    ])->toArray(),
-                    'given_items' => $initiatorItems->map(fn($i) => [
-                        'name' => $i->template->name,
-                        'quantity' => $i->quantity,
-                    ])->toArray(),
-                    'gold_delta' => $initiatorDelta,
+                    'received_items' => $initiatorReceived,
+                    'given_items' => $initiatorGiven,
                 ],
                 $trade->initiator_id,
                 $correlationId
             );
 
             $this->eventStore->record(
-                GameEvent::TRADE_COMPLETED,
-                'trade',
-                $trade->id,
+                GameEvent::TRADE_COMPLETED, 'trade', $trade->id,
                 [
                     'trade_id' => $trade->id,
                     'side' => 'partner',
                     'opponent_name' => $initiator->name,
-                    'received_items' => $initiatorItems->map(fn($i) => [
-                        'name' => $i->template->name,
-                        'quantity' => $i->quantity,
-                    ])->toArray(),
-                    'given_items' => $partnerItems->map(fn($i) => [
-                        'name' => $i->template->name,
-                        'quantity' => $i->quantity,
-                    ])->toArray(),
-                    'gold_delta' => $partnerDelta,
+                    'received_items' => $partnerReceived,
+                    'given_items' => $partnerGiven,
                 ],
                 $trade->partner_id,
                 $correlationId
@@ -457,15 +473,21 @@ class TradeService
         }
     }
 
-    private function emitTradeUpdated(TradeOffer $trade, int $userId): void
+    private function emitTradeUpdated(TradeOffer $trade, int $triggerUserId): void
     {
+        $payload = [
+            'trade_id' => $trade->id,
+            'trigger_user_id' => $triggerUserId,
+        ];
+        $correlationId = Str::uuid()->toString();
+
         $this->eventStore->record(
-            GameEvent::TRADE_UPDATED,
-            'trade',
-            $trade->id,
-            ['trade_id' => $trade->id],
-            $userId,
-            Str::uuid()->toString()
+            GameEvent::TRADE_UPDATED, 'trade', $trade->id,
+            $payload, $trade->initiator_id, $correlationId
+        );
+        $this->eventStore->record(
+            GameEvent::TRADE_UPDATED, 'trade', $trade->id,
+            $payload, $trade->partner_id, $correlationId
         );
     }
 
@@ -488,6 +510,7 @@ class TradeService
                 'gold' => $trade->initiator_gold,
                 'items' => $trade->initiatorItems->map(fn($i) => [
                     'id' => $i->id,
+                    'instance_id' => $i->item_instance_id,
                     'template_id' => $i->template_id,
                     'name' => $i->template->name,
                     'type' => $i->template->type,
@@ -501,6 +524,7 @@ class TradeService
                 'gold' => $trade->partner_gold,
                 'items' => $trade->partnerItems->map(fn($i) => [
                     'id' => $i->id,
+                    'instance_id' => $i->item_instance_id,
                     'template_id' => $i->template_id,
                     'name' => $i->template->name,
                     'type' => $i->template->type,

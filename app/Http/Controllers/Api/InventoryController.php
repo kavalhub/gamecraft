@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ItemInstance;
 use App\Models\User;
 use App\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
@@ -30,7 +31,19 @@ class InventoryController extends Controller
             return response()->json(['error' => 'User not found'], 404);
         }
 
-        $inventory = $this->inventoryService->getInventory((int)$userId);
+        $inventory = ItemInstance::where('owner_id', $userId)
+            ->with('template')
+            ->get()
+            ->map(fn($item) => [
+                'instance_id' => $item->id,
+                'template_id' => $item->template_id,
+                'name' => $item->template->name,
+                'type' => $item->template->type,
+                'icon' => $item->template->icon,
+                'quantity' => $item->quantity,
+                'description' => $item->template->description,
+                'stats' => $item->stats ?? [],
+            ]);
 
         return response()->json([
             'user' => [

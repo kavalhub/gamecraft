@@ -126,21 +126,48 @@
         .inventory-content { flex: 1; overflow-y: auto; padding: 15px; }
         .items {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
             gap: 8px;
         }
         .item {
             background: rgba(255,255,255,0.05);
             border: 2px solid rgba(255,255,255,0.1);
-            border-radius: 8px; padding: 8px; text-align: center;
-            cursor: grab; transition: all 0.2s; user-select: none;
+            border-radius: 8px;
+            padding: 8px;
+            text-align: center;
+            cursor: grab;
+            transition: all 0.2s;
+            user-select: none;
+            position: relative;
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         .item:hover { border-color: #667eea; transform: translateY(-2px); }
         .item.dragging { opacity: 0.4; cursor: grabbing; }
-        .item-icon { font-size: 28px; margin-bottom: 4px; }
-        .item-name { font-size: 10px; font-weight: 600; }
-        .item-qty { font-size: 12px; font-weight: 700; color: #fbbf24; }
-        .item-type { font-size: 8px; color: #888; text-transform: uppercase; margin-top: 2px; }
+        .item-icon { font-size: 32px; }
+        .item-qty {
+            position: absolute;
+            bottom: 2px;
+            right: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #fbbf24;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+        }
+        .item-link {
+            color: #667eea;
+            font-weight: 600;
+            cursor: pointer;
+            border-bottom: 1px dashed rgba(102, 126, 234, 0.5);
+            transition: all 0.2s;
+            display: inline;
+        }
+        .item-link:hover {
+            color: #a855f7;
+            border-bottom-color: #a855f7;
+        }
 
         .item[data-type="recipe"] { border-color: rgba(168,85,247,0.4); background: rgba(168,85,247,0.1); }
         .item[data-type="equipment"] { border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.05); }
@@ -195,6 +222,85 @@
         ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+        /* ===== Tooltip ===== */
+        #itemTooltip {
+            position: fixed;
+            background: rgba(20, 20, 35, 0.98);
+            border: 2px solid rgba(102, 126, 234, 0.6);
+            border-radius: 8px;
+            padding: 12px 15px;
+            max-width: 300px;
+            z-index: 9999;
+            pointer-events: none;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            display: none;
+            font-size: 13px;
+        }
+        #itemTooltip.visible {
+            display: block;
+            animation: tooltipFadeIn 0.15s ease-out;
+        }
+        @keyframes tooltipFadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .tooltip-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .tooltip-icon {
+            font-size: 28px;
+        }
+        .tooltip-name {
+            font-weight: 700;
+            font-size: 15px;
+            color: #fff;
+        }
+        .tooltip-type {
+            font-size: 11px;
+            color: #888;
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
+        .tooltip-description {
+            color: #bbb;
+            font-size: 12px;
+            line-height: 1.4;
+            margin-bottom: 8px;
+            font-style: italic;
+        }
+        .tooltip-stats {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .tooltip-stat {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+        }
+        .tooltip-stat-label {
+            color: #888;
+        }
+        .tooltip-stat-value {
+            color: #10b981;
+            font-weight: 600;
+        }
+        .tooltip-quantity {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            text-align: center;
+            font-size: 14px;
+            color: #fbbf24;
+            font-weight: 700;
+        }
     </style>
     @stack('styles')
 </head>
@@ -250,9 +356,12 @@
 </div>
 
 <div id="msg" class="msg"></div>
+<div id="itemTooltip"></div>
 
 <script>
-    // ===== Глобальное состояние =====
+    // ================================================================
+    //                     ГЛОБАЛЬНОЕ СОСТОЯНИЕ
+    // ================================================================
     window.GameState = {
         userId: null,
         inventory: [],
@@ -260,7 +369,9 @@
         currentTool: 'workbench',
     };
 
-    // ===== Утилиты =====
+    // ================================================================
+    //                          УТИЛИТЫ
+    // ================================================================
     function showMsg(text, type) {
         const el = document.getElementById('msg');
         const copyId = 'msg_' + Date.now();
@@ -300,7 +411,9 @@
         return { material: '📦', equipment: '⚔️', consumable: '🧪', recipe: '📜' }[type] || '📦';
     }
 
-    // ===== Переключение инструментов =====
+    // ================================================================
+    //                     ПЕРЕКЛЮЧЕНИЕ ИНСТРУМЕНТОВ
+    // ================================================================
     function switchTool(tool) {
         GameState.currentTool = tool;
         document.querySelectorAll('.tool-btn').forEach(btn => {
@@ -311,7 +424,9 @@
         if (active) active.style.display = 'block';
     }
 
-    // ===== Загрузка данных игрока =====
+    // ================================================================
+    //                     ЗАГРУЗКА ДАННЫХ ИГРОКА
+    // ================================================================
     async function loadPlayerData() {
         try {
             const res = await fetch(`/api/inventory?user_id=${GameState.userId}`, { headers: { 'Accept': 'application/json' } });
@@ -331,28 +446,44 @@
             el.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:30px;color:#666">Инвентарь пуст</div>';
             return;
         }
-        el.innerHTML = GameState.inventory.map(item => `
-                <div class="item"
-                     data-type="${item.type}"
-                     data-instance-id="${item.instance_id}"
-                     data-template-id="${item.template_id}"
-                     data-quantity="${item.quantity}"
-                     draggable="true">
-                    <div class="item-icon">${getIcon(item.type)}</div>
-                    <div class="item-name">${item.name}</div>
-                    ${item.quantity > 1 ? `<div class="item-qty">x${item.quantity}</div>` : ''}
-                    <div class="item-type">${item.type}</div>
-                </div>
-            `).join('');
+        el.innerHTML = GameState.inventory.map(item => {
+            const inTrade = typeof isItemInActiveTrade === 'function' && isItemInActiveTrade(item.instance_id);
+            const tradeClass = inTrade ? 'in-trade' : '';
+            return `
+                    <div class="item ${tradeClass}"
+                         data-type="${item.type}"
+                         data-instance-id="${item.instance_id}"
+                         data-template-id="${item.template_id}"
+                         data-quantity="${item.quantity}"
+                         data-name="${item.name}"
+                         data-description="${item.description || ''}"
+                         data-stats='${JSON.stringify(item.stats || {})}'
+                         draggable="${!inTrade}"
+                         title="">
+                        <div class="item-icon">${getIcon(item.type)}</div>
+                        ${item.quantity > 1 ? `<div class="item-qty">x${item.quantity}</div>` : ''}
+                    </div>
+                `;
+        }).join('');
 
         el.querySelectorAll('.item').forEach(itemEl => {
-            itemEl.addEventListener('dragstart', onDragStart);
-            itemEl.addEventListener('dragend', onDragEnd);
-            itemEl.addEventListener('dblclick', onDoubleClick);
+            const inTrade = itemEl.classList.contains('in-trade');
+            if (!inTrade) {
+                itemEl.addEventListener('dragstart', onDragStart);
+                itemEl.addEventListener('dragend', onDragEnd);
+                itemEl.addEventListener('dblclick', onDoubleClick);
+            } else {
+                itemEl.style.cursor = 'not-allowed';
+            }
+            itemEl.addEventListener('mouseenter', showItemTooltip);
+            itemEl.addEventListener('mouseleave', hideItemTooltip);
+            itemEl.addEventListener('mousemove', moveItemTooltip);
         });
     }
 
-    // ===== Drag-and-Drop =====
+    // ================================================================
+    //                       DRAG-AND-DROP
+    // ================================================================
     let draggedItem = null;
 
     function onDragStart(e) {
@@ -361,11 +492,14 @@
             template_id: parseInt(e.currentTarget.dataset.templateId),
             quantity: parseInt(e.currentTarget.dataset.quantity),
             type: e.currentTarget.dataset.type,
-            name: e.currentTarget.querySelector('.item-name').textContent,
+            name: e.currentTarget.dataset.name,
+            description: e.currentTarget.dataset.description,
+            stats: JSON.parse(e.currentTarget.dataset.stats || '{}'),
         };
         e.currentTarget.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', '');
+        hideItemTooltip();
     }
 
     function onDragEnd(e) {
@@ -380,7 +514,9 @@
             template_id: parseInt(e.currentTarget.dataset.templateId),
             quantity: parseInt(e.currentTarget.dataset.quantity),
             type: e.currentTarget.dataset.type,
-            name: e.currentTarget.querySelector('.item-name').textContent,
+            name: e.currentTarget.dataset.name,
+            description: e.currentTarget.dataset.description,
+            stats: JSON.parse(e.currentTarget.dataset.stats || '{}'),
         };
 
         if (GameState.currentTool === 'workbench' && typeof handleWorkbenchDrop === 'function') {
@@ -409,13 +545,142 @@
         });
     }
 
-    // ===== Event Sourcing =====
-    window.GameEvents = {
+    // ================================================================
+    //                       TOOLTIP СИСТЕМА
+    // ================================================================
+    function showItemTooltip(e) {
+        const tooltip = document.getElementById('itemTooltip');
+        const element = e.currentTarget;
+
+        let name, type, description, quantity, stats, icon;
+
+        if (element.classList.contains('item')) {
+            name = element.dataset.name;
+            type = element.dataset.type;
+            description = element.dataset.description;
+            quantity = parseInt(element.dataset.quantity);
+            stats = JSON.parse(element.dataset.stats || '{}');
+            icon = getIcon(type);
+        } else if (element.classList.contains('item-link')) {
+            name = element.dataset.name;
+            type = element.dataset.type;
+            description = element.dataset.description;
+            quantity = parseInt(element.dataset.quantity);
+            stats = JSON.parse(element.dataset.stats || '{}');
+            icon = element.dataset.icon || getIcon(type);
+        } else {
+            return;
+        }
+
+        // Если иконка — это файл (содержит точку), показываем эмодзи по типу
+        // Если эмодзи — показываем как есть
+        let iconHtml;
+        if (icon && icon.includes('.')) {
+            // Это файл, показываем эмодзи по типу
+            iconHtml = getIcon(type);
+        } else {
+            // Это эмодзи
+            iconHtml = icon || getIcon(type);
+        }
+
+        let html = `
+        <div class="tooltip-header">
+            <div class="tooltip-icon">${iconHtml}</div>
+            <div>
+                <div class="tooltip-name">${name}</div>
+                <div class="tooltip-type">${getTypeName(type)}</div>
+            </div>
+        </div>
+    `;
+
+        if (description) {
+            html += `<div class="tooltip-description">${description}</div>`;
+        }
+
+        if (Object.keys(stats).length > 0) {
+            html += '<div class="tooltip-stats">';
+            for (const [key, value] of Object.entries(stats)) {
+                html += `
+                <div class="tooltip-stat">
+                    <span class="tooltip-stat-label">${getStatLabel(key)}:</span>
+                    <span class="tooltip-stat-value">${value}</span>
+                </div>
+            `;
+            }
+            html += '</div>';
+        }
+
+        if (quantity > 1) {
+            html += `<div class="tooltip-quantity">Количество: ${quantity}</div>`;
+        }
+
+        tooltip.innerHTML = html;
+        tooltip.classList.add('visible');
+        moveItemTooltip(e);
+    }
+
+    function hideItemTooltip() {
+        const tooltip = document.getElementById('itemTooltip');
+        tooltip.classList.remove('visible');
+    }
+
+    function moveItemTooltip(e) {
+        const tooltip = document.getElementById('itemTooltip');
+        const offsetX = 15;
+        const offsetY = 15;
+
+        let x = e.clientX + offsetX;
+        let y = e.clientY + offsetY;
+
+        const rect = tooltip.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+
+        if (x + rect.width > viewportWidth) {
+            x = e.clientX - rect.width - offsetX;
+        }
+        if (y + rect.height > viewportHeight) {
+            y = e.clientY - rect.height - offsetY;
+        }
+
+        tooltip.style.left = x + 'px';
+        tooltip.style.top = y + 'px';
+    }
+
+    function getTypeName(type) {
+        const names = {
+            material: 'Материал',
+            equipment: 'Экипировка',
+            consumable: 'Расходник',
+            recipe: 'Чертёж'
+        };
+        return names[type] || type;
+    }
+
+    function getStatLabel(key) {
+        const labels = {
+            attack: 'Атака',
+            defense: 'Защита',
+            health: 'Здоровье',
+            durability: 'Прочность',
+            level: 'Уровень',
+            weight: 'Вес',
+            value: 'Ценность'
+        };
+        return labels[key] || key;
+    }
+
+    // ================================================================
+    //          EVENT POLLER — источник событий (не знает про UI)
+    // ================================================================
+    window.EventPoller = {
         lastEventId: 0,
         pollingInterval: null,
+        userId: null,
+        listeners: [],
 
         start(userId) {
-            GameState.userId = userId;
+            this.userId = userId;
             this.loadInitial();
             this.pollingInterval = setInterval(() => this.poll(), 2000);
         },
@@ -424,104 +689,134 @@
             if (this.pollingInterval) clearInterval(this.pollingInterval);
         },
 
+        on(callback) {
+            this.listeners.push(callback);
+        },
+
         async loadInitial() {
             try {
-                const res = await fetch(`/api/events/latest?user_id=${GameState.userId}&limit=30`);
+                const res = await fetch(`/api/events/latest?user_id=${this.userId}&limit=30`);
                 const data = await res.json();
                 if (data.events && data.events.length > 0) {
                     this.lastEventId = Math.max(...data.events.map(e => e.id));
-                    this.renderAll(data.events);
-                } else {
-                    document.getElementById('eventsList').innerHTML =
-                        '<div class="events-empty">Пока нет событий.<br>Начни играть!</div>';
                 }
             } catch (e) { console.error('Events load error:', e); }
         },
 
         async poll() {
-            if (!GameState.userId) return;
+            if (!this.userId) return;
             try {
-                const res = await fetch(`/api/events/latest?user_id=${GameState.userId}&after_id=${this.lastEventId}`);
-                const data = await res.json();
+                const res = await fetch(`/api/events/latest?user_id=${this.userId}&after_id=${this.lastEventId}`);
+                const text = await res.text();
+                let data;
+                try { data = JSON.parse(text); }
+                catch (e) {
+                    console.error('Non-JSON response:', text.slice(0, 200));
+                    return;
+                }
 
                 if (data.events && data.events.length > 0) {
-                    let needsInventoryUpdate = false;
-                    let needsTradeUpdate = false;
-
                     data.events.forEach(e => {
-                        this.addEvent(e, true);
                         if (e.id > this.lastEventId) this.lastEventId = e.id;
-
-                        // Инвентарь и золото
-                        if (['item.received', 'item.removed', 'item.crafted', 'item.disassembled', 'user.gold_changed', 'auction.listed', 'auction.purchase', 'auction.sale', 'auction.cancelled', 'trade.completed'].includes(e.type)) {
-                            needsInventoryUpdate = true;
-                        }
-
-                        // Обмен
-                        if (['trade.created', 'trade.updated', 'trade.accepted', 'trade.completed', 'trade.cancelled'].includes(e.type)) {
-                            needsTradeUpdate = true;
-                        }
                     });
-
-                    if (needsInventoryUpdate) {
-                        setTimeout(() => {
-                            loadPlayerData();
-                            if (GameState.currentTool === 'auction') {
-                                if (typeof window.loadMarket === 'function') window.loadMarket();
-                                if (typeof window.loadMyLots === 'function') window.loadMyLots();
-                            }
-                        }, 100);
-                    }
-
-                    if (needsTradeUpdate) {
-                        setTimeout(async () => {
-                            if (typeof window.loadTrades === 'function') await window.loadTrades();
-                            // Если открыт обмен — обновляем его содержимое
-                            if (typeof tradeState !== 'undefined' && tradeState.currentTrade) {
-                                if (typeof openTrade === 'function') {
-                                    await openTrade(tradeState.currentTrade.id);
-                                }
-                            }
-                        }, 200);
-                    }
+                    this.listeners.forEach(cb => {
+                        try { cb(data.events); } catch (e) { console.error('Listener error:', e); }
+                    });
                 }
             } catch (e) { console.error('Events poll error:', e); }
+        }
+    };
+
+    // ================================================================
+    //            JOURNAL — визуализация событий (подписчик)
+    // ================================================================
+    window.Journal = {
+        init() {
+            EventPoller.on((events) => {
+                events.forEach(e => this.addEvent(e, true));
+            });
+        },
+
+        async loadInitial() {
+            try {
+                const res = await fetch(`/api/events/latest?user_id=${EventPoller.userId}&limit=30`);
+                const data = await res.json();
+                if (data.events && data.events.length > 0) {
+                    this.renderAll(data.events);
+                } else {
+                    const list = document.getElementById('eventsList');
+                    if (list) list.innerHTML = '<div class="events-empty">Пока нет событий.<br>Начни играть!</div>';
+                }
+            } catch (e) { console.error('Journal load error:', e); }
         },
 
         renderAll(events) {
             const list = document.getElementById('eventsList');
+            if (!list) return;
             list.innerHTML = '';
             events.forEach(e => this.addEvent(e, false));
             setTimeout(() => list.scrollTop = list.scrollHeight, 100);
         },
 
         addEvent(event, isNew) {
+            const formatted = this.formatEvent(event);
+            if (!formatted) return;
+
+            const { icon, title, body } = formatted;
             const list = document.getElementById('eventsList');
+            if (!list) return;
             const empty = list.querySelector('.events-empty');
             if (empty) empty.remove();
-
-            const { icon, title, body } = this.formatEvent(event);
 
             const el = document.createElement('div');
             el.className = 'event-item' + (isNew ? ' new' : '');
             el.dataset.type = event.type;
             el.innerHTML = `
-                    <div class="event-header">
-                        <div>
-                            <span class="event-icon">${icon}</span>
-                            <span class="event-title">${title}</span>
-                        </div>
-                        <span class="event-time">${event.occurred_at}</span>
-                    </div>
-                    <div class="event-body">${body}</div>
-                `;
+            <div class="event-header">
+                <div>
+                    <span class="event-icon">${icon}</span>
+                    <span class="event-title">${title}</span>
+                </div>
+                <span class="event-time">${event.occurred_at}</span>
+            </div>
+            <div class="event-body">${body}</div>
+        `;
 
             list.appendChild(el);
+
+            // Навешиваем tooltip на все item-link в этом событии
+            el.querySelectorAll('.item-link').forEach(link => {
+                link.addEventListener('mouseenter', showItemTooltip);
+                link.addEventListener('mouseleave', hideItemTooltip);
+                link.addEventListener('mousemove', moveItemTooltip);
+            });
+
             while (list.children.length > 50) list.removeChild(list.firstChild);
 
             if (isNew) {
                 setTimeout(() => list.scrollTop = list.scrollHeight, 50);
             }
+        },
+
+        // ===== НОВЫЙ МЕТОД: рендерит название предмета как кликабельную ссылку =====
+        renderItemLink(item) {
+            if (!item || !item.template_id) {
+                return `<b>${item?.template_name || item?.name || '???'}</b>`;
+            }
+
+            const safeDescription = (item.description || '').replace(/"/g, '&quot;');
+            const safeStats = JSON.stringify(item.stats || {}).replace(/'/g, "&apos;");
+            const safeName = (item.template_name || item.name || '???').replace(/"/g, '&quot;');
+
+            return `<span class="item-link"
+                 data-template-id="${item.template_id}"
+                 data-instance-id="${item.instance_id || ''}"
+                 data-name="${safeName}"
+                 data-type="${item.template_type || 'material'}"
+                 data-icon="${item.template_icon || getIcon(item.template_type || 'material')}"
+                 data-description="${safeDescription}"
+                 data-stats='${safeStats}'
+                 data-quantity="${item.quantity || 1}">${safeName}</span>`;
         },
 
         formatEvent(event) {
@@ -537,45 +832,101 @@
                     return { icon: '💰', title: 'Золото', body: `${sign}<b>${delta}</b> золота (${p.reason || ''})<br>Баланс: <b>${p.new_balance}</b>` };
 
                 case 'item.received':
-                    return { icon: '📥', title: 'Получен предмет', body: `<b>${p.template_name || '???'}</b> x${p.quantity}<br>${p.reason === 'stack_add' ? 'Добавлено к стаку' : 'Новый предмет'}` };
+                    const qtyReceived = (p.quantity > 1) ? ` x${p.quantity}` : '';
+                    return {
+                        icon: '📥',
+                        title: 'Получен предмет',
+                        body: `${this.renderItemLink(p)}${qtyReceived}<br>${p.reason === 'stack_add' ? 'Добавлено к стаку' : 'Новый предмет'}`
+                    };
 
                 case 'item.removed':
+                    const qtyRemoved = (p.quantity > 1) ? ` x${p.quantity}` : '';
                     if (p.reason === 'auction_list') {
-                        return { icon: '📢', title: 'Выставлено на аукцион', body: `<b>${p.template_name || '???'}</b> x${p.quantity}<br>Ожидает покупателя` };
+                        return {
+                            icon: '📢',
+                            title: 'Выставлено на аукцион',
+                            body: `${this.renderItemLink(p)}${qtyRemoved}<br>Ожидает покупателя`
+                        };
                     }
-                    return { icon: '📤', title: 'Предмет изъят', body: `<b>${p.template_name || '???'}</b> x${p.quantity}<br>Причина: ${p.reason || 'расход'}` };
+                    return {
+                        icon: '📤',
+                        title: 'Предмет изъят',
+                        body: `${this.renderItemLink(p)}${qtyRemoved}<br>Причина: ${p.reason || 'расход'}`
+                    };
 
                 case 'item.crafted':
-                    const components = (p.components || []).map(c => `${c.name} x${c.quantity}`).join(', ');
-                    return { icon: '⚒️', title: 'Крафт', body: `<b>Получен:</b> ${p.result_name} x${p.quantity}<br><b>Использовано:</b> ${components || '???'}` };
+                    const components = (p.components || []).map(c => {
+                        const qty = (c.quantity > 1) ? ` x${c.quantity}` : '';
+                        return `${this.renderItemLink(c)}${qty}`;
+                    }).join(', ');
+                    const resultQty = (p.quantity > 1) ? ` x${p.quantity}` : '';
+                    return {
+                        icon: '⚒️',
+                        title: 'Крафт',
+                        body: `<b>Получен:</b> ${this.renderItemLink(p.result || p)}${resultQty}<br><b>Использовано:</b> ${components || '???'}`
+                    };
 
                 case 'item.disassembled':
-                    const mats = (p.materials || []).map(m => `${m.name} x${m.quantity}`).join(', ');
-                    return { icon: '🔧', title: 'Разборка', body: `<b>Разобран:</b> ${p.item_name}<br><b>Получено:</b> ${mats || '???'}` };
+                    const mats = (p.materials || []).map(m => {
+                        const qty = (m.quantity > 1) ? ` x${m.quantity}` : '';
+                        return `${this.renderItemLink(m)}${qty}`;
+                    }).join(', ');
+                    return {
+                        icon: '🔧',
+                        title: 'Разборка',
+                        body: `${this.renderItemLink({ template_name: p.item_name, template_type: p.item_type, template_icon: p.item_icon, description: p.description })}<br><b>Получено:</b> ${mats || '???'}`
+                    };
 
                 case 'auction.listed':
-                    return { icon: '📢', title: 'Лот выставлен', body: `<b>${p.template_name || '???'}</b> x${p.quantity}<br>Цена: <b>${p.price}</b> 💰` };
+                    const qtyListed = (p.quantity > 1) ? ` x${p.quantity}` : '';
+                    return {
+                        icon: '📢',
+                        title: 'Лот выставлен',
+                        body: `${this.renderItemLink(p)}${qtyListed}<br>Цена: <b>${p.price}</b> 💰`
+                    };
 
                 case 'auction.purchase':
-                    return { icon: '🛒', title: 'Аукцион — покупка', body: `<b>Получено:</b> ${p.item_name} x${p.quantity}<br><b>Оплата:</b> 💰 ${p.payment_amount} золота<br>Баланс: ${p.new_gold_balance} 💰<br><span style="font-size:10px;color:#888">Продавец: ${p.seller_name}</span>` };
+                    const qtyPurchase = (p.quantity > 1) ? ` x${p.quantity}` : '';
+                    return {
+                        icon: '🛒',
+                        title: 'Аукцион — покупка',
+                        body: `<b>Получено:</b> ${this.renderItemLink(p)}${qtyPurchase}<br><b>Оплата:</b> 💰 ${p.payment_amount} золота<br>Баланс: ${p.new_gold_balance} 💰<br><span style="font-size:10px;color:#888">Продавец: ${p.seller_name}</span>`
+                    };
 
                 case 'auction.sale':
-                    return { icon: '💰', title: 'Аукцион — продажа', body: `<b>Продано:</b> ${p.item_name} x${p.quantity}<br><b>Получено:</b> 💰 ${p.payment_amount} золота${p.commission > 0 ? `<br><span style="font-size:10px;color:#888">Комиссия: ${p.commission}</span>` : ''}<br>Баланс: ${p.new_gold_balance} 💰<br><span style="font-size:10px;color:#888">Покупатель: ${p.buyer_name}</span>` };
+                    const qtySale = (p.quantity > 1) ? ` x${p.quantity}` : '';
+                    return {
+                        icon: '💰',
+                        title: 'Аукцион — продажа',
+                        body: `<b>Продано:</b> ${this.renderItemLink(p)}${qtySale}<br><b>Получено:</b> 💰 ${p.payment_amount} золота${p.commission > 0 ? `<br><span style="font-size:10px;color:#888">Комиссия: ${p.commission}</span>` : ''}<br>Баланс: ${p.new_gold_balance} 💰<br><span style="font-size:10px;color:#888">Покупатель: ${p.buyer_name}</span>`
+                    };
 
                 case 'auction.cancelled':
-                    return { icon: '❌', title: 'Лот отменён', body: `<b>${p.template_name}</b> x${p.quantity}<br>Предмет возвращён` };
+                    const qtyCancelled = (p.quantity > 1) ? ` x${p.quantity}` : '';
+                    return {
+                        icon: '❌',
+                        title: 'Лот отменён',
+                        body: `${this.renderItemLink(p)}${qtyCancelled}<br>Предмет возвращён`
+                    };
 
                 case 'trade.created':
-                    return { icon: '🤝', title: 'Обмен создан', body: `ID: ${p.trade_id}<br>Инициатор: ${p.initiator_id} → Партнёр: ${p.partner_id}` };
+                    return { icon: '🤝', title: 'Обмен создан', body: `Инициатор: <b>${p.initiator_name || p.initiator_id}</b><br>Партнёр: <b>${p.partner_name || p.partner_id}</b>` };
 
                 case 'trade.accepted':
-                    return { icon: '✅', title: 'Обмен подтверждён', body: `Сторона: ${p.side}<br>ID обмена: ${p.trade_id}` };
+                    return { icon: '✅', title: 'Обмен подтверждён', body: `ID обмена: ${p.trade_id}` };
 
                 case 'trade.completed':
-                    const received = (p.received_items || []).map(i => `${i.name} x${i.quantity}`).join(', ') || 'ничего';
-                    const given = (p.given_items || []).map(i => `${i.name} x${i.quantity}`).join(', ') || 'ничего';
-                    const goldText = p.gold_delta !== 0 ? `<br>Золото: <b>${p.gold_delta > 0 ? '+' : ''}${p.gold_delta}</b> 💰` : '';
-                    return { icon: '✨', title: 'Обмен завершён', body: `С: <b>${p.opponent_name}</b><br><b>Получено:</b> ${received}<br><b>Отдано:</b> ${given}${goldText}` };
+                    const received = (p.received_items || []).map(i => {
+                        const isStackable = i.template_type === 'material' || i.template_type === 'consumable';
+                        const qty = (i.quantity > 1 && isStackable) ? ` x${i.quantity}` : '';
+                        return `${this.renderItemLink(i)}${qty}`;
+                    }).join(', ') || 'ничего';
+                    const given = (p.given_items || []).map(i => {
+                        const isStackable = i.template_type === 'material' || i.template_type === 'consumable';
+                        const qty = (i.quantity > 1 && isStackable) ? ` x${i.quantity}` : '';
+                        return `${this.renderItemLink(i)}${qty}`;
+                    }).join(', ') || 'ничего';
+                    return { icon: '✨', title: 'Обмен завершён', body: `С: <b>${p.opponent_name}</b><br><b>Получено:</b> ${received}<br><b>Отдано:</b> ${given}` };
 
                 case 'trade.cancelled':
                     return { icon: '❌', title: 'Обмен отменён', body: `ID: ${p.trade_id}` };
@@ -589,7 +940,71 @@
         }
     };
 
-    // ===== Инициализация =====
+    // ================================================================
+    //       UI UPDATER — обновляет UI на основе событий (подписчик)
+    // ================================================================
+    window.UIUpdater = {
+        init() {
+            EventPoller.on((events) => this.handle(events));
+        },
+
+        handle(events) {
+            let needsInventoryUpdate = false;
+            let autoOpenTradeId = null;
+            let needsTradeUpdate = false;
+            let shouldCloseTradeWindow = false;
+
+            events.forEach(e => {
+                if (['item.received', 'item.removed', 'item.crafted', 'item.disassembled', 'user.gold_changed', 'auction.listed', 'auction.purchase', 'auction.sale', 'auction.cancelled', 'trade.completed'].includes(e.type)) {
+                    needsInventoryUpdate = true;
+                }
+
+                if (e.type === 'trade.created' && e.payload.partner_id == GameState.userId) {
+                    autoOpenTradeId = e.payload.trade_id;
+                }
+                if (['trade.created', 'trade.updated', 'trade.accepted', 'trade.completed', 'trade.cancelled'].includes(e.type)) {
+                    needsTradeUpdate = true;
+                }
+
+                if ((e.type === 'trade.completed' || e.type === 'trade.cancelled') &&
+                    typeof tradeState !== 'undefined' &&
+                    tradeState.currentTrade &&
+                    tradeState.currentTrade.id == e.payload.trade_id) {
+                    shouldCloseTradeWindow = true;
+                }
+            });
+
+            if (needsInventoryUpdate) {
+                setTimeout(() => {
+                    loadPlayerData();
+                    if (GameState.currentTool === 'auction') {
+                        if (typeof window.loadMarket === 'function') window.loadMarket();
+                        if (typeof window.loadMyLots === 'function') window.loadMyLots();
+                    }
+                }, 100);
+            }
+
+            if (needsTradeUpdate || autoOpenTradeId) {
+                setTimeout(async () => {
+                    if (typeof window.loadTrades === 'function') await window.loadTrades();
+
+                    if (autoOpenTradeId) {
+                        if (typeof switchTool === 'function') switchTool('trade');
+                        await new Promise(r => setTimeout(r, 150));
+                        if (typeof openTrade === 'function') await openTrade(autoOpenTradeId);
+                    } else if (shouldCloseTradeWindow) {
+                        if (typeof window.closeTradeWindow === 'function') window.closeTradeWindow();
+                    } else if (typeof tradeState !== 'undefined' && tradeState.currentTrade) {
+                        if (typeof openTrade === 'function') await openTrade(tradeState.currentTrade.id);
+                    }
+                }, 200);
+            }
+        }
+    };
+
+    // ================================================================
+    //                        ИНИЦИАЛИЗАЦИЯ
+    // ================================================================
     document.addEventListener('DOMContentLoaded', () => {
         const userId = localStorage.getItem('userId');
         if (!userId) {
@@ -600,9 +1015,13 @@
         GameState.userId = userId;
         loadPlayerData();
         switchTool('workbench');
-        GameEvents.start(userId);
 
-        // Heartbeat
+        EventPoller.start(userId);
+
+        Journal.init();
+        Journal.loadInitial();
+        UIUpdater.init();
+
         async function heartbeat() {
             try {
                 await fetch('/api/heartbeat', {
@@ -617,5 +1036,3 @@
     });
 </script>
 @stack('scripts')
-</body>
-</html>

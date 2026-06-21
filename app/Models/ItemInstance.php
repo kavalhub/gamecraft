@@ -1,14 +1,16 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ItemInstance extends Model
 {
-    protected $table = 'item_instances';
+    use HasFactory;
 
     protected $fillable = [
         'template_id',
@@ -19,6 +21,10 @@ class ItemInstance extends Model
     ];
 
     protected $casts = [
+        'template_id' => 'integer',
+        'owner_id' => 'integer',
+        'quantity' => 'integer',
+        'durability' => 'integer',
         'stats' => 'array',
     ];
 

@@ -251,31 +251,83 @@
             }
         }
 
-        async function loadMarket() {
+        window.loadMarket = async function() {
             try {
                 const type = document.getElementById('filterType').value;
-                const url = `/api/auction${type ? '?type=' + type : ''}`;
-                const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                const res = await fetch(`/api/auction${type ? '?type=' + type : ''}`, { headers: { 'Accept': 'application/json' } });
                 const data = await res.json();
-                renderMarket(data.lots || []);
-                document.getElementById('statActive').textContent = (data.lots || []).length;
-            } catch (e) {
-                showMsg('Ошибка загрузки: ' + e.message, 'error');
-            }
-        }
+                const lots = data.lots || [];
+                const el = document.getElementById('marketList');
+                if (!lots.length) { el.innerHTML = '<div style="text-align:center;padding:40px;color:#666">🏪 Аукцион пуст</div>'; return; }
+                el.innerHTML = lots.map(lot => {
+                    const qtyDisplay = (lot.quantity > 1) ? `<span style="color:#fbbf24;font-weight:700"> x${lot.quantity}</span>` : '';
+                    const icon = (lot.template_icon && lot.template_icon.includes('.')) ? getIcon(lot.template_type) : (lot.template_icon || getIcon(lot.template_type));
+                    const sellerReceived = Math.floor(lot.price * 0.95); // 95% от цены (комиссия 5%)
+                    return `
+            <div class="auction-lot"
+                 data-template-id="${lot.template_id}"
+                 data-name="${lot.template_name}"
+                 data-type="${lot.template_type}"
+                 data-icon="${icon}"
+                 data-description="${lot.description || ''}"
+                 data-quantity="${lot.quantity}"
+                 data-stats='${JSON.stringify(lot.item_stats || {})}'
+                 style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:15px;display:grid;grid-template-columns:50px 1fr auto auto;gap:15px;align-items:center">
+                <div style="font-size:36px;text-align:center">${icon}</div>
+                <div><div style="font-weight:600;font-size:14px">${lot.template_name}${qtyDisplay}</div>
+                    <div style="font-size:11px;color:#888">Продавец: ${lot.seller_name}</div></div>
+                <div style="text-align:right"><div style="font-size:18px;font-weight:700;color:#fbbf24">${lot.price} 💰</div>
+                    <div style="font-size:10px;color:#888">продавец получит ${sellerReceived}</div></div>
+                <button onclick="buyLot(${lot.id})" ${lot.seller_id == GameState.userId ? 'disabled style="opacity:0.4"' : ''} style="padding:10px 16px;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">${lot.seller_id == GameState.userId ? 'Ваш лот' : 'Купить'}</button>
+            </div>`;
+                }).join('');
 
-        async function loadMyLots() {
+                // Навешиваем tooltip на лоты
+                el.querySelectorAll('.auction-lot').forEach(lotEl => {
+                    lotEl.addEventListener('mouseenter', showItemTooltip);
+                    lotEl.addEventListener('mouseleave', hideItemTooltip);
+                    lotEl.addEventListener('mousemove', moveItemTooltip);
+                });
+            } catch (e) { showMsg('Ошибка: ' + e.message, 'error'); }
+        };
+
+        window.loadMyLots = async function() {
             try {
-                const res = await fetch(`/api/auction/my?user_id=${userId}`, { headers: { 'Accept': 'application/json' } });
+                const res = await fetch(`/api/auction/my?user_id=${GameState.userId}`, { headers: { 'Accept': 'application/json' } });
                 const data = await res.json();
-                myLots = data.lots || [];
-                renderMyLots(myLots);
-                document.getElementById('statMy').textContent = myLots.filter(l => l.status === 'active').length;
-                document.getElementById('statSold').textContent = myLots.filter(l => l.status === 'sold').length;
-            } catch (e) {
-                showMsg('Ошибка загрузки: ' + e.message, 'error');
-            }
-        }
+                const lots = data.lots || [];
+                const el = document.getElementById('myLotsList');
+                if (!lots.length) { el.innerHTML = '<div style="text-align:center;padding:40px;color:#666">У вас пока нет лотов</div>'; return; }
+                el.innerHTML = lots.map(lot => {
+                    const sc = { active: 'background:rgba(16,185,129,0.2);color:#10b981', sold: 'background:rgba(59,130,246,0.2);color:#3b82f6', cancelled: 'background:rgba(107,114,128,0.2);color:#9ca3af' }[lot.status];
+                    const st = { active: 'Активен', sold: 'Продан', cancelled: 'Отменён' }[lot.status];
+                    const qtyDisplay = (lot.quantity > 1) ? `<span style="color:#fbbf24;font-weight:700"> x${lot.quantity}</span>` : '';
+                    const icon = (lot.template_icon && lot.template_icon.includes('.')) ? getIcon(lot.template_type) : (lot.template_icon || getIcon(lot.template_type));
+                    return `<div class="auction-lot"
+                         data-template-id="${lot.template_id}"
+                         data-name="${lot.template_name}"
+                         data-type="${lot.template_type}"
+                         data-icon="${icon}"
+                         data-description="${lot.description || ''}"
+                         data-quantity="${lot.quantity}"
+                         data-stats='${JSON.stringify(lot.item_stats || {})}'
+                         style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:15px;display:grid;grid-template-columns:50px 1fr auto auto;gap:15px;align-items:center">
+                <div style="font-size:36px;text-align:center">${icon}</div>
+                <div><div style="font-weight:600;font-size:14px">${lot.template_name}${qtyDisplay}</div>
+                    <div style="font-size:11px;color:#888"><span style="display:inline-block;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;${sc}">${st}</span></div></div>
+                <div style="font-size:18px;font-weight:700;color:#fbbf24;text-align:right">${lot.price} 💰</div>
+                ${lot.status === 'active' ? `<button onclick="cancelLot(${lot.id})" style="padding:10px 16px;background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Отменить</button>` : '<div></div>'}
+            </div>`;
+                }).join('');
+
+                // Навешиваем tooltip на лоты
+                el.querySelectorAll('.auction-lot').forEach(lotEl => {
+                    lotEl.addEventListener('mouseenter', showItemTooltip);
+                    lotEl.addEventListener('mouseleave', hideItemTooltip);
+                    lotEl.addEventListener('mousemove', moveItemTooltip);
+                });
+            } catch (e) { showMsg('Ошибка: ' + e.message, 'error'); }
+        };
 
         function renderMarket(lots) {
             const el = document.getElementById('marketList');

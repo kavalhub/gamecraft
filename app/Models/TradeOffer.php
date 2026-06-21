@@ -4,29 +4,32 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class TradeOffer extends Model
 {
-    protected $table = 'trade_offers';
+    use HasFactory;
 
     protected $fillable = [
         'initiator_id',
         'partner_id',
-        'status',
-        'initiator_accepted',
-        'partner_accepted',
         'initiator_gold',
         'partner_gold',
+        'initiator_accepted',
+        'partner_accepted',
+        'status',
     ];
 
     protected $casts = [
-        'initiator_accepted' => 'boolean',
-        'partner_accepted' => 'boolean',
+        'initiator_id' => 'integer',
+        'partner_id' => 'integer',
         'initiator_gold' => 'integer',
         'partner_gold' => 'integer',
+        'initiator_accepted' => 'boolean',
+        'partner_accepted' => 'boolean',
     ];
 
     public function initiator(): BelongsTo
@@ -46,12 +49,12 @@ class TradeOffer extends Model
 
     public function initiatorItems(): HasMany
     {
-        return $this->items()->where('side', 'initiator');
+        return $this->hasMany(TradeItem::class, 'trade_id')->where('side', 'initiator');
     }
 
     public function partnerItems(): HasMany
     {
-        return $this->items()->where('side', 'partner');
+        return $this->hasMany(TradeItem::class, 'trade_id')->where('side', 'partner');
     }
 
     public function isParticipant(int $userId): bool

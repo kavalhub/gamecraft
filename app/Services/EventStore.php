@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\GameEvent;
+use App\Models\ItemInstance;
+use App\Models\ItemTemplate;
 use Illuminate\Support\Str;
 
 class EventStore
@@ -38,6 +40,40 @@ class EventStore
             'causation_id' => $causationId,
             'version' => $this->getNextVersion($aggregateType, $aggregateId),
         ]);
+    }
+
+    public function recordItemEvent(
+        string $eventType,
+        int $userId,
+        int $templateId,
+        ?int $instanceId = null,
+        array $extraPayload = [],
+        ?string $correlationId = null
+    ): GameEvent {
+        $template = ItemTemplate::find($templateId);
+
+        $payload = array_merge([
+            'template_id' => $templateId,
+            'template_name' => $template?->name ?? 'Неизвестно',
+            'template_type' => $template?->type ?? 'material',
+            'template_icon' => $template?->icon ?? '📦',
+            'description' => $template?->description ?? '',
+        ], $extraPayload);
+
+        if ($instanceId) {
+            $instance = ItemInstance::find($instanceId);
+            $payload['instance_id'] = $instanceId;
+            $payload['stats'] = $instance?->stats ?? [];
+        }
+
+        return $this->record(
+            $eventType,
+            'user',
+            $userId,
+            $payload,
+            $userId,
+            $correlationId
+        );
     }
 
     /**

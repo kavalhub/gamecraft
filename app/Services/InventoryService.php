@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\GameEvent;
 use App\Models\ItemInstance;
 use App\Models\ItemTemplate;
+use Illuminate\Support\Facades\DB;
 
 class InventoryService
 {
@@ -14,122 +15,145 @@ class InventoryService
         private EventStore $eventStore
     ) {}
 
-    public function addItem(int $userId, int $templateId, int $quantity = 1, ?string $correlationId = null, bool $recordEvent = true): ItemInstance
-    {
-        $template = ItemTemplate::findOrFail($templateId);
+    public function addItem(
+        int $userId,
+        int $templateId,
+        int $quantity = 1,
+        ?string $correlationId = null,
+        bool $recordEvent = true
+    ): ItemInstance {
+        return DB::transaction(function () use ($userId, $templateId, $quantity, $correlationId, $recordEvent) {
+            $template = ItemTemplate::findOrFail($templateId);
+            $maxStack = $template->max_stack ?? 999;
 
-        if ($template->is_stackable) {
-            $existingItem = ItemInstance::where('owner_id', $userId)
-                ->where('template_id', $templateId)
-                ->first();
+            $remaining = $quantity;
+            $firstInstance = null;
 
-            if ($existingItem) {
-                $existingItem->quantity += $quantity;
-                $existingItem->save();
+            if ($template->is_stackable) {
+                $existingItems = ItemInstance::where('owner_id', $userId)
+                    ->where('template_id', $templateId)
+                    ->orderBy('id')
+                    ->get();
+
+                foreach ($existingItems as $existing) {
+                    if ($remaining <= 0) break;
+                    $space = $maxStack - $existing->quantity;
+                    if ($space > 0) {
+                        $toAdd = min($remaining, $space);
+                        $existing->quantity += $toAdd;
+                        $existing->save();
+                        $remaining -= $toAdd;
+
+                        if (!$firstInstance) $firstInstance = $existing;
+
+                        if ($recordEvent) {
+                            $this->eventStore->recordItemEvent(
+                                GameEvent::ITEM_RECEIVED,
+                                $userId,
+                                $templateId,
+                                $existing->id,
+                                [
+                                    'quantity' => $toAdd,
+                                    'new_total' => $existing->quantity,
+                                    'reason' => 'stack_add',
+                                ],
+                                $correlationId
+                            );
+                        }
+                    }
+                }
+            }
+
+            while ($remaining > 0) {
+                $toAdd = min($remaining, $maxStack);
+                $item = ItemInstance::create([
+                    'template_id' => $templateId,
+                    'owner_id' => $userId,
+                    'quantity' => $toAdd,
+                    'durability' => 100,
+                    'stats' => [],
+                ]);
+
+                if (!$firstInstance) $firstInstance = $item;
+                $remaining -= $toAdd;
 
                 if ($recordEvent) {
-                    $this->eventStore->record(
+                    $this->eventStore->recordItemEvent(
                         GameEvent::ITEM_RECEIVED,
-                        'user',
                         $userId,
+                        $templateId,
+                        $item->id,
                         [
-                            'template_id' => $templateId,
-                            'template_name' => $template->name,
-                            'instance_id' => $existingItem->id,
-                            'quantity' => $quantity,
-                            'new_total' => $existingItem->quantity,
-                            'reason' => 'stack_add',
+                            'quantity' => $toAdd,
+                            'reason' => 'new_item',
                         ],
-                        $userId,
                         $correlationId
                     );
                 }
-
-                return $existingItem;
             }
-        }
 
-        $item = ItemInstance::create([
-            'template_id' => $templateId,
-            'owner_id' => $userId,
-            'quantity' => $quantity,
-            'durability' => 100,
-        ]);
-
-        if ($recordEvent) {
-            $this->eventStore->record(
-                GameEvent::ITEM_RECEIVED,
-                'user',
-                $userId,
-                [
-                    'template_id' => $templateId,
-                    'template_name' => $template->name,
-                    'instance_id' => $item->id,
-                    'quantity' => $quantity,
-                    'reason' => 'new_item',
-                ],
-                $userId,
-                $correlationId
-            );
-        }
-
-        return $item;
+            return $firstInstance;
+        });
     }
 
-    public function removeItem(int $userId, int $instanceId, int $quantity = 1, ?string $correlationId = null, string $reason = 'consume', bool $recordEvent = true): bool
-    {
-        $item = ItemInstance::where('id', $instanceId)
-            ->where('owner_id', $userId)
-            ->firstOrFail();
+    public function removeItem(
+        int $userId,
+        int $instanceId,
+        int $quantity = 1,
+        ?string $correlationId = null,
+        string $reason = 'spend',
+        bool $recordEvent = true
+    ): void {
+        DB::transaction(function () use ($userId, $instanceId, $quantity, $correlationId, $reason, $recordEvent) {
+            $item = ItemInstance::where('id', $instanceId)
+                ->where('owner_id', $userId)
+                ->firstOrFail();
 
-        $template = $item->template;
-        $removedQuantity = min($quantity, $item->quantity);
+            $template = $item->template;
 
-        if ($item->quantity > $quantity) {
+            if ($item->quantity < $quantity) {
+                throw new \RuntimeException("Недостаточно предметов: есть {$item->quantity}, нужно {$quantity}");
+            }
+
             $item->quantity -= $quantity;
-            $item->save();
-        } else {
-            $item->delete();
-        }
 
-        if ($recordEvent) {
-            $this->eventStore->record(
-                GameEvent::ITEM_REMOVED,
-                'user',
-                $userId,
-                [
-                    'template_id' => $template->id,
-                    'template_name' => $template->name,
-                    'instance_id' => $instanceId,
-                    'quantity' => $removedQuantity,
-                    'reason' => $reason,
-                ],
-                $userId,
-                $correlationId
-            );
-        }
+            if ($item->quantity <= 0) {
+                $item->delete();
+            } else {
+                $item->save();
+            }
 
-        return true;
+            if ($recordEvent) {
+                $this->eventStore->recordItemEvent(
+                    GameEvent::ITEM_REMOVED,
+                    $userId,
+                    $template->id,
+                    $instanceId,
+                    [
+                        'quantity' => $quantity,
+                        'reason' => $reason,
+                    ],
+                    $correlationId
+                );
+            }
+        });
     }
-    public function getInventory(int $userId): array
+
+    public function getUserInventory(int $userId): array
     {
-        // Read model — просто читаем из таблицы
-        return ItemInstance::with('template')
-            ->where('owner_id', $userId)
+        return ItemInstance::where('owner_id', $userId)
+            ->with('template')
             ->get()
-            ->map(function ($item) {
-                return [
-                    'instance_id' => $item->id,
-                    'template_id' => $item->template_id,
-                    'name' => $item->template->name,
-                    'type' => $item->template->type,
-                    'icon' => $item->template->icon,
-                    'quantity' => $item->quantity,
-                    'durability' => $item->durability,
-                    'is_stackable' => $item->template->is_stackable,
-                    'stats' => $item->stats,
-                ];
-            })
+            ->map(fn($item) => [
+                'instance_id' => $item->id,
+                'template_id' => $item->template_id,
+                'name' => $item->template->name,
+                'type' => $item->template->type,
+                'icon' => $item->template->icon,
+                'quantity' => $item->quantity,
+                'description' => $item->template->description,
+                'stats' => $item->stats ?? [],
+            ])
             ->toArray();
     }
 }
