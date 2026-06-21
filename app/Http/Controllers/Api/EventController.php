@@ -56,25 +56,10 @@ class EventController extends Controller
             return response()->json(['error' => 'user_id required'], 400);
         }
 
-        // Получаем события, где пользователь участвует (как actor или в payload)
-        $query = GameEvent::where(function ($q) use ($userId) {
-            // События пользователя
-            $q->where(function ($sub) use ($userId) {
-                $sub->where('aggregate_type', 'user')
-                    ->where('aggregate_id', $userId);
-            })
-                // ИЛИ события обмена, где пользователь участвует
-                ->orWhere(function ($sub) use ($userId) {
-                    $sub->where('aggregate_type', 'trade')
-                        ->where('actor_id', $userId);
-                });
-        });
-
-        if ($afterId) {
-            $query->where('id', '>', (int)$afterId);
-        }
-
-        $events = $query->orderBy('id', 'desc')
+        // Простой запрос: события пользователя ИЛИ события обмена с его участием
+        $events = GameEvent::where('actor_id', $userId)
+            ->where('id', '>', (int)$afterId)
+            ->orderBy('id', 'desc')
             ->limit($limit)
             ->get()
             ->sortBy('id')

@@ -44,6 +44,7 @@ Route::delete('/trade/{id}/item/{itemId}', [TradeController::class, 'removeItem'
 Route::post('/trade/{id}/gold', [TradeController::class, 'addGold']);
 Route::post('/trade/{id}/accept', [TradeController::class, 'accept']);
 Route::post('/trade/{id}/cancel', [TradeController::class, 'cancel']);
+Route::post('/trade/{id}/item/{itemId}/reduce', [TradeController::class, 'reduceItem']);
 
 // Игроки
 Route::post('/heartbeat', [PlayerController::class, 'heartbeat']);

@@ -1,15 +1,14 @@
 <?php
-declare(strict_types=1);
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
 class User extends Authenticatable
 {
-    use Notifiable;
+    use HasFactory, Notifiable;
 
     protected $fillable = [
         'name',
@@ -24,15 +23,13 @@ class User extends Authenticatable
         'remember_token',
     ];
 
-    protected $casts = [
-        'email_verified_at' => 'datetime',
-        'password' => 'hashed',
-        'last_seen_at' => 'datetime',
-    ];
-
-    // Добавь этот метод
-    public function items(): HasMany
+    protected function casts(): array
     {
-        return $this->hasMany(ItemInstance::class, 'owner_id');
+        return [
+            'email_verified_at' => 'datetime',
+            'password' => 'hashed',
+            'last_seen_at' => 'datetime',
+            'gold' => 'integer',
+        ];
     }
 }

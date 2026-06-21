@@ -4,18 +4,23 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Recipe extends Model
 {
-    protected $table = 'recipes';
+    use HasFactory;
 
     protected $fillable = [
         'result_template_id',
         'result_quantity',
-        'name',
+    ];
+
+    protected $casts = [
+        'result_template_id' => 'integer',
+        'result_quantity' => 'integer',
     ];
 
     public function resultTemplate(): BelongsTo

@@ -41,7 +41,7 @@ class AuctionController extends Controller
     {
         $request->validate([
             'user_id' => 'required|integer',
-            'instance_id' => 'required|integer',
+            'template_id' => 'required|integer',
             'price' => 'required|integer|min:1',
             'quantity' => 'sometimes|integer|min:1',
         ]);
@@ -49,7 +49,7 @@ class AuctionController extends Controller
         try {
             $lot = $this->auctionService->listLot(
                 (int)$request->input('user_id'),
-                (int)$request->input('instance_id'),
+                (int)$request->input('template_id'),
                 (int)$request->input('price'),
                 (int)$request->input('quantity', 1)
             );
