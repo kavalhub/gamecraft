@@ -167,7 +167,6 @@ class CraftingService
      */
     public function disassemble(int $userId, int $instanceId): array
     {
-        \Log::info('DISASSEMBLE CALLED', ['userId' => $userId, 'instanceId' => $instanceId]);
         return DB::transaction(function () use ($userId, $instanceId) {
             $item = ItemInstance::where('id', $instanceId)
                 ->where('owner_id', $userId)
