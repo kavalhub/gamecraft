@@ -167,6 +167,7 @@ class CraftingService
      */
     public function disassemble(int $userId, int $instanceId): array
     {
+        \Log::info('DISASSEMBLE CALLED', ['userId' => $userId, 'instanceId' => $instanceId]);
         return DB::transaction(function () use ($userId, $instanceId) {
             $item = ItemInstance::where('id', $instanceId)
                 ->where('owner_id', $userId)
@@ -177,7 +178,13 @@ class CraftingService
 
             $disassembleData = $item->template->disassemble_data;
 
-            if (empty($disassembleData)) {
+            // Если это строка — декодируем в массив
+            if (is_string($disassembleData)) {
+                $disassembleData = json_decode($disassembleData, true);
+            }
+
+            // Если null или не массив — предмет нельзя разобрать
+            if (!is_array($disassembleData) || empty($disassembleData)) {
                 throw new \RuntimeException('Этот предмет нельзя разобрать');
             }
 
