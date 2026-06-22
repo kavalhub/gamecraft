@@ -461,7 +461,7 @@
                          draggable="${!inTrade}"
                          title="">
                         <div class="item-icon">${getIcon(item.type)}</div>
-                        ${item.quantity > 1 ? `<div class="item-qty">x${item.quantity}</div>` : ''}
+                        ${item.is_stackable && item.quantity != null ? `<div class="item-qty">x${item.quantity}</div>` : ''}
                     </div>
                 `;
         }).join('');
@@ -886,11 +886,11 @@
                     };
 
                 case 'auction.purchase':
-                    const qtyPurchase = (p.quantity > 1) ? ` x${p.quantity}` : '';
+                    const qtyPurchase = p.quantity > 1 ? ` x${p.quantity}` : '';
                     return {
                         icon: '🛒',
                         title: 'Аукцион — покупка',
-                        body: `<b>Получено:</b> ${this.renderItemLink(p)}${qtyPurchase}<br><b>Оплата:</b> 💰 ${p.payment_amount} золота<br>Баланс: ${p.new_gold_balance} 💰<br><span style="font-size:10px;color:#888">Продавец: ${p.seller_name}</span>`
+                        body: `<b>Получено:</b> ${this.renderItemLink(p)}${qtyPurchase}<br><b>Оплата:</b> 💰 ${p.payment_amount || 0} золота<br>Баланс: ${p.new_gold_balance || 0} 💰<br><span style="font-size:10px;color:#888">Продавец: ${p.seller_name || 'Неизвестный'}</span>`
                     };
 
                 case 'auction.sale':

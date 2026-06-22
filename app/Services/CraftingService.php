@@ -18,19 +18,21 @@ class CraftingService
         private EventStore $eventStore
     ) {}
 
-    /**
-     * Получить список всех рецептов с полной информацией
-     */
     public function getRecipes(): array
     {
         return Recipe::with(['components.template', 'resultTemplate'])
             ->get()
             ->map(fn(Recipe $recipe) => [
                 'recipe_id' => $recipe->id,
+                'recipe_slug' => $recipe->slug,
+                'recipe_name' => $recipe->name,
+                'recipe_description' => $recipe->description,
                 'result_template_id' => $recipe->result_template_id,
+                'result_template_slug' => $recipe->resultTemplate->slug,
                 'result_quantity' => $recipe->result_quantity,
                 'result' => [
                     'template_id' => $recipe->resultTemplate->id,
+                    'template_slug' => $recipe->resultTemplate->slug,
                     'template_name' => $recipe->resultTemplate->name,
                     'template_type' => $recipe->resultTemplate->type,
                     'template_icon' => $recipe->resultTemplate->icon,
@@ -42,6 +44,7 @@ class CraftingService
                 ],
                 'components' => $recipe->components->map(fn($c) => [
                     'template_id' => $c->template_id,
+                    'template_slug' => $c->template->slug,
                     'template_name' => $c->template->name,
                     'template_type' => $c->template->type,
                     'template_icon' => $c->template->icon,
@@ -55,9 +58,6 @@ class CraftingService
             ->toArray();
     }
 
-    /**
-     * Создать предмет по рецепту
-     */
     public function craft(int $userId, int $recipeId, int $quantity = 1): ItemInstance
     {
         return DB::transaction(function () use ($userId, $recipeId, $quantity) {
@@ -71,14 +71,12 @@ class CraftingService
                 throw new \RuntimeException('Рецепт не имеет результата');
             }
 
-            $totalNeeded = [];
             foreach ($recipe->components as $component) {
                 if (!$component->template) {
                     throw new \RuntimeException('Компонент рецепта не имеет шаблона');
                 }
-                $needed = $component->quantity * $quantity;
-                $totalNeeded[$component->template_id] = $needed;
 
+                $needed = $component->quantity * $quantity;
                 $available = ItemInstance::where('owner_id', $userId)
                     ->where('template_id', $component->template_id)
                     ->sum('quantity');
@@ -90,9 +88,10 @@ class CraftingService
                 }
             }
 
-            // Снимаем все ингредиенты сразу
+            $correlationId = Str::uuid()->toString();
+
             foreach ($recipe->components as $component) {
-                $remaining = $totalNeeded[$component->template_id];
+                $remaining = $component->quantity * $quantity;
 
                 $stacks = ItemInstance::where('owner_id', $userId)
                     ->where('template_id', $component->template_id)
@@ -106,7 +105,7 @@ class CraftingService
                         $userId,
                         $stack->id,
                         $toRemove,
-                        null,
+                        $correlationId,
                         'craft',
                         false
                     );
@@ -114,57 +113,49 @@ class CraftingService
                 }
             }
 
-            // Крафтим по единице и записываем событие для каждой
-            $lastInstance = null;
-            for ($i = 0; $i < $quantity; $i++) {
-                $resultInstance = $this->inventoryService->addItem(
-                    $userId,
-                    $recipe->result_template_id,
-                    1,
-                    null,
-                    false
-                );
+            $resultQuantity = $recipe->result_quantity * $quantity;
+            $resultInstance = $this->inventoryService->addItem(
+                $userId,
+                $recipe->result_template_id,
+                $resultQuantity,
+                $correlationId,
+                false
+            );
 
-                $this->eventStore->record(
-                    GameEvent::ITEM_CRAFTED,
-                    'user',
-                    $userId,
-                    [
-                        'recipe_id' => $recipeId,
-                        'quantity' => 1,
-                        'result' => [
-                            'template_id' => $recipe->result_template_id,
-                            'template_name' => $recipe->resultTemplate->name,
-                            'template_type' => $recipe->resultTemplate->type,
-                            'template_icon' => $recipe->resultTemplate->icon,
-                            'description' => $recipe->resultTemplate->description ?? '',
-                            'instance_id' => $resultInstance->id,
-                            'stats' => $resultInstance->stats ?? [],
-                            'quantity' => 1,
-                        ],
-                        'components' => $recipe->components->map(fn($c) => [
-                            'template_id' => $c->template_id,
-                            'template_name' => $c->template->name,
-                            'template_type' => $c->template->type,
-                            'template_icon' => $c->template->icon,
-                            'description' => $c->template->description ?? '',
-                            'quantity' => $c->quantity,
-                        ])->toArray(),
+            $this->eventStore->record(
+                GameEvent::ITEM_CRAFTED,
+                'user',
+                $userId,
+                [
+                    'recipe_id' => $recipeId,
+                    'quantity' => $resultQuantity,
+                    'result' => [
+                        'template_id' => $recipe->result_template_id,
+                        'template_name' => $recipe->resultTemplate->name,
+                        'template_type' => $recipe->resultTemplate->type,
+                        'template_icon' => $recipe->resultTemplate->icon,
+                        'description' => $recipe->resultTemplate->description ?? '',
+                        'instance_id' => $resultInstance->id,
+                        'stats' => $resultInstance->stats ?? [],
+                        'quantity' => $resultQuantity,
                     ],
-                    $userId,
-                    null
-                );
+                    'components' => $recipe->components->map(fn($c) => [
+                        'template_id' => $c->template_id,
+                        'template_name' => $c->template->name,
+                        'template_type' => $c->template->type,
+                        'template_icon' => $c->template->icon,
+                        'description' => $c->template->description ?? '',
+                        'quantity' => $c->quantity * $quantity,
+                    ])->toArray(),
+                ],
+                $userId,
+                $correlationId
+            );
 
-                $lastInstance = $resultInstance;
-            }
-
-            return $lastInstance;
+            return $resultInstance;
         });
     }
 
-    /**
-     * Разобрать предмет на материалы
-     */
     public function disassemble(int $userId, int $instanceId): array
     {
         return DB::transaction(function () use ($userId, $instanceId) {
@@ -174,27 +165,30 @@ class CraftingService
                 ->firstOrFail();
 
             $materials = [];
-
             $disassembleData = $item->template->disassemble_data;
 
             if (empty($disassembleData)) {
                 throw new \RuntimeException('Этот предмет нельзя разобрать');
             }
 
-            foreach ($disassembleData as $templateId => $quantity) {
-                $template = ItemTemplate::find($templateId);
-                if (!$template) continue;
+            // disassemble_data теперь содержит slug'и
+            foreach ($disassembleData as $templateSlug => $quantity) {
+                $template = ItemTemplate::where('slug', $templateSlug)->first();
+                if (!$template) {
+                    throw new \RuntimeException("Шаблон с slug '{$templateSlug}' не найден");
+                }
 
                 $this->inventoryService->addItem(
                     $userId,
-                    $templateId,
+                    $template->id,
                     $quantity,
                     null,
                     false
                 );
 
                 $materials[] = [
-                    'template_id' => $templateId,
+                    'template_id' => $template->id,
+                    'template_slug' => $template->slug,
                     'template_name' => $template->name,
                     'template_type' => $template->type,
                     'template_icon' => $template->icon,

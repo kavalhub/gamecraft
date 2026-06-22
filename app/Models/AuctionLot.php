@@ -14,7 +14,6 @@ class AuctionLot extends Model
 
     protected $fillable = [
         'seller_id',
-        'buyer_id',
         'template_id',
         'quantity',
         'item_instance_id',
@@ -22,17 +21,18 @@ class AuctionLot extends Model
         'price',
         'commission_percent',
         'status',
+        'is_infinite',
+        'buyer_id',
+        'sold_at',
     ];
 
     protected $casts = [
-        'seller_id' => 'integer',
-        'buyer_id' => 'integer',
-        'template_id' => 'integer',
         'quantity' => 'integer',
-        'item_instance_id' => 'integer',
-        'item_stats' => 'array',
         'price' => 'integer',
         'commission_percent' => 'integer',
+        'item_stats' => 'array',
+        'is_infinite' => 'boolean',
+        'sold_at' => 'datetime',
     ];
 
     public function seller(): BelongsTo
@@ -50,7 +50,7 @@ class AuctionLot extends Model
         return $this->belongsTo(ItemTemplate::class, 'template_id');
     }
 
-    public function instance(): BelongsTo
+    public function itemInstance(): BelongsTo
     {
         return $this->belongsTo(ItemInstance::class, 'item_instance_id');
     }

@@ -14,10 +14,12 @@ class RecipeFactory extends Factory
 
     public function definition(): array
     {
+        $resultTemplate = ItemTemplate::factory();
+        
         return [
-            'name' => fake()->word() . ' recipe',
-            'result_template_id' => ItemTemplate::factory()->equipment(),
-            'result_quantity' => 1,
+            'slug' => fake()->unique()->slug(2),
+            'result_template_id' => $resultTemplate,
+            'result_quantity' => fake()->numberBetween(1, 10),
         ];
     }
 }

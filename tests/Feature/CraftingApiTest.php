@@ -117,11 +117,14 @@ class CraftingApiTest extends TestCase
     public function test_disassemble_api(): void
     {
         $user = User::factory()->create();
-        $wood = ItemTemplate::factory()->material()->create(['name' => 'Дерево']);
-
+        $wood = ItemTemplate::factory()->material()->create([
+            'slug' => 'wood',
+            'name' => 'Дерево'
+        ]);
+        
         $swordTemplate = ItemTemplate::factory()->equipment()->create([
             'name' => 'Меч',
-            'disassemble_data' => [$wood->id => 2], // Используем реальный ID
+            'disassemble_data' => ['wood' => 2], // Теперь slug!
         ]);
 
         $sword = ItemInstance::factory()->create([

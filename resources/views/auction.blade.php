@@ -398,7 +398,7 @@
                  onclick="selectItem(this)">
                 <div class="item-icon">${getIcon(item.type)}</div>
                 <div class="item-name">${item.name}</div>
-                ${item.quantity > 1 ? `<div class="item-qty">x${item.quantity}</div>` : ''}
+                ${item.is_stackable && item.quantity != null ? `<div class="item-qty">x${item.quantity}</div>` : ''}
             </div>
         `).join('');
         }

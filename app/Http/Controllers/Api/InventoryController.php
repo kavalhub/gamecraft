@@ -40,7 +40,8 @@ class InventoryController extends Controller
                 'name' => $item->template->name,
                 'type' => $item->template->type,
                 'icon' => $item->template->icon,
-                'quantity' => $item->quantity,
+                'is_stackable' => $item->template->is_stackable,
+                'quantity' => $item->template->is_stackable ? $item->quantity : null,
                 'description' => $item->template->description,
                 'stats' => $item->stats ?? [],
             ]);

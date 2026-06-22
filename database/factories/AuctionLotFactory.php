@@ -17,29 +17,37 @@ class AuctionLotFactory extends Factory
     {
         return [
             'seller_id' => User::factory(),
-            'template_id' => ItemTemplate::factory()->material(),
-            'quantity' => 1,
-            'price' => 100,
+            'template_id' => ItemTemplate::factory(),
+            'quantity' => fake()->numberBetween(1, 10),
+            'price' => fake()->numberBetween(10, 1000),
             'commission_percent' => 5,
             'status' => 'active',
+            'is_infinite' => false,
         ];
     }
 
-    public function active(): static
+    public function infinite(): static
     {
-        return $this->state(['status' => 'active']);
+        return $this->state(fn(array $attributes) => [
+            'seller_id' => null,
+            'is_infinite' => true,
+            'commission_percent' => 0,
+        ]);
     }
 
     public function sold(): static
     {
-        return $this->state([
+        return $this->state(fn(array $attributes) => [
             'status' => 'sold',
             'buyer_id' => User::factory(),
+            'sold_at' => now(),
         ]);
     }
 
     public function cancelled(): static
     {
-        return $this->state(['status' => 'cancelled']);
+        return $this->state(fn(array $attributes) => [
+            'status' => 'cancelled',
+        ]);
     }
 }

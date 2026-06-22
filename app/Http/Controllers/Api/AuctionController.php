@@ -50,8 +50,8 @@ class AuctionController extends Controller
             $lot = $this->auctionService->listLot(
                 (int)$request->input('user_id'),
                 (int)$request->input('template_id'),
-                (int)$request->input('price'),
-                (int)$request->input('quantity', 1)
+                (int)$request->input('quantity', 1),
+                (int)$request->input('price')
             );
 
             return response()->json([
@@ -75,7 +75,20 @@ class AuctionController extends Controller
                 $id
             );
 
-            return response()->json($result);
+            $lot = $result['lot'];
+            $buyer = $result['buyer'];
+            $totalPrice = $lot->price * $lot->quantity;
+
+            return response()->json([
+                'message' => 'Покупка успешна',
+                'item_name' => $lot->template->name,
+                'item_type' => $lot->template->type,
+                'item_icon' => $lot->template->icon,
+                'item_quantity' => $lot->quantity,
+                'payment_amount' => $totalPrice,
+                'seller_name' => $lot->seller?->name ?? 'Неизвестный',
+                'buyer_gold' => $buyer->gold,
+            ]);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
@@ -93,7 +106,10 @@ class AuctionController extends Controller
                 $id
             );
 
-            return response()->json($result);
+            return response()->json([
+                'message' => 'Лот отменён',
+                'lot' => $result,
+            ]);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }

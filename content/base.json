@@ -1,0 +1,182 @@
+{
+  "version": "1.0.0",
+  "templates": [
+    {
+      "slug": "wood",
+      "name": "Дерево",
+      "type": "material",
+      "icon": "🪵",
+      "is_stackable": true,
+      "max_stack": 200,
+      "description": "Обычное дерево, основа многих крафтов"
+    },
+    {
+      "slug": "iron_ore",
+      "name": "Железная руда",
+      "type": "material",
+      "icon": "⛏️",
+      "is_stackable": true,
+      "max_stack": 100,
+      "description": "Необработанная железная руда"
+    },
+    {
+      "slug": "wooden_plank",
+      "name": "Деревянный брусок",
+      "type": "material",
+      "icon": "🪵",
+      "is_stackable": true,
+      "max_stack": 200,
+      "description": "Обработанный деревянный брусок"
+    },
+    {
+      "slug": "iron_ingot",
+      "name": "Железный слиток",
+      "type": "material",
+      "icon": "🔩",
+      "is_stackable": true,
+      "max_stack": 100,
+      "description": "Очищенный железный слиток"
+    },
+    {
+      "slug": "wooden_sword",
+      "name": "Деревянный меч",
+      "type": "equipment",
+      "icon": "🗡️",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Простой деревянный меч для начинающих",
+      "disassemble_data": {"wood": 2},
+      "stats": {
+        "damage": {"min": 5, "max": 8},
+        "strength": {"min": 1, "max": 2},
+        "attack_speed": {"min": 1.0, "max": 1.2},
+        "crit_chance": {"min": 1, "max": 3}
+      }
+    },
+    {
+      "slug": "iron_sword",
+      "name": "Железный меч",
+      "type": "equipment",
+      "icon": "⚔️",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Крепкий железный меч",
+      "disassemble_data": {"wooden_plank": 1, "iron_ingot": 2},
+      "stats": {
+        "damage": {"min": 15, "max": 20},
+        "strength": {"min": 5, "max": 8},
+        "attack_speed": {"min": 1.2, "max": 1.5},
+        "crit_chance": {"min": 5, "max": 10}
+      }
+    },
+    {
+      "slug": "recipe_wooden_sword",
+      "name": "Чертёж: Деревянный меч",
+      "type": "recipe",
+      "icon": "📜",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Обучает крафту деревянного меча"
+    },
+    {
+      "slug": "recipe_wooden_plank",
+      "name": "Чертёж: Деревянный брусок",
+      "type": "recipe",
+      "icon": "📜",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Обучает изготовлению деревянных брусков"
+    },
+    {
+      "slug": "recipe_iron_ingot",
+      "name": "Чертёж: Железный слиток",
+      "type": "recipe",
+      "icon": "📜",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Обучает плавке железных слитков"
+    },
+    {
+      "slug": "recipe_iron_sword",
+      "name": "Чертёж: Железный меч",
+      "type": "recipe",
+      "icon": "📜",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Обучает крафту железного меча"
+    }
+  ],
+  "recipes": [
+    {
+      "slug": "craft_wooden_sword",
+      "name": "Изготовление деревянного меча",
+      "description": "Создаёт простой деревянный меч из пяти брёвен",
+      "result": {"template_slug": "wooden_sword", "quantity": 1},
+      "components": [
+        {"template_slug": "wood", "quantity": 5}
+      ]
+    },
+    {
+      "slug": "craft_wooden_plank",
+      "name": "Распил дерева",
+      "description": "Из одного бревна получается пять брусков",
+      "result": {"template_slug": "wooden_plank", "quantity": 5},
+      "components": [
+        {"template_slug": "wood", "quantity": 1}
+      ]
+    },
+    {
+      "slug": "craft_iron_ingot",
+      "name": "Плавка железного слитка",
+      "description": "Из десяти кусков руды выплавляется два слитка",
+      "result": {"template_slug": "iron_ingot", "quantity": 2},
+      "components": [
+        {"template_slug": "iron_ore", "quantity": 10}
+      ]
+    },
+    {
+      "slug": "craft_iron_sword",
+      "name": "Ковка железного меча",
+      "description": "Создаёт крепкий железный меч из бруска и двух слитков",
+      "result": {"template_slug": "iron_sword", "quantity": 1},
+      "components": [
+        {"template_slug": "wooden_plank", "quantity": 1},
+        {"template_slug": "iron_ingot", "quantity": 2}
+      ]
+    }
+  ],
+  "npcs": [
+    {
+      "slug": "wulfric_goldsmyth",
+      "name": "Wulfric Goldsmyth",
+      "email": "wulfric@game.npc",
+      "description": "Опытный торговец и кузнец, продаёт базовые материалы"
+    }
+  ],
+  "shop_lots": [
+    {
+      "npc_slug": "wulfric_goldsmyth",
+      "template_slug": "wood",
+      "quantity": 1,
+      "price": 1
+    },
+    {
+      "npc_slug": "wulfric_goldsmyth",
+      "template_slug": "iron_ore",
+      "quantity": 1,
+      "price": 1
+    },
+    {
+      "npc_slug": "wulfric_goldsmyth",
+      "template_slug": "wooden_plank",
+      "quantity": 1,
+      "price": 1
+    },
+    {
+      "npc_slug": "wulfric_goldsmyth",
+      "template_slug": "iron_ingot",
+      "quantity": 1,
+      "price": 1
+    }
+  ]
+}

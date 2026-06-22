@@ -7,7 +7,6 @@ use App\Http\Controllers\Controller;
 use App\Models\GameEvent;
 use App\Models\User;
 use App\Services\EventStore;
-use App\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,11 +15,6 @@ use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
-    public function __construct(
-        private InventoryService $inventoryService
-    ) {
-    }
-
     public function register(Request $request): JsonResponse
     {
         $request->validate([
@@ -37,11 +31,8 @@ class AuthController extends Controller
                     'gold' => 100,
                 ]);
 
-                // Корреляция — все стартовые предметы связаны одним ID
-                $correlationId = Str::uuid()
-                    ->toString();
+                $correlationId = Str::uuid()->toString();
 
-                // Событие регистрации
                 app(EventStore::class)->record(
                     GameEvent::USER_REGISTERED,
                     'user',
@@ -54,7 +45,6 @@ class AuthController extends Controller
                     $correlationId
                 );
 
-                // Событие получения золота
                 app(EventStore::class)->record(
                     GameEvent::USER_GOLD_CHANGED,
                     'user',
@@ -68,16 +58,6 @@ class AuthController extends Controller
                     $correlationId
                 );
 
-                // Стартовые предметы
-                $starterItems = [
-                    ['template_id' => 1, 'qty' => 10],
-                    ['template_id' => 2, 'qty' => 5],
-                ];
-
-                foreach ($starterItems as $item) {
-                    $this->inventoryService->addItem($user->id, $item['template_id'], $item['qty'], $correlationId);
-                }
-
                 return response()->json([
                     'message' => 'User registered successfully',
                     'user_id' => $user->id,
@@ -89,17 +69,13 @@ class AuthController extends Controller
         }
     }
 
-    /**
-     * Вход для существующего пользователя (упрощённый, без пароля — для отладки)
-     */
     public function login(Request $request): JsonResponse
     {
         $request->validate([
             'username' => 'required|string',
         ]);
 
-        $user = User::where('name', $request->username)
-            ->first();
+        $user = User::where('name', $request->username)->first();
 
         if (!$user) {
             return response()->json(['error' => 'User not found'], 404);
