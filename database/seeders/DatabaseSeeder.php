@@ -1,34 +1,43 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Database\Seeders;
 
+use App\Dto\Content\ContentImportDto;
 use App\Models\User;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use App\Services\ContentImportService;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\File;
 
 class DatabaseSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
     public function run(): void
     {
-        // Пользователь
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-            'gold' => 1000,
-        ]);
+        User::updateOrCreate(
+            ['email' => 'test@example.com'],
+            [
+                'name' => 'Test User',
+                'password' => bcrypt('password'),
+                'gold' => 1000,
+            ]
+        );
 
-        // Шаблоны предметов (материалы, экипировка, чертежи)
-        $this->call(ItemTemplateSeeder::class);
+        $importService = app(ContentImportService::class);
 
-        // Рецепты
-        $this->call(RecipeSeeder::class);
+        $baseContentPath = base_path('content/base.json');
+        if (File::exists($baseContentPath)) {
+            $data = json_decode(File::get($baseContentPath), true);
+            $dto = ContentImportDto::fromArray($data);
+            $report = $importService->import($dto);
 
-        // Компоненты рецептов
-        $this->call(RecipeItemSeeder::class);
-
-        // Стартовый инвентарь для тестов
-        $this->call(DebugInventorySeeder::class);
+            $this->command->info('Content imported:');
+            $this->command->info("  Templates: {$report['templates']['created']} created, {$report['templates']['updated']} updated");
+            $this->command->info("  Recipes: {$report['recipes']['created']} created, {$report['recipes']['updated']} updated");
+            $this->command->info("  NPCs: {$report['npcs']['created']} created, {$report['npcs']['updated']} updated");
+            $this->command->info("  Shop lots: {$report['shop_lots']['created']} created, {$report['shop_lots']['updated']} updated");
+        } else {
+            $this->command->warn('content/base.json not found');
+        }
     }
 }

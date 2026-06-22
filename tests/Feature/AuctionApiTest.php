@@ -120,15 +120,18 @@ class AuctionApiTest extends TestCase
             'quantity' => 5,
         ]);
 
-        $lot = AuctionLot::factory()->create([
-            'seller_id' => $seller->id,
+        // Создаём лот через API, чтобы предметы корректно списались
+        $createResponse = $this->postJson('/api/auction', [
+            'user_id' => $seller->id,
             'template_id' => $template->id,
+            'price' => 100,
             'quantity' => 5,
-            'price' => 500,
-            'status' => 'active',
         ]);
 
-        $response = $this->postJson("/api/auction/{$lot->id}/buy", [
+        $createResponse->assertStatus(201);
+        $lotId = $createResponse->json('lot_id');
+
+        $response = $this->postJson("/api/auction/{$lotId}/buy", [
             'user_id' => $buyer->id,
         ]);
 
@@ -146,13 +149,17 @@ class AuctionApiTest extends TestCase
             'quantity' => 5,
         ]);
 
-        $lot = AuctionLot::factory()->create([
-            'seller_id' => $seller->id,
+        $createResponse = $this->postJson('/api/auction', [
+            'user_id' => $seller->id,
             'template_id' => $template->id,
-            'status' => 'active',
+            'price' => 100,
+            'quantity' => 5,
         ]);
 
-        $response = $this->postJson("/api/auction/{$lot->id}/cancel", [
+        $createResponse->assertStatus(201);
+        $lotId = $createResponse->json('lot_id');
+
+        $response = $this->postJson("/api/auction/{$lotId}/cancel", [
             'user_id' => $seller->id,
         ]);
 

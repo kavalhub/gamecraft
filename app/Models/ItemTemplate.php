@@ -13,6 +13,7 @@ class ItemTemplate extends Model
     use HasFactory;
 
     protected $fillable = [
+        'slug',
         'name',
         'type',
         'icon',
@@ -20,12 +21,14 @@ class ItemTemplate extends Model
         'max_stack',
         'description',
         'disassemble_data',
+        'stats',
     ];
 
     protected $casts = [
         'is_stackable' => 'boolean',
         'max_stack' => 'integer',
         'disassemble_data' => 'array',
+        'stats' => 'array',
     ];
 
     public function instances(): HasMany

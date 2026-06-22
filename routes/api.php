@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\AuctionController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ContentImportController;
 use App\Http\Controllers\Api\CraftingController;
 use App\Http\Controllers\Api\EventController;
 use App\Http\Controllers\Api\InventoryController;
@@ -49,3 +50,6 @@ Route::post('/trade/{id}/item/{itemId}/reduce', [TradeController::class, 'reduce
 // Игроки
 Route::post('/heartbeat', [PlayerController::class, 'heartbeat']);
 Route::get('/players/online', [PlayerController::class, 'online']);
+
+// Импорт игровых ресурсов
+Route::post('/admin/content/import', [ContentImportController::class, 'import']);

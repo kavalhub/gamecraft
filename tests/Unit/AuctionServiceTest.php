@@ -14,7 +14,7 @@ use Tests\TestCase;
 
 class AuctionServiceTest extends TestCase
 {
-    use DatabaseTransactions;
+    use \Illuminate\Foundation\Testing\RefreshDatabase;
 
     private AuctionService $service;
     private User $seller;
@@ -162,7 +162,8 @@ class AuctionServiceTest extends TestCase
             'quantity' => 10,
         ]);
 
-        $lot = $this->service->listLot($this->seller->id, $template->id, 100, 5);
+        // listLot($userId, $templateId, $quantity, $price)
+        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
 
         $this->assertNotNull($lot->id);
         $this->assertEquals($this->seller->id, $lot->seller_id);
@@ -190,7 +191,7 @@ class AuctionServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('В инвентаре только');
-        $this->service->listLot($this->seller->id, $template->id, 100, 5);
+        $this->service->listLot($this->seller->id, $template->id, 5, 100);
     }
 
     public function test_list_lot_fails_with_zero_price(): void
@@ -199,7 +200,7 @@ class AuctionServiceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Цена должна быть больше нуля');
-        $this->service->listLot($this->seller->id, $template->id, 0);
+        $this->service->listLot($this->seller->id, $template->id, 5, 0);
     }
 
     public function test_buy_lot_transfers_gold_and_items(): void
@@ -210,16 +211,16 @@ class AuctionServiceTest extends TestCase
             'max_stack' => 200,
         ]);
 
-        // Продавец выставляет 5 дерева за 500 золота
+        // Продавец выставляет 5 дерева за 100 золота (итого 500)
         ItemInstance::factory()->create([
             'owner_id' => $this->seller->id,
             'template_id' => $template->id,
             'quantity' => 5,
         ]);
 
-        $lot = $this->service->listLot($this->seller->id, $template->id, 500, 5);
+        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
 
-        // Покупатель покупает
+        // Покупатель покупает (5 × 100 = 500)
         $this->service->buyLot($this->buyer->id, $lot->id);
 
         // Проверяем золото (комиссия 5% = 25, продавец получает 475)
@@ -247,7 +248,7 @@ class AuctionServiceTest extends TestCase
             'quantity' => 5,
         ]);
 
-        $lot = $this->service->listLot($this->seller->id, $template->id, 9999, 5);
+        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 9999);
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Недостаточно золота');
@@ -264,10 +265,10 @@ class AuctionServiceTest extends TestCase
             'quantity' => 5,
         ]);
 
-        $lot = $this->service->listLot($this->seller->id, $template->id, 100, 5);
+        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Нельзя купить свой лот');
+        $this->expectExceptionMessage('Нельзя купить свой');
         $this->service->buyLot($this->seller->id, $lot->id);
     }
 
@@ -285,7 +286,7 @@ class AuctionServiceTest extends TestCase
             'quantity' => 10,
         ]);
 
-        $lot = $this->service->listLot($this->seller->id, $template->id, 100, 5);
+        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
 
         // После выставления осталось 5
         $this->assertEquals(5, ItemInstance::where('owner_id', $this->seller->id)
@@ -314,10 +315,10 @@ class AuctionServiceTest extends TestCase
             'quantity' => 5,
         ]);
 
-        $lot = $this->service->listLot($this->seller->id, $template->id, 100, 5);
+        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Вы не владелец');
+        $this->expectExceptionMessage('не можете отменить');
         $this->service->cancelLot($this->buyer->id, $lot->id);
     }
 
@@ -331,11 +332,11 @@ class AuctionServiceTest extends TestCase
             'quantity' => 5,
         ]);
 
-        $lot = $this->service->listLot($this->seller->id, $template->id, 100, 5);
+        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
         $this->service->buyLot($this->buyer->id, $lot->id);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Лот не активен');
+        $this->expectExceptionMessage('Можно отменить только активный лот');
         $this->service->cancelLot($this->seller->id, $lot->id);
     }
 }

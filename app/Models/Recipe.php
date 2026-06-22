@@ -14,6 +14,9 @@ class Recipe extends Model
     use HasFactory;
 
     protected $fillable = [
+        'slug',
+        'name',
+        'description',
         'result_template_id',
         'result_quantity',
     ];
