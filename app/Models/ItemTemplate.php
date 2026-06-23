@@ -4,14 +4,11 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ItemTemplate extends Model
 {
-    use HasFactory;
-
     protected $fillable = [
         'slug',
         'name',
@@ -31,9 +28,24 @@ class ItemTemplate extends Model
         'stats' => 'array',
     ];
 
-    public function instances(): HasMany
+    public function isResource(): bool
     {
-        return $this->hasMany(ItemInstance::class, 'template_id');
+        return in_array($this->type, ['material', 'consumable']);
+    }
+
+    public function isItem(): bool
+    {
+        return in_array($this->type, ['equipment', 'blueprint']);
+    }
+
+    public function isBlueprint(): bool
+    {
+        return $this->type === 'blueprint';
+    }
+
+    public function isEquipment(): bool
+    {
+        return $this->type === 'equipment';
     }
 
     public function recipes(): HasMany
@@ -41,8 +53,13 @@ class ItemTemplate extends Model
         return $this->hasMany(Recipe::class, 'result_template_id');
     }
 
-    public function recipeComponents(): HasMany
+    public function items(): HasMany
     {
-        return $this->hasMany(RecipeComponent::class, 'template_id');
+        return $this->hasMany(Item::class);
+    }
+
+    public function resourceBalances(): HasMany
+    {
+        return $this->hasMany(ResourceBalance::class);
     }
 }
