@@ -128,7 +128,7 @@ temporary_slots
 ```
 * Создаются при обмене предметами, выставлении лота на аукцион, возможно дроп с монстров
 
-### 5. recipes — Рецепты
+### recipes — Рецепты
 ```sql
 recipes
 ├── id : BIGINT (PK)
@@ -139,7 +139,21 @@ recipes
 └── timestamps
 ```
 
-### 5. items — Чертежи/Предметы
+### disassemble_formulas — Формулы разбора предмета
+```sql
+disassemble_formulas
+├── id : BIGINT (PK)
+├── recipe_slug : VARCHAR(50) (FK → recipes)
+├── priority : INT  -- 1 = первый проверяется
+├── chance : INT  -- 0-100, где 100 = всегда
+├── conditions : JSON (nullable)  -- {"min_craftsmanship": 50}
+├── formula : JSON  -- {"wooden_plank": 2, "iron_ingot": 1}
+├── is_active : BOOLEAN
+├── description : VARCHAR(255)  -- "Обычный разбор", "Пасхальный разбор"
+└── timestamps
+```
+
+### items — Чертежи/Предметы
 ```sql
 items
 ├── id : BIGINT (PK)
@@ -162,4 +176,12 @@ items
 * slot_type в какой тип хранилища может быть помещён предмет 
   (например equipment_head может быть помещён либо в слот хранилища equipment_head либо в слот с типом null)
 * recipe_id и materials_used заполняются при крафте
+
+### resources — Балансы ресурсов
+resource_balances
+├── id : BIGINT (PK)
+├── characters_uuid : VARCHAR(36)
+├── recipe_slug : VARCHAR(50) (FK → recipes)
+├── quantity : INT
+└── timestamps
 
