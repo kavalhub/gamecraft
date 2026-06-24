@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\GameEvent;
-use App\Models\ItemInstance;
+use App\Models\Item;
 use App\Models\ItemTemplate;
 use App\Models\Recipe;
 use Illuminate\Support\Facades\DB;
@@ -58,7 +58,7 @@ class CraftingService
             ->toArray();
     }
 
-    public function craft(int $userId, int $recipeId, int $quantity = 1): ItemInstance
+    public function craft(int $userId, int $recipeId, int $quantity = 1): Item
     {
         return DB::transaction(function () use ($userId, $recipeId, $quantity) {
             $recipe = Recipe::with(['components.template', 'resultTemplate'])->findOrFail($recipeId);
@@ -77,7 +77,7 @@ class CraftingService
                 }
 
                 $needed = $component->quantity * $quantity;
-                $available = ItemInstance::where('owner_id', $userId)
+                $available = Item::where('owner_id', $userId)
                     ->where('template_id', $component->template_id)
                     ->sum('quantity');
 
@@ -93,7 +93,7 @@ class CraftingService
             foreach ($recipe->components as $component) {
                 $remaining = $component->quantity * $quantity;
 
-                $stacks = ItemInstance::where('owner_id', $userId)
+                $stacks = Item::where('owner_id', $userId)
                     ->where('template_id', $component->template_id)
                     ->orderBy('quantity', 'desc')
                     ->get();
@@ -159,7 +159,7 @@ class CraftingService
     public function disassemble(int $userId, int $instanceId): array
     {
         return DB::transaction(function () use ($userId, $instanceId) {
-            $item = ItemInstance::where('id', $instanceId)
+            $item = Item::where('id', $instanceId)
                 ->where('owner_id', $userId)
                 ->with('template')
                 ->firstOrFail();

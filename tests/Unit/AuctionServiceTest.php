@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use App\Models\AuctionLot;
-use App\Models\ItemInstance;
+use App\Models\Item;
 use App\Models\ItemTemplate;
 use App\Models\User;
 use App\Services\AuctionService;
@@ -156,7 +156,7 @@ class AuctionServiceTest extends TestCase
             'max_stack' => 200,
         ]);
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->seller->id,
             'template_id' => $template->id,
             'quantity' => 10,
@@ -173,7 +173,7 @@ class AuctionServiceTest extends TestCase
         $this->assertEquals('active', $lot->status);
 
         // Проверка, что предметы списались
-        $remaining = ItemInstance::where('owner_id', $this->seller->id)
+        $remaining = Item::where('owner_id', $this->seller->id)
             ->where('template_id', $template->id)
             ->sum('quantity');
         $this->assertEquals(5, $remaining);
@@ -183,7 +183,7 @@ class AuctionServiceTest extends TestCase
     {
         $template = ItemTemplate::factory()->material()->create();
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->seller->id,
             'template_id' => $template->id,
             'quantity' => 3,
@@ -212,7 +212,7 @@ class AuctionServiceTest extends TestCase
         ]);
 
         // Продавец выставляет 5 дерева за 100 золота (итого 500)
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->seller->id,
             'template_id' => $template->id,
             'quantity' => 5,
@@ -228,7 +228,7 @@ class AuctionServiceTest extends TestCase
         $this->assertEquals(1475, $this->seller->fresh()->gold); // 1000 + 475
 
         // Проверяем предметы
-        $buyerWood = ItemInstance::where('owner_id', $this->buyer->id)
+        $buyerWood = Item::where('owner_id', $this->buyer->id)
             ->where('template_id', $template->id)
             ->sum('quantity');
         $this->assertEquals(5, $buyerWood);
@@ -242,7 +242,7 @@ class AuctionServiceTest extends TestCase
     {
         $template = ItemTemplate::factory()->material()->create();
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->seller->id,
             'template_id' => $template->id,
             'quantity' => 5,
@@ -259,7 +259,7 @@ class AuctionServiceTest extends TestCase
     {
         $template = ItemTemplate::factory()->material()->create();
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->seller->id,
             'template_id' => $template->id,
             'quantity' => 5,
@@ -280,7 +280,7 @@ class AuctionServiceTest extends TestCase
             'max_stack' => 200,
         ]);
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->seller->id,
             'template_id' => $template->id,
             'quantity' => 10,
@@ -289,7 +289,7 @@ class AuctionServiceTest extends TestCase
         $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
 
         // После выставления осталось 5
-        $this->assertEquals(5, ItemInstance::where('owner_id', $this->seller->id)
+        $this->assertEquals(5, Item::where('owner_id', $this->seller->id)
             ->where('template_id', $template->id)
             ->sum('quantity'));
 
@@ -297,7 +297,7 @@ class AuctionServiceTest extends TestCase
         $this->service->cancelLot($this->seller->id, $lot->id);
 
         // Предметы вернулись
-        $this->assertEquals(10, ItemInstance::where('owner_id', $this->seller->id)
+        $this->assertEquals(10, Item::where('owner_id', $this->seller->id)
             ->where('template_id', $template->id)
             ->sum('quantity'));
 
@@ -309,7 +309,7 @@ class AuctionServiceTest extends TestCase
     {
         $template = ItemTemplate::factory()->material()->create();
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->seller->id,
             'template_id' => $template->id,
             'quantity' => 5,
@@ -326,7 +326,7 @@ class AuctionServiceTest extends TestCase
     {
         $template = ItemTemplate::factory()->material()->create();
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->seller->id,
             'template_id' => $template->id,
             'quantity' => 5,

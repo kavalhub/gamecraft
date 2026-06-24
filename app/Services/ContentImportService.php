@@ -9,6 +9,7 @@ use App\Dto\Content\NpcDto;
 use App\Dto\Content\RecipeDto;
 use App\Dto\Content\TemplateDto;
 use App\Models\AuctionLot;
+use App\Models\DisassembleFormula;
 use App\Models\ItemTemplate;
 use App\Models\Recipe;
 use App\Models\RecipeComponent;
@@ -24,6 +25,7 @@ class ContentImportService
             'version' => $dto->version,
             'templates' => ['created' => 0, 'updated' => 0, 'total' => count($dto->templates)],
             'recipes' => ['created' => 0, 'updated' => 0, 'total' => count($dto->recipes)],
+            'disassemble_formulas' => ['created' => 0, 'updated' => 0, 'total' => 0],
             'npcs' => ['created' => 0, 'updated' => 0, 'total' => count($dto->npcs)],
             'shop_lots' => ['created' => 0, 'updated' => 0, 'total' => count($dto->shopLots)],
         ];
@@ -63,7 +65,6 @@ class ContentImportService
                 'is_stackable' => $dto->isStackable,
                 'max_stack' => $dto->maxStack,
                 'description' => $dto->description,
-                'disassemble_data' => $dto->disassembleData,
                 'stats' => $dto->stats,
             ]
         );
@@ -85,7 +86,6 @@ class ContentImportService
             [
                 'name' => $dto->name,
                 'password' => Hash::make('npc_' . $dto->slug),
-                'gold' => 999999,
             ]
         );
 
@@ -124,11 +124,42 @@ class ContentImportService
             ]);
         }
 
+        // Импортируем формулы разбора
+        if (isset($dto->disassembleFormulas)) {
+            DisassembleFormula::where('recipe_id', $recipe->id)->delete();
+
+            foreach ($dto->disassembleFormulas as $formulaData) {
+                $this->importDisassembleFormula($recipe, $formulaData, $report);
+            }
+        }
+
         if ($isNew) {
             $report['recipes']['created']++;
         } else {
             $report['recipes']['updated']++;
         }
+    }
+
+    private function importDisassembleFormula(Recipe $recipe, array $formulaData, array &$report): void
+    {
+        $formula = [];
+        foreach ($formulaData['formula'] as $templateSlug => $quantity) {
+            $template = ItemTemplate::where('slug', $templateSlug)->firstOrFail();
+            $formula[$template->id] = $quantity;
+        }
+
+        DisassembleFormula::create([
+            'recipe_id' => $recipe->id,
+            'name' => $formulaData['name'],
+            'priority' => $formulaData['priority'] ?? 100,
+            'chance' => $formulaData['chance'] ?? 100,
+            'conditions' => $formulaData['conditions'] ?? null,
+            'formula' => $formula,
+            'is_active' => true,
+        ]);
+
+        $report['disassemble_formulas']['created']++;
+        $report['disassemble_formulas']['total']++;
     }
 
     private function importShopLot(array $shopLot, array &$report): void
@@ -163,7 +194,6 @@ class ContentImportService
 
     private function getNpcEmail(string $npcSlug): string
     {
-        // Простая маппинг - в будущем можно хранить в БД
         $mapping = [
             'wulfric_goldsmyth' => 'wulfric@game.npc',
         ];

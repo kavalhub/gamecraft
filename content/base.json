@@ -2,6 +2,15 @@
   "version": "1.0.0",
   "templates": [
     {
+      "slug": "gold",
+      "name": "Золото",
+      "type": "material",
+      "icon": "💰",
+      "is_stackable": true,
+      "max_stack": 999999999,
+      "description": "Золотые монеты — универсальная валюта"
+    },
+    {
       "slug": "wood",
       "name": "Дерево",
       "type": "material",
@@ -45,7 +54,6 @@
       "is_stackable": false,
       "max_stack": 1,
       "description": "Простой деревянный меч для начинающих",
-      "disassemble_data": {"wood": 2},
       "stats": {
         "damage": {"min": 5, "max": 8},
         "strength": {"min": 1, "max": 2},
@@ -61,49 +69,12 @@
       "is_stackable": false,
       "max_stack": 1,
       "description": "Крепкий железный меч",
-      "disassemble_data": {"wooden_plank": 1, "iron_ingot": 2},
       "stats": {
         "damage": {"min": 15, "max": 20},
         "strength": {"min": 5, "max": 8},
         "attack_speed": {"min": 1.2, "max": 1.5},
         "crit_chance": {"min": 5, "max": 10}
       }
-    },
-    {
-      "slug": "recipe_wooden_sword",
-      "name": "Чертёж: Деревянный меч",
-      "type": "recipe",
-      "icon": "📜",
-      "is_stackable": false,
-      "max_stack": 1,
-      "description": "Обучает крафту деревянного меча"
-    },
-    {
-      "slug": "recipe_wooden_plank",
-      "name": "Чертёж: Деревянный брусок",
-      "type": "recipe",
-      "icon": "📜",
-      "is_stackable": false,
-      "max_stack": 1,
-      "description": "Обучает изготовлению деревянных брусков"
-    },
-    {
-      "slug": "recipe_iron_ingot",
-      "name": "Чертёж: Железный слиток",
-      "type": "recipe",
-      "icon": "📜",
-      "is_stackable": false,
-      "max_stack": 1,
-      "description": "Обучает плавке железных слитков"
-    },
-    {
-      "slug": "recipe_iron_sword",
-      "name": "Чертёж: Железный меч",
-      "type": "recipe",
-      "icon": "📜",
-      "is_stackable": false,
-      "max_stack": 1,
-      "description": "Обучает крафту железного меча"
     }
   ],
   "recipes": [
@@ -114,6 +85,14 @@
       "result": {"template_slug": "wooden_sword", "quantity": 1},
       "components": [
         {"template_slug": "wood", "quantity": 5}
+      ],
+      "disassemble_formulas": [
+        {
+          "name": "Обычный разбор",
+          "priority": 100,
+          "chance": 100,
+          "formula": {"wood": 2}
+        }
       ]
     },
     {
@@ -123,6 +102,14 @@
       "result": {"template_slug": "wooden_plank", "quantity": 5},
       "components": [
         {"template_slug": "wood", "quantity": 1}
+      ],
+      "disassemble_formulas": [
+        {
+          "name": "Обычный разбор",
+          "priority": 100,
+          "chance": 100,
+          "formula": {"wood": 1}
+        }
       ]
     },
     {
@@ -132,6 +119,14 @@
       "result": {"template_slug": "iron_ingot", "quantity": 2},
       "components": [
         {"template_slug": "iron_ore", "quantity": 10}
+      ],
+      "disassemble_formulas": [
+        {
+          "name": "Обычный разбор",
+          "priority": 100,
+          "chance": 100,
+          "formula": {"iron_ore": 5}
+        }
       ]
     },
     {
@@ -142,6 +137,21 @@
       "components": [
         {"template_slug": "wooden_plank", "quantity": 1},
         {"template_slug": "iron_ingot", "quantity": 2}
+      ],
+      "disassemble_formulas": [
+        {
+          "name": "Пасхальный разбор",
+          "priority": 1,
+          "chance": 10,
+          "conditions": null,
+          "formula": {"wooden_plank": 3, "iron_ingot": 4}
+        },
+        {
+          "name": "Обычный разбор",
+          "priority": 100,
+          "chance": 100,
+          "formula": {"wooden_plank": 1, "iron_ingot": 1}
+        }
       ]
     }
   ],

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
-use App\Models\ItemInstance;
+use App\Models\Item;
 use App\Models\ItemTemplate;
 use App\Models\Recipe;
 use App\Models\RecipeComponent;
@@ -53,7 +53,7 @@ class CraftingApiTest extends TestCase
         $resultTemplate = ItemTemplate::factory()->equipment()->create(['name' => 'Меч']);
         $wood = ItemTemplate::factory()->material()->create(['name' => 'Дерево']);
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $user->id,
             'template_id' => $wood->id,
             'quantity' => 10,
@@ -127,7 +127,7 @@ class CraftingApiTest extends TestCase
             'disassemble_data' => ['wood' => 2], // Теперь slug!
         ]);
 
-        $sword = ItemInstance::factory()->create([
+        $sword = Item::factory()->create([
             'owner_id' => $user->id,
             'template_id' => $swordTemplate->id,
             'quantity' => 1,

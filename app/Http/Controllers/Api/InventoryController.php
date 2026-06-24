@@ -5,18 +5,15 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\ItemInstance;
+use App\Models\Item;
+use App\Models\ItemTemplate;
+use App\Models\ResourceBalance;
 use App\Models\User;
-use App\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class InventoryController extends Controller
 {
-    public function __construct(
-        private InventoryService $inventoryService
-    ) {}
-
     public function index(Request $request): JsonResponse
     {
         $userId = $request->query('user_id');
@@ -31,7 +28,8 @@ class InventoryController extends Controller
             return response()->json(['error' => 'User not found'], 404);
         }
 
-        $inventory = ItemInstance::where('owner_id', $userId)
+        // Предметы (equipment, blueprint)
+        $items = Item::where('owner_id', $userId)
             ->with('template')
             ->get()
             ->map(fn($item) => [
@@ -46,11 +44,31 @@ class InventoryController extends Controller
                 'stats' => $item->stats ?? [],
             ]);
 
+        // Ресурсы (material, consumable)
+        $resources = ResourceBalance::where('user_id', $userId)
+            ->where('quantity', '>', 0)
+            ->with('template')
+            ->get()
+            ->map(fn($balance) => [
+                'instance_id' => null,
+                'template_id' => $balance->template_id,
+                'name' => $balance->template->name,
+                'type' => $balance->template->type,
+                'icon' => $balance->template->icon,
+                'is_stackable' => true,
+                'quantity' => $balance->quantity,
+                'description' => $balance->template->description,
+                'stats' => [],
+            ]);
+
+        // Объединяем: сначала ресурсы, потом предметы
+        $inventory = $resources->merge($items)->values()->toArray();
+
         return response()->json([
             'user' => [
                 'id' => $user->id,
                 'username' => $user->name,
-                'gold' => $user->gold,
+                'gold' => $user->getGold(),
             ],
             'inventory' => $inventory,
         ]);

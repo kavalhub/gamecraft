@@ -1,10 +1,13 @@
 <?php
+
 declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\GameEvent;
+use App\Models\ItemTemplate;
+use App\Models\ResourceBalance;
 use App\Models\User;
 use App\Services\EventStore;
 use Illuminate\Http\JsonResponse;
@@ -28,8 +31,17 @@ class AuthController extends Controller
                     'name' => $request->username,
                     'email' => $request->username . '@game.local',
                     'password' => Hash::make($request->password),
-                    'gold' => 100,
                 ]);
+
+                // Начисляем 100 золота как ресурс
+                $goldTemplate = ItemTemplate::where('slug', 'gold')->first();
+                if ($goldTemplate) {
+                    ResourceBalance::create([
+                        'user_id' => $user->id,
+                        'template_id' => $goldTemplate->id,
+                        'quantity' => 100,
+                    ]);
+                }
 
                 $correlationId = Str::uuid()->toString();
 

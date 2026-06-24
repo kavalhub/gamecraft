@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\AuctionLot;
-use App\Models\ItemInstance;
+use App\Models\Item;
 use App\Models\ItemTemplate;
 use App\Models\User;
 use Tests\TestCase;
@@ -88,7 +88,7 @@ class AuctionApiTest extends TestCase
         $seller = User::factory()->create(['gold' => 1000]);
         $template = ItemTemplate::factory()->material()->create();
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $seller->id,
             'template_id' => $template->id,
             'quantity' => 10,
@@ -114,7 +114,7 @@ class AuctionApiTest extends TestCase
             'max_stack' => 200,
         ]);
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $seller->id,
             'template_id' => $template->id,
             'quantity' => 5,
@@ -143,7 +143,7 @@ class AuctionApiTest extends TestCase
         $seller = User::factory()->create();
         $template = ItemTemplate::factory()->material()->create();
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $seller->id,
             'template_id' => $template->id,
             'quantity' => 5,

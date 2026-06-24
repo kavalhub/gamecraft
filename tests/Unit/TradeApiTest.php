@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Models\ItemInstance;
+use App\Models\Item;
 use App\Models\ItemTemplate;
 use App\Models\User;
 use Tests\TestCase;
@@ -28,7 +28,7 @@ class TradeApiTest extends TestCase
         $user1 = User::factory()->create();
         $user2 = User::factory()->create();
         $template = ItemTemplate::factory()->material()->create();
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $user1->id,
             'template_id' => $template->id,
             'quantity' => 100,
@@ -56,12 +56,12 @@ class TradeApiTest extends TestCase
         $wood = ItemTemplate::factory()->material()->create();
         $sword = ItemTemplate::factory()->equipment()->create();
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $user1->id,
             'template_id' => $wood->id,
             'quantity' => 50,
         ]);
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $user2->id,
             'template_id' => $sword->id,
             'quantity' => 1,

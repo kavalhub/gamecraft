@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Models\ItemInstance;
+use App\Models\Item;
 use App\Models\ItemTemplate;
 use App\Models\TradeOffer;
 use App\Models\User;
@@ -55,17 +55,17 @@ class TradeServiceTest extends TestCase
     {
         $template = ItemTemplate::factory()->material()->create(['max_stack' => 100]);
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->user1->id,
             'template_id' => $template->id,
             'quantity' => 100,
         ]);
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->user1->id,
             'template_id' => $template->id,
             'quantity' => 100,
         ]);
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->user1->id,
             'template_id' => $template->id,
             'quantity' => 50,
@@ -84,7 +84,7 @@ class TradeServiceTest extends TestCase
     public function test_add_item_fails_if_not_enough(): void
     {
         $template = ItemTemplate::factory()->material()->create();
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->user1->id,
             'template_id' => $template->id,
             'quantity' => 10,
@@ -99,7 +99,7 @@ class TradeServiceTest extends TestCase
     public function test_reduce_item(): void
     {
         $template = ItemTemplate::factory()->material()->create();
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->user1->id,
             'template_id' => $template->id,
             'quantity' => 100,
@@ -138,12 +138,12 @@ class TradeServiceTest extends TestCase
         $wood = ItemTemplate::factory()->material()->create(['name' => 'Дерево']);
         $sword = ItemTemplate::factory()->equipment()->create(['name' => 'Меч']);
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->user1->id,
             'template_id' => $wood->id,
             'quantity' => 100,
         ]);
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->user2->id,
             'template_id' => $sword->id,
             'quantity' => 1,
@@ -189,17 +189,17 @@ class TradeServiceTest extends TestCase
     {
         $template = ItemTemplate::factory()->material()->create(['max_stack' => 100, 'name' => 'Руда']);
 
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->user1->id,
             'template_id' => $template->id,
             'quantity' => 100,
         ]);
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->user1->id,
             'template_id' => $template->id,
             'quantity' => 100,
         ]);
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->user1->id,
             'template_id' => $template->id,
             'quantity' => 50,
@@ -215,12 +215,12 @@ class TradeServiceTest extends TestCase
         $this->service->accept($this->user1->id, $trade->id);
         $this->service->accept($this->user2->id, $trade->id);
 
-        $totalOre = \App\Models\ItemInstance::where('owner_id', $this->user2->id)
+        $totalOre = \App\Models\Item::where('owner_id', $this->user2->id)
             ->where('template_id', $template->id)
             ->sum('quantity');
         $this->assertEquals(150, $totalOre);
 
-        $remainingOre = \App\Models\ItemInstance::where('owner_id', $this->user1->id)
+        $remainingOre = \App\Models\Item::where('owner_id', $this->user1->id)
             ->where('template_id', $template->id)
             ->sum('quantity');
         $this->assertEquals(100, $remainingOre);

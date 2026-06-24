@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\GameEvent;
-use App\Models\ItemInstance;
+use App\Models\Item;
 use App\Models\ItemTemplate;
 use App\Models\TradeItem;
 use App\Models\TradeOffer;
@@ -115,7 +115,7 @@ class TradeService
                 throw new \RuntimeException('Чертежи нельзя обменивать');
             }
 
-            $items = ItemInstance::where('owner_id', $userId)
+            $items = Item::where('owner_id', $userId)
                 ->where('template_id', $templateId)
                 ->orderBy('quantity', 'desc')
                 ->get();
@@ -307,7 +307,7 @@ class TradeService
 
             // Проверка наличия предметов по template_id
             foreach ($initiatorItems as $ti) {
-                $available = ItemInstance::where('owner_id', $trade->initiator_id)
+                $available = Item::where('owner_id', $trade->initiator_id)
                     ->where('template_id', $ti->template_id)
                     ->sum('quantity');
                 if ($available < $ti->quantity) {
@@ -315,7 +315,7 @@ class TradeService
                 }
             }
             foreach ($partnerItems as $ti) {
-                $available = ItemInstance::where('owner_id', $trade->partner_id)
+                $available = Item::where('owner_id', $trade->partner_id)
                     ->where('template_id', $ti->template_id)
                     ->sum('quantity');
                 if ($available < $ti->quantity) {
@@ -339,7 +339,7 @@ class TradeService
             // Обмен предметами: инициатор → партнёру
             foreach ($initiatorItems as $ti) {
                 $remaining = $ti->quantity;
-                $stacks = ItemInstance::where('owner_id', $trade->initiator_id)
+                $stacks = Item::where('owner_id', $trade->initiator_id)
                     ->where('template_id', $ti->template_id)
                     ->orderBy('quantity', 'desc')
                     ->get();
@@ -363,7 +363,7 @@ class TradeService
             // Обмен предметами: партнёр → инициатору
             foreach ($partnerItems as $ti) {
                 $remaining = $ti->quantity;
-                $stacks = ItemInstance::where('owner_id', $trade->partner_id)
+                $stacks = Item::where('owner_id', $trade->partner_id)
                     ->where('template_id', $ti->template_id)
                     ->orderBy('quantity', 'desc')
                     ->get();

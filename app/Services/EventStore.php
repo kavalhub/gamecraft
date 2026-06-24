@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\GameEvent;
-use App\Models\ItemInstance;
+use App\Models\Item;
 use App\Models\ItemTemplate;
 use Illuminate\Support\Str;
 
@@ -61,7 +61,7 @@ class EventStore
         ], $extraPayload);
 
         if ($instanceId) {
-            $instance = ItemInstance::find($instanceId);
+            $instance = Item::find($instanceId);
             $payload['instance_id'] = $instanceId;
             $payload['stats'] = $instance?->stats ?? [];
         }

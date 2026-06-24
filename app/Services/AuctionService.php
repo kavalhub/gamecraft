@@ -7,7 +7,7 @@ namespace App\Services;
 use App\Models\AuctionHistory;
 use App\Models\AuctionLot;
 use App\Models\GameEvent;
-use App\Models\ItemInstance;
+use App\Models\Item;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -87,7 +87,7 @@ class AuctionService
                 throw new \RuntimeException('Количество должно быть больше нуля');
             }
 
-            $available = ItemInstance::where('owner_id', $userId)
+            $available = Item::where('owner_id', $userId)
                 ->where('template_id', $templateId)
                 ->sum('quantity');
 
@@ -96,7 +96,7 @@ class AuctionService
             }
 
             $remaining = $quantity;
-            $stacks = ItemInstance::where('owner_id', $userId)
+            $stacks = Item::where('owner_id', $userId)
                 ->where('template_id', $templateId)
                 ->orderBy('quantity', 'asc')
                 ->get();

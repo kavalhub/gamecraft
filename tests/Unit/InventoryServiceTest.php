@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use App\Models\ItemInstance;
+use App\Models\Item;
 use App\Models\ItemTemplate;
 use App\Models\User;
 use App\Services\InventoryService;
@@ -37,7 +37,7 @@ class InventoryServiceTest extends TestCase
     public function test_add_item_stacks_to_existing(): void
     {
         $template = ItemTemplate::factory()->material()->create(['max_stack' => 200]);
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->user->id,
             'template_id' => $template->id,
             'quantity' => 50,
@@ -46,7 +46,7 @@ class InventoryServiceTest extends TestCase
         $this->service->addItem($this->user->id, $template->id, 30);
 
         // Проверяем только записи для этого пользователя и шаблона
-        $instances = ItemInstance::where('owner_id', $this->user->id)
+        $instances = Item::where('owner_id', $this->user->id)
             ->where('template_id', $template->id)
             ->get();
 
@@ -57,7 +57,7 @@ class InventoryServiceTest extends TestCase
     public function test_add_item_respects_max_stack(): void
     {
         $template = ItemTemplate::factory()->material()->create(['max_stack' => 100]);
-        ItemInstance::factory()->create([
+        Item::factory()->create([
             'owner_id' => $this->user->id,
             'template_id' => $template->id,
             'quantity' => 80,
@@ -65,7 +65,7 @@ class InventoryServiceTest extends TestCase
 
         $this->service->addItem($this->user->id, $template->id, 50);
 
-        $instances = ItemInstance::where('owner_id', $this->user->id)->get();
+        $instances = Item::where('owner_id', $this->user->id)->get();
         $this->assertCount(2, $instances);
         $this->assertEquals(130, $instances->sum('quantity'));
     }
@@ -73,7 +73,7 @@ class InventoryServiceTest extends TestCase
     public function test_remove_item_decrements_stack(): void
     {
         $template = ItemTemplate::factory()->material()->create();
-        $item = ItemInstance::factory()->create([
+        $item = Item::factory()->create([
             'owner_id' => $this->user->id,
             'template_id' => $template->id,
             'quantity' => 50,
@@ -87,7 +87,7 @@ class InventoryServiceTest extends TestCase
     public function test_remove_item_deletes_when_zero(): void
     {
         $template = ItemTemplate::factory()->material()->create();
-        $item = ItemInstance::factory()->create([
+        $item = Item::factory()->create([
             'owner_id' => $this->user->id,
             'template_id' => $template->id,
             'quantity' => 10,
@@ -102,7 +102,7 @@ class InventoryServiceTest extends TestCase
     {
         $otherUser = User::factory()->create();
         $template = ItemTemplate::factory()->material()->create();
-        $item = ItemInstance::factory()->create([
+        $item = Item::factory()->create([
             'owner_id' => $otherUser->id,
             'template_id' => $template->id,
             'quantity' => 10,
