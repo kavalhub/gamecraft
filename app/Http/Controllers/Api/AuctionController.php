@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Character;
 use App\Services\AuctionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,103 +16,146 @@ class AuctionController extends Controller
         private AuctionService $auctionService
     ) {}
 
-    public function index(Request $request): JsonResponse
+    public function activeLots(Request $request): JsonResponse
     {
-        $type = $request->query('type');
-        $templateId = $request->query('template_id') ? (int)$request->query('template_id') : null;
+        $templateSlug = $request->query('template_slug');
+        $lots = $this->auctionService->getActiveLots($templateSlug);
 
         return response()->json([
-            'lots' => $this->auctionService->getActiveLots($type, $templateId),
+            'lots' => $lots->map(fn($lot) => [
+                'uuid' => $lot->uuid,
+                'template_slug' => $lot->template_slug,
+                'template_name' => $lot->template->name,
+                'template_icon' => $lot->template->icon,
+                'quantity' => $lot->quantity,
+                'price' => $lot->price,
+                'seller_name' => $lot->seller->name,
+                'is_infinite' => $lot->is_infinite,
+                'status' => $lot->status,
+            ]),
         ]);
     }
 
-    public function my(Request $request): JsonResponse
+    public function myLots(string $characterUuid): JsonResponse
     {
-        $userId = $request->query('user_id');
-        if (!$userId) {
-            return response()->json(['error' => 'user_id required'], 400);
-        }
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+        $lots = $this->auctionService->getMyLots($character);
 
         return response()->json([
-            'lots' => $this->auctionService->getMyLots((int)$userId),
+            'lots' => $lots->map(fn($lot) => [
+                'uuid' => $lot->uuid,
+                'template_slug' => $lot->template_slug,
+                'template_name' => $lot->template->name,
+                'quantity' => $lot->quantity,
+                'price' => $lot->price,
+                'status' => $lot->status,
+                'is_infinite' => $lot->is_infinite,
+            ]),
         ]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function prepareLot(Request $request, string $characterUuid): JsonResponse
     {
         $request->validate([
-            'user_id' => 'required|integer',
-            'template_id' => 'required|integer',
+            'item_uuid' => 'required|string',
             'price' => 'required|integer|min:1',
-            'quantity' => 'sometimes|integer|min:1',
         ]);
 
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+
         try {
-            $lot = $this->auctionService->listLot(
-                (int)$request->input('user_id'),
-                (int)$request->input('template_id'),
-                (int)$request->input('quantity', 1),
-                (int)$request->input('price')
+            $temporarySlot = $this->auctionService->prepareLot(
+                $character,
+                $request->item_uuid,
+                $request->price
             );
 
             return response()->json([
-                'message' => 'Лот выставлен',
-                'lot_id' => $lot->id,
-            ], 201);
+                'success' => true,
+                'temporary_slot_uuid' => $temporarySlot->uuid,
+                'expires_at' => $temporarySlot->timestamps_end,
+            ]);
         } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['error' => $e->getMessage()], 400);
         }
     }
 
-    public function buy(Request $request, int $id): JsonResponse
+    public function confirmLot(Request $request, string $characterUuid): JsonResponse
     {
         $request->validate([
-            'user_id' => 'required|integer',
+            'item_uuid' => 'required|string',
+            'price' => 'required|integer|min:1',
         ]);
+
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+
+        try {
+            $lot = $this->auctionService->confirmLot(
+                $character,
+                $request->item_uuid,
+                $request->price
+            );
+
+            return response()->json([
+                'success' => true,
+                'lot' => [
+                    'uuid' => $lot->uuid,
+                    'template_slug' => $lot->template_slug,
+                    'price' => $lot->price,
+                    'status' => $lot->status,
+                ],
+            ]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 400);
+        }
+    }
+
+    public function buyLot(Request $request, string $characterUuid): JsonResponse
+    {
+        $request->validate([
+            'lot_uuid' => 'required|string',
+        ]);
+
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
 
         try {
             $result = $this->auctionService->buyLot(
-                (int)$request->input('user_id'),
-                $id
+                $character,
+                $request->lot_uuid
             );
 
-            $lot = $result['lot'];
-            $buyer = $result['buyer'];
-            $totalPrice = $lot->price * $lot->quantity;
-
             return response()->json([
-                'message' => 'Покупка успешна',
-                'item_name' => $lot->template->name,
-                'item_type' => $lot->template->type,
-                'item_icon' => $lot->template->icon,
-                'item_quantity' => $lot->quantity,
-                'payment_amount' => $totalPrice,
-                'seller_name' => $lot->seller?->name ?? 'Неизвестный',
-                'buyer_gold' => $buyer->gold,
+                'success' => true,
+                'is_infinite' => $result['is_infinite'],
+                'lot_uuid' => $result['lot']->uuid,
+                'template_slug' => $result['lot']->template_slug,
             ]);
         } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['error' => $e->getMessage()], 400);
         }
     }
 
-    public function cancel(Request $request, int $id): JsonResponse
+    public function cancelLot(Request $request, string $characterUuid): JsonResponse
     {
         $request->validate([
-            'user_id' => 'required|integer',
+            'lot_uuid' => 'required|string',
         ]);
 
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+
         try {
-            $result = $this->auctionService->cancelLot(
-                (int)$request->input('user_id'),
-                $id
+            $lot = $this->auctionService->cancelLot(
+                $character,
+                $request->lot_uuid
             );
 
             return response()->json([
-                'message' => 'Лот отменён',
-                'lot' => $result,
+                'success' => true,
+                'lot_uuid' => $lot->uuid,
+                'status' => $lot->status,
             ]);
         } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['error' => $e->getMessage()], 400);
         }
     }
 }

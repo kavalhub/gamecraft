@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Character;
 use App\Services\TradeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,186 +16,158 @@ class TradeController extends Controller
         private TradeService $tradeService
     ) {}
 
-    public function active(Request $request): JsonResponse
+    public function index(string $characterUuid): JsonResponse
     {
-        $userId = $request->query('user_id');
-        if (!$userId) {
-            return response()->json(['error' => 'user_id required'], 400);
-        }
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+        $trades = $this->tradeService->getCharacterTrades($character);
 
         return response()->json([
-            'trades' => $this->tradeService->getActiveTrades((int)$userId),
+            'trades' => $trades->map(fn($trade) => [
+                'uuid' => $trade->uuid,
+                'initiator' => [
+                    'uuid' => $trade->initiator->uuid,
+                    'name' => $trade->initiator->name,
+                ],
+                'partner' => [
+                    'uuid' => $trade->partner->uuid,
+                    'name' => $trade->partner->name,
+                ],
+                'status' => $trade->status,
+                'initiator_accepted' => $trade->initiator_accepted,
+                'partner_accepted' => $trade->partner_accepted,
+                'items' => $trade->items->map(fn($item) => [
+                    'character_uuid' => $item->character_uuid,
+                    'item_uuid' => $item->item_uuid,
+                    'resource_uuid' => $item->resource_uuid,
+                    'quantity' => $item->quantity,
+                ]),
+            ]),
         ]);
     }
 
-    public function show(Request $request, string $id): JsonResponse
-    {
-        $userId = $request->query('user_id');
-        if (!$userId) {
-            return response()->json(['error' => 'user_id required'], 400);
-        }
-
-        try {
-            return response()->json([
-                'trade' => $this->tradeService->getTrade((int)$id, (int)$userId),
-            ]);
-        } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
-        }
-    }
-
-    public function store(Request $request): JsonResponse
+    public function create(Request $request, string $characterUuid): JsonResponse
     {
         $request->validate([
-            'initiator_id' => 'required|integer',
-            'partner_id' => 'required|integer',
+            'partner_uuid' => 'required|string',
         ]);
 
+        $initiator = Character::where('uuid', $characterUuid)->firstOrFail();
+        $partner = Character::where('uuid', $request->partner_uuid)->firstOrFail();
+
         try {
-            $trade = $this->tradeService->createTrade(
-                (int)$request->input('initiator_id'),
-                (int)$request->input('partner_id')
-            );
+            $trade = $this->tradeService->createTrade($initiator, $partner);
+
             return response()->json([
                 'success' => true,
-                'trade_id' => $trade->id,
-                'message' => 'Обмен создан',
+                'trade' => [
+                    'uuid' => $trade->uuid,
+                    'status' => $trade->status,
+                ],
             ], 201);
         } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['error' => $e->getMessage()], 400);
         }
     }
 
-    public function addItem(Request $request, string $id): JsonResponse
+    public function addItem(Request $request, string $characterUuid): JsonResponse
     {
         $request->validate([
-            'user_id' => 'required|integer',
-            'template_id' => 'required|integer',
+            'trade_uuid' => 'required|string',
+            'item_uuid' => 'required|string',
+        ]);
+
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+        $trade = \App\Models\TradeOffer::where('uuid', $request->trade_uuid)->firstOrFail();
+
+        try {
+            $tradeItem = $this->tradeService->addItemToTrade(
+                $character,
+                $trade,
+                $request->item_uuid
+            );
+
+            return response()->json([
+                'success' => true,
+                'trade_item_uuid' => $tradeItem->uuid,
+            ]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 400);
+        }
+    }
+
+    public function addResource(Request $request, string $characterUuid): JsonResponse
+    {
+        $request->validate([
+            'trade_uuid' => 'required|string',
+            'template_slug' => 'required|string',
             'quantity' => 'required|integer|min:1',
         ]);
 
-        try {
-            $tradeId = (int)$id;
-            $userId = (int)$request->input('user_id');
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+        $trade = \App\Models\TradeOffer::where('uuid', $request->trade_uuid)->firstOrFail();
 
-            $this->tradeService->addItem(
-                $userId,
-                $tradeId,
-                (int)$request->input('template_id'),
-                (int)$request->input('quantity')
+        try {
+            $tradeItem = $this->tradeService->addResourceToTrade(
+                $character,
+                $trade,
+                $request->template_slug,
+                $request->quantity
             );
+
             return response()->json([
-                'message' => 'Предмет добавлен',
-                'trade' => $this->tradeService->getTrade($tradeId, $userId),
+                'success' => true,
+                'trade_item_uuid' => $tradeItem->uuid,
             ]);
         } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['error' => $e->getMessage()], 400);
         }
     }
 
-    public function reduceItem(Request $request, string $id, string $itemId): JsonResponse
+    public function confirm(Request $request, string $characterUuid): JsonResponse
     {
         $request->validate([
-            'user_id' => 'required|integer',
-            'quantity' => 'required|integer|min:1',
+            'trade_uuid' => 'required|string',
         ]);
 
-        try {
-            $tradeId = (int)$id;
-            $userId = (int)$request->input('user_id');
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+        $trade = \App\Models\TradeOffer::where('uuid', $request->trade_uuid)->firstOrFail();
 
-            $this->tradeService->reduceItem(
-                $userId,
-                $tradeId,
-                (int)$itemId,
-                (int)$request->input('quantity')
-            );
+        try {
+            $trade = $this->tradeService->confirmTrade($character, $trade);
+
             return response()->json([
-                'message' => 'Количество уменьшено',
-                'trade' => $this->tradeService->getTrade($tradeId, $userId),
+                'success' => true,
+                'trade' => [
+                    'uuid' => $trade->uuid,
+                    'status' => $trade->status,
+                    'initiator_accepted' => $trade->initiator_accepted,
+                    'partner_accepted' => $trade->partner_accepted,
+                ],
             ]);
         } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['error' => $e->getMessage()], 400);
         }
     }
 
-    public function removeItem(Request $request, string $id, string $itemId): JsonResponse
-    {
-        $request->validate(['user_id' => 'required|integer']);
-
-        try {
-            $tradeId = (int)$id;
-            $userId = (int)$request->input('user_id');
-
-            $this->tradeService->removeItem(
-                $userId,
-                $tradeId,
-                (int)$itemId
-            );
-            return response()->json([
-                'message' => 'Предмет убран',
-                'trade' => $this->tradeService->getTrade($tradeId, $userId),
-            ]);
-        } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
-        }
-    }
-
-    public function addGold(Request $request, string $id): JsonResponse
+    public function cancel(Request $request, string $characterUuid): JsonResponse
     {
         $request->validate([
-            'user_id' => 'required|integer',
-            'amount' => 'required|integer|min:0',
+            'trade_uuid' => 'required|string',
         ]);
 
-        try {
-            $tradeId = (int)$id;
-            $userId = (int)$request->input('user_id');
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+        $trade = \App\Models\TradeOffer::where('uuid', $request->trade_uuid)->firstOrFail();
 
-            $this->tradeService->addGold(
-                $userId,
-                $tradeId,
-                (int)$request->input('amount')
-            );
+        try {
+            $trade = $this->tradeService->cancelTrade($character, $trade);
+
             return response()->json([
-                'message' => 'Золото добавлено',
-                'trade' => $this->tradeService->getTrade($tradeId, $userId),
+                'success' => true,
+                'trade_uuid' => $trade->uuid,
+                'status' => $trade->status,
             ]);
         } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
-        }
-    }
-
-    public function accept(Request $request, string $id): JsonResponse
-    {
-        $request->validate(['user_id' => 'required|integer']);
-
-        try {
-            $tradeId = (int)$id;
-            $userId = (int)$request->input('user_id');
-
-            $trade = $this->tradeService->accept($userId, $tradeId);
-            return response()->json([
-                'message' => $trade->status === 'completed' ? 'Обмен завершён!' : 'Подтверждено',
-                'trade' => $this->tradeService->getTrade($tradeId, $userId),
-            ]);
-        } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
-        }
-    }
-
-    public function cancel(Request $request, string $id): JsonResponse
-    {
-        $request->validate(['user_id' => 'required|integer']);
-
-        try {
-            $tradeId = (int)$id;
-            $userId = (int)$request->input('user_id');
-
-            $this->tradeService->cancel($userId, $tradeId);
-            return response()->json(['message' => 'Обмен отменён']);
-        } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 422);
+            return response()->json(['error' => $e->getMessage()], 400);
         }
     }
 }

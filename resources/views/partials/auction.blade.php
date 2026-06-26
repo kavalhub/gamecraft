@@ -14,14 +14,6 @@
     </div>
 
     <div id="auction-market">
-        <div style="margin-bottom:15px">
-            <select id="filterType" style="padding:8px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.3);color:#fff;font-size:13px">
-                <option value="">Все типы</option>
-                <option value="material">Материалы</option>
-                <option value="equipment">Экипировка</option>
-                <option value="consumable">Расходники</option>
-            </select>
-        </div>
         <div id="marketList" style="display:flex;flex-direction:column;gap:10px;max-height:500px;overflow-y:auto"></div>
     </div>
 
@@ -34,7 +26,7 @@
             <div>
                 <label style="display:block;font-size:12px;color:#aaa;margin-bottom:6px">Выберите предмет:</label>
                 <div id="selectedItem" style="background:rgba(168,85,247,0.1);border:2px dashed rgba(168,85,247,0.4);border-radius:8px;padding:15px;text-align:center;min-height:80px;display:flex;flex-direction:column;align-items:center;justify-content:center">
-                    <div style="color:#888;font-size:12px">Перетащите предмет из инвентаря или кликните дважды</div>
+                    <div style="color:#888;font-size:12px">Двойной клик на предмете из инвентаря</div>
                 </div>
             </div>
             <div>
@@ -42,7 +34,10 @@
                 <input type="number" id="listPrice" min="1" value="100" style="width:100%;padding:10px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.3);color:#fff;font-size:14px">
             </div>
             <button id="btnSubmitLot" style="width:100%;padding:12px;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;text-transform:uppercase">
-                📢 Выставить на аукцион
+                📢 Подготовить лот
+            </button>
+            <button id="btnConfirmLot" style="width:100%;padding:12px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;text-transform:uppercase;display:none">
+                ✅ Подтвердить выставление
             </button>
         </div>
     </div>
@@ -52,30 +47,25 @@
     let auctionState = {
         currentTab: 'market',
         selectedItem: null,
+        preparedLot: null,
     };
 
-    // Глобальная функция для обработки drop/double-click из inventory
     window.handleAuctionDrop = function(item) {
-        if (item.type === 'recipe') {
-            showMsg('Чертежи нельзя продавать', 'error');
-            return;
-        }
-
+        // Любые предметы можно выставлять на аукцион
         auctionState.selectedItem = item;
         const box = document.getElementById('selectedItem');
         box.style.borderStyle = 'solid';
         box.style.background = 'rgba(168,85,247,0.2)';
         box.innerHTML = `
-            <div style="font-size:32px">${getIcon(item.type)}</div>
+            <div style="font-size:32px">${item.icon || (item.stage === 'blueprint' ? '📜' : '⚔️')}</div>
             <div style="font-size:13px;font-weight:600;margin-top:5px">${item.name}</div>
-            <div style="font-size:12px;color:#fbbf24">x${item.quantity}</div>
+            <div style="font-size:10px;color:#888;margin-top:3px">${item.stage === 'blueprint' ? 'Чертёж' : 'Предмет'}</div>
         `;
 
         switchAuctionTab('list');
     };
 
     function initAuction() {
-        // Навешиваем обработчики на вкладки
         document.querySelectorAll('.auction-tab').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const tab = e.currentTarget.dataset.tab;
@@ -83,8 +73,8 @@
             });
         });
 
-        document.getElementById('filterType').addEventListener('change', loadMarket);
-        document.getElementById('btnSubmitLot').addEventListener('click', submitLot);
+        document.getElementById('btnSubmitLot').addEventListener('click', prepareLot);
+        document.getElementById('btnConfirmLot').addEventListener('click', confirmLot);
 
         switchAuctionTab('market');
     }
@@ -92,7 +82,6 @@
     function switchAuctionTab(tab) {
         auctionState.currentTab = tab;
 
-        // Обновляем стили вкладок
         document.querySelectorAll('.auction-tab').forEach(t => {
             if (t.dataset.tab === tab) {
                 t.style.background = 'linear-gradient(135deg,#667eea,#764ba2)';
@@ -105,22 +94,18 @@
             }
         });
 
-        // Показываем нужную вкладку
         ['market', 'my', 'list'].forEach(t => {
             const el = document.getElementById('auction-' + t);
             if (el) el.style.display = (t === tab) ? 'block' : 'none';
         });
 
-        // Загружаем данные
         if (tab === 'market') loadMarket();
         if (tab === 'my') loadMyLots();
     }
 
     async function loadMarket() {
         try {
-            const type = document.getElementById('filterType').value;
-            const url = `/api/auction${type ? '?type=' + type : ''}`;
-            const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+            const res = await fetch('/api/auction/lots');
             const data = await res.json();
             renderMarket(data.lots || []);
         } catch (e) {
@@ -130,7 +115,7 @@
 
     async function loadMyLots() {
         try {
-            const res = await fetch(`/api/auction/my?user_id=${GameState.userId}`, { headers: { 'Accept': 'application/json' } });
+            const res = await fetch(`/api/auction/${GameState.characterUuid}/my-lots`);
             const data = await res.json();
             renderMyLots(data.lots || []);
         } catch (e) {
@@ -141,22 +126,21 @@
     function renderMarket(lots) {
         const el = document.getElementById('marketList');
         if (!lots.length) {
-            el.innerHTML = '<div style="text-align:center;padding:40px;color:#666">🏪 Аукцион пуст. Будь первым продавцом!</div>';
+            el.innerHTML = '<div style="text-align:center;padding:40px;color:#666">🏪 Аукцион пуст</div>';
             return;
         }
         el.innerHTML = lots.map(lot => `
             <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:15px;display:grid;grid-template-columns:50px 1fr auto auto;gap:15px;align-items:center">
-                <div style="font-size:36px;text-align:center">${getIcon(lot.item_type)}</div>
+                <div style="font-size:36px;text-align:center">${lot.template_icon || '📦'}</div>
                 <div>
-                    <div style="font-weight:600;font-size:14px">${lot.item_name} <span style="color:#fbbf24;font-weight:700">x${lot.quantity}</span></div>
+                    <div style="font-weight:600;font-size:14px">${lot.template_name}</div>
                     <div style="font-size:11px;color:#888">Продавец: ${lot.seller_name}</div>
                 </div>
                 <div style="text-align:right">
                     <div style="font-size:18px;font-weight:700;color:#fbbf24">${lot.price} 💰</div>
-                    <div style="font-size:10px;color:#888">продавец получит ${lot.seller_received}</div>
                 </div>
-                <button onclick="buyLot(${lot.id})" ${lot.seller_id == GameState.userId ? 'disabled style="opacity:0.4"' : ''} style="padding:10px 16px;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;text-transform:uppercase">
-                    ${lot.seller_id == GameState.userId ? 'Ваш лот' : 'Купить'}
+                <button onclick="buyLot('${lot.uuid}')" ${lot.seller_uuid === GameState.characterUuid ? 'disabled style="opacity:0.4"' : ''} style="padding:10px 16px;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">
+                    ${lot.seller_uuid === GameState.characterUuid ? 'Ваш лот' : 'Купить'}
                 </button>
             </div>
         `).join('');
@@ -173,24 +157,23 @@
             const statusText = { active: 'Активен', sold: 'Продан', cancelled: 'Отменён' }[lot.status];
             return `
                 <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:15px;display:grid;grid-template-columns:50px 1fr auto auto;gap:15px;align-items:center">
-                    <div style="font-size:36px;text-align:center">${getIcon(lot.item_type)}</div>
+                    <div style="font-size:36px;text-align:center">${lot.template_icon || '📦'}</div>
                     <div>
-                        <div style="font-weight:600;font-size:14px">${lot.item_name} <span style="color:#fbbf24;font-weight:700">x${lot.quantity}</span></div>
+                        <div style="font-weight:600;font-size:14px">${lot.template_name}</div>
                         <div style="font-size:11px;color:#888">
-                            <span style="display:inline-block;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;${statusClass}">${statusText}</span>
-                            ${lot.buyer_name ? ' • Покупатель: ' + lot.buyer_name : ''}
+                            <span style="display:inline-block;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;${statusClass}">${statusText}</span>
                         </div>
                     </div>
                     <div style="font-size:18px;font-weight:700;color:#fbbf24;text-align:right">${lot.price} 💰</div>
                     ${lot.status === 'active'
-                      ? `<button onclick="cancelLot(${lot.id})" style="padding:10px 16px;background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Отменить</button>`
+                      ? `<button onclick="cancelLot('${lot.uuid}')" style="padding:10px 16px;background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Отменить</button>`
                       : '<div></div>'}
                 </div>
             `;
         }).join('');
     }
 
-    async function submitLot() {
+    async function prepareLot() {
         if (!auctionState.selectedItem) {
             showMsg('Выберите предмет', 'error');
             return;
@@ -201,12 +184,11 @@
             return;
         }
         try {
-            const res = await fetch('/api/auction', {
+            const res = await fetch(`/api/auction/${GameState.characterUuid}/prepare`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({
-                    user_id: GameState.userId,
-                    instance_id: auctionState.selectedItem.instance_id,
+                    item_uuid: auctionState.selectedItem.uuid,
                     price: price,
                 })
             });
@@ -214,13 +196,33 @@
             if (data.error) {
                 showMsg(data.error, 'error');
             } else {
-                showMsg(`✅ Лот выставлен за ${price} 💰`, 'success');
+                auctionState.preparedLot = { item_uuid: auctionState.selectedItem.uuid, price };
+                showMsg(`✅ Лот подготовлен. Подтвердите выставление.`, 'success');
+                document.getElementById('btnConfirmLot').style.display = 'block';
+            }
+        } catch (e) {
+            showMsg('Ошибка: ' + e.message, 'error');
+        }
+    }
+
+    async function confirmLot() {
+        if (!auctionState.preparedLot) return;
+        try {
+            const res = await fetch(`/api/auction/${GameState.characterUuid}/confirm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify(auctionState.preparedLot)
+            });
+            const data = await res.json();
+            if (data.error) {
+                showMsg(data.error, 'error');
+            } else {
+                showMsg(`✅ Лот выставлен за ${auctionState.preparedLot.price} 💰`, 'success');
                 auctionState.selectedItem = null;
-                const box = document.getElementById('selectedItem');
-                box.style.borderStyle = 'dashed';
-                box.style.background = 'rgba(168,85,247,0.1)';
-                box.innerHTML = '<div style="color:#888;font-size:12px">Перетащите предмет из инвентаря или кликните дважды</div>';
+                auctionState.preparedLot = null;
+                document.getElementById('selectedItem').innerHTML = '<div style="color:#888;font-size:12px">Двойной клик на предмете из инвентаря</div>';
                 document.getElementById('listPrice').value = 100;
+                document.getElementById('btnConfirmLot').style.display = 'none';
                 switchAuctionTab('my');
             }
         } catch (e) {
@@ -228,40 +230,40 @@
         }
     }
 
-    window.buyLot = async function(lotId) {
-        if (!confirm('Купить этот лот?')) return;
+    window.buyLot = async function(lotUuid) {
         try {
-            const res = await fetch(`/api/auction/${lotId}/buy`, {
+            const res = await fetch(`/api/auction/${GameState.characterUuid}/buy`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                body: JSON.stringify({ user_id: GameState.userId })
+                body: JSON.stringify({ lot_uuid: lotUuid })
             });
             const data = await res.json();
             if (data.error) {
                 showMsg(data.error, 'error');
             } else {
-                showMsg(`✅ ${data.message}`, 'success');
+                showMsg(`✅ Куплено!`, 'success');
                 loadMarket();
+                loadPlayerData();
             }
         } catch (e) {
             showMsg('Ошибка: ' + e.message, 'error');
         }
     };
 
-    window.cancelLot = async function(lotId) {
-        if (!confirm('Отменить лот? Предмет вернётся в инвентарь.')) return;
+    window.cancelLot = async function(lotUuid) {
         try {
-            const res = await fetch(`/api/auction/${lotId}/cancel`, {
+            const res = await fetch(`/api/auction/${GameState.characterUuid}/cancel`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                body: JSON.stringify({ user_id: GameState.userId })
+                body: JSON.stringify({ lot_uuid: lotUuid })
             });
             const data = await res.json();
             if (data.error) {
                 showMsg(data.error, 'error');
             } else {
-                showMsg(`✅ ${data.message}`, 'success');
+                showMsg(`✅ Лот отменён`, 'success');
                 loadMyLots();
+                loadPlayerData();
             }
         } catch (e) {
             showMsg('Ошибка: ' + e.message, 'error');

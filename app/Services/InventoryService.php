@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Models\GameEvent;
+use App\Models\Character;
 use App\Models\Item;
 use App\Models\ItemTemplate;
-use App\Models\ResourceBalance;
+use App\Models\Resource;
+use App\Models\Slot;
+use App\Models\Storage;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class InventoryService
 {
@@ -16,299 +20,239 @@ class InventoryService
         private EventStore $eventStore
     ) {}
 
-    /**
-     * Добавляет ресурс или предмет в инвентарь
-     */
-    public function addItem(
-        int $userId,
-        int $templateId,
-        int $quantity = 1,
-        ?string $correlationId = null,
-        bool $recordEvent = true
-    ): Item|ResourceBalance {
-        $template = ItemTemplate::findOrFail($templateId);
-
-        if ($template->isResource()) {
-            return $this->addResource($userId, $templateId, $quantity, $correlationId, $recordEvent);
-        } else {
-            return $this->addEquipment($userId, $templateId, $quantity, $correlationId, $recordEvent);
-        }
-    }
-
-    /**
-     * Добавляет ресурс (материал, золото) в resource_balances
-     */
-    private function addResource(
-        int $userId,
-        int $templateId,
+    public function addResource(
+        Character $character,
+        string $templateSlug,
         int $quantity,
-        ?string $correlationId,
-        bool $recordEvent
-    ): ResourceBalance {
-        return DB::transaction(function () use ($userId, $templateId, $quantity, $correlationId, $recordEvent) {
-            $balance = ResourceBalance::firstOrCreate(
-                ['user_id' => $userId, 'template_id' => $templateId],
-                ['quantity' => 0]
-            );
+        ?string $storageType = 'inventory'
+    ): Resource {
+        return DB::transaction(function () use ($character, $templateSlug, $quantity, $storageType) {
+            $template = ItemTemplate::where('slug', $templateSlug)->firstOrFail();
+            $storage = $character->storages()->where('storage_type', $storageType)->firstOrFail();
+            
+            $storageSlotUuids = $storage->slots()->pluck('uuid');
+            
+            // Ищем существующий ресурс для стака
+            $existingResource = Resource::whereIn('slot_uuid', $storageSlotUuids)
+                ->where('template_slug', $templateSlug)
+                ->first();
 
-            $balance->quantity += $quantity;
-            $balance->save();
-
-            if ($recordEvent) {
+            if ($existingResource) {
+                $existingResource->quantity += $quantity;
+                $existingResource->save();
+                
                 $this->eventStore->recordResourceEvent(
-                    GameEvent::RESOURCE_RECEIVED,
-                    $userId,
-                    $templateId,
+                    'resource.received',
+                    $existingResource->uuid,
                     [
                         'quantity' => $quantity,
-                        'new_balance' => $balance->quantity,
-                        'reason' => 'add',
+                        'new_quantity' => $existingResource->quantity,
+                        'template_slug' => $templateSlug,
                     ],
-                    $correlationId
+                    $character->uuid
                 );
+
+                return $existingResource;
             }
 
-            return $balance;
+            // Находим свободный слот
+            $occupiedSlotUuids = Resource::pluck('slot_uuid')->merge(Item::pluck('slot_uuid'));
+            $slot = $storage->slots()
+                ->whereNotIn('uuid', $occupiedSlotUuids)
+                ->first();
+
+            if (!$slot) {
+                throw new \RuntimeException("Нет свободных слотов в хранилище {$storageType}");
+            }
+
+            $resource = Resource::create([
+                'uuid' => Str::uuid()->toString(),
+                'slot_uuid' => $slot->uuid,
+                'recipe_slug' => $templateSlug,
+                'template_slug' => $templateSlug,
+                'slot_type' => $template->slot_type,
+                'max_stack' => $template->max_stack,
+                'quantity' => $quantity,
+            ]);
+
+            $this->eventStore->recordResourceEvent(
+                'resource.received',
+                $resource->uuid,
+                [
+                    'quantity' => $quantity,
+                    'new_quantity' => $quantity,
+                    'template_slug' => $templateSlug,
+                ],
+                $character->uuid
+            );
+
+            return $resource;
         });
     }
 
-    /**
-     * Добавляет предмет (equipment, blueprint) в items
-     */
-    private function addEquipment(
-        int $userId,
-        int $templateId,
-        int $quantity,
-        ?string $correlationId,
-        bool $recordEvent
-    ): Item {
-        return DB::transaction(function () use ($userId, $templateId, $quantity, $correlationId, $recordEvent) {
-            // Для предметов quantity обычно 1, но поддерживаем стаки если is_stackable
-            $template = ItemTemplate::findOrFail($templateId);
+    public function removeResource(
+        Character $character,
+        string $templateSlug,
+        int $quantity
+    ): void {
+        DB::transaction(function () use ($character, $templateSlug, $quantity) {
+            $storageUuids = $character->storages()->pluck('uuid');
+            $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
             
-            if ($template->is_stackable) {
-                // Стакаемые предметы (например, чертежи)
-                $item = Item::where('owner_id', $userId)
-                    ->where('template_id', $templateId)
-                    ->whereNull('recipe_id') // Только базовые предметы без рецепта
-                    ->first();
+            $resources = Resource::whereIn('slot_uuid', $slotUuids)
+                ->where('template_slug', $templateSlug)
+                ->get();
 
-                if ($item) {
-                    $item->quantity += $quantity;
-                    $item->save();
-                } else {
-                    $item = Item::create([
-                        'template_id' => $templateId,
-                        'owner_id' => $userId,
-                        'quantity' => $quantity,
-                        'durability' => 100,
-                        'stats' => [],
-                    ]);
-                }
-            } else {
-                // Нестакаемые предметы — создаём отдельный экземпляр для каждого
-                $item = Item::create([
-                    'template_id' => $templateId,
-                    'owner_id' => $userId,
-                    'quantity' => 1,
-                    'durability' => 100,
-                    'stats' => [],
-                ]);
+            $totalAvailable = $resources->sum('quantity');
+            if ($totalAvailable < $quantity) {
+                throw new \RuntimeException("Недостаточно ресурса {$templateSlug}: есть {$totalAvailable}, нужно {$quantity}");
             }
 
-            if ($recordEvent) {
-                $this->eventStore->recordItemEvent(
-                    GameEvent::ITEM_RECEIVED,
-                    $userId,
-                    $templateId,
-                    $item->id,
+            $remaining = $quantity;
+            foreach ($resources as $resource) {
+                if ($remaining <= 0) break;
+
+                $toRemove = min($remaining, $resource->quantity);
+                $resource->quantity -= $toRemove;
+                $remaining -= $toRemove;
+
+                if ($resource->quantity <= 0) {
+                    $resourceUuid = $resource->uuid;
+                    $resource->delete();
+                } else {
+                    $resource->save();
+                    $resourceUuid = $resource->uuid;
+                }
+
+                $this->eventStore->recordResourceEvent(
+                    'resource.spent',
+                    $resourceUuid,
                     [
-                        'quantity' => $quantity,
-                        'reason' => 'add',
+                        'quantity' => $toRemove,
+                        'new_quantity' => max(0, $resource->quantity),
+                        'template_slug' => $templateSlug,
                     ],
-                    $correlationId
+                    $character->uuid
                 );
             }
+        });
+    }
+
+    public function getResourceQuantity(Character $character, string $templateSlug): int
+    {
+        $storageUuids = $character->storages()->pluck('uuid');
+        $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
+        
+        return (int) Resource::whereIn('slot_uuid', $slotUuids)
+            ->where('template_slug', $templateSlug)
+            ->sum('quantity');
+    }
+
+    public function addItem(
+        Character $character,
+        string $templateSlug,
+        string $stage = 'item',
+        ?string $customName = null,
+        ?string $recipeSlug = null,
+        ?array $materialsUsed = null,
+        ?array $stats = null,
+        ?string $storageType = 'inventory'
+    ): Item {
+        return DB::transaction(function () use ($character, $templateSlug, $stage, $customName, $recipeSlug, $materialsUsed, $stats, $storageType) {
+            $template = ItemTemplate::where('slug', $templateSlug)->firstOrFail();
+            $storage = $character->storages()->where('storage_type', $storageType)->firstOrFail();
+            
+            // Находим свободный слот подходящего типа
+            $occupiedSlotUuids = Item::pluck('slot_uuid')->merge(Resource::pluck('slot_uuid'));
+            $slot = $storage->slots()
+                ->where(function ($query) use ($template) {
+                    $query->whereNull('slot_type')
+                        ->orWhere('slot_type', $template->slot_type);
+                })
+                ->whereNotIn('uuid', $occupiedSlotUuids)
+                ->first();
+
+            if (!$slot) {
+                throw new \RuntimeException("Нет свободных слотов подходящего типа в хранилище {$storageType}");
+            }
+
+            $item = Item::create([
+                'uuid' => Str::uuid()->toString(),
+                'slot_uuid' => $slot->uuid,
+                'recipe_slug' => $recipeSlug, // может быть null
+                'template_slug' => $templateSlug,
+                'custom_name' => $customName,
+                'stage' => $stage,
+                'slot_type' => $template->slot_type,
+                'durability' => 100,
+                'materials_used' => $materialsUsed,
+                'stats' => $stats ?? $template->base_stats,
+            ]);
+
+            $this->eventStore->recordItemEvent(
+                'item.created',
+                $item->uuid,
+                [
+                    'template_slug' => $templateSlug,
+                    'stage' => $stage,
+                    'custom_name' => $customName,
+                    'recipe_slug' => $recipeSlug,
+                    'materials_used' => $materialsUsed,
+                ],
+                $character->uuid
+            );
 
             return $item;
         });
     }
 
-    /**
-     * Удаляет ресурс или предмет из инвентаря
-     */
-    public function removeItem(
-        int $userId,
-        int $instanceId,
-        int $quantity = 1,
-        ?string $correlationId = null,
-        string $reason = 'spend',
-        bool $recordEvent = true
-    ): void {
-        $item = Item::where('id', $instanceId)
-            ->where('owner_id', $userId)
-            ->firstOrFail();
-
-        $template = $item->template;
-
-        if ($template->isResource()) {
-            $this->removeResource($userId, $template->id, $quantity, $correlationId, $reason, $recordEvent);
-        } else {
-            $this->removeEquipment($userId, $instanceId, $quantity, $correlationId, $reason, $recordEvent);
-        }
-    }
-
-    /**
-     * Удаляет ресурс по template_id
-     */
-    public function removeResource(
-        int $userId,
-        int $templateId,
-        int $quantity,
-        ?string $correlationId = null,
-        string $reason = 'spend',
-        bool $recordEvent = true
-    ): void {
-        DB::transaction(function () use ($userId, $templateId, $quantity, $correlationId, $reason, $recordEvent) {
-            $balance = ResourceBalance::where('user_id', $userId)
-                ->where('template_id', $templateId)
-                ->first();
-
-            if (!$balance || $balance->quantity < $quantity) {
-                $available = $balance ? $balance->quantity : 0;
-                throw new \RuntimeException("Недостаточно ресурсов: есть {$available}, нужно {$quantity}");
-            }
-
-            $balance->quantity -= $quantity;
+    public function removeItem(Character $character, string $itemUuid): void
+    {
+        DB::transaction(function () use ($character, $itemUuid) {
+            $item = Item::where('uuid', $itemUuid)->firstOrFail();
             
-            if ($balance->quantity <= 0) {
-                $balance->delete();
-            } else {
-                $balance->save();
+            $slot = Slot::where('uuid', $item->slot_uuid)->firstOrFail();
+            $storage = Storage::where('uuid', $slot->storage_uuid)->firstOrFail();
+            
+            if ($storage->characters_uuid !== $character->uuid) {
+                throw new \RuntimeException("Предмет не принадлежит персонажу");
             }
 
-            if ($recordEvent) {
-                $this->eventStore->recordResourceEvent(
-                    GameEvent::RESOURCE_REMOVED,
-                    $userId,
-                    $templateId,
-                    [
-                        'quantity' => $quantity,
-                        'new_balance' => $balance->quantity ?? 0,
-                        'reason' => $reason,
-                    ],
-                    $correlationId
-                );
-            }
+            $item->delete();
+
+            $this->eventStore->recordItemEvent(
+                'item.destroyed',
+                $itemUuid,
+                [
+                    'template_slug' => $item->template_slug,
+                    'stage' => $item->stage,
+                ],
+                $character->uuid
+            );
         });
     }
 
-    /**
-     * Удаляет предмет по instance_id
-     */
-    private function removeEquipment(
-        int $userId,
-        int $instanceId,
-        int $quantity,
-        ?string $correlationId,
-        string $reason,
-        bool $recordEvent
-    ): void {
-        DB::transaction(function () use ($userId, $instanceId, $quantity, $correlationId, $reason, $recordEvent) {
-            $item = Item::where('id', $instanceId)
-                ->where('owner_id', $userId)
-                ->firstOrFail();
+    public function getCharacterItems(Character $character, ?string $storageType = null): Collection
+    {
+        $storageQuery = Storage::where('characters_uuid', $character->uuid);
+        if ($storageType) {
+            $storageQuery->where('storage_type', $storageType);
+        }
+        $storageUuids = $storageQuery->pluck('uuid');
+        $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
 
-            if ($item->quantity < $quantity) {
-                throw new \RuntimeException("Недостаточно предметов: есть {$item->quantity}, нужно {$quantity}");
-            }
-
-            $item->quantity -= $quantity;
-
-            if ($item->quantity <= 0) {
-                $item->delete();
-            } else {
-                $item->save();
-            }
-
-            if ($recordEvent) {
-                $this->eventStore->recordItemEvent(
-                    GameEvent::ITEM_REMOVED,
-                    $userId,
-                    $item->template_id,
-                    $instanceId,
-                    [
-                        'quantity' => $quantity,
-                        'reason' => $reason,
-                    ],
-                    $correlationId
-                );
-            }
-        });
+        return Item::whereIn('slot_uuid', $slotUuids)->with('template')->get();
     }
 
-    /**
-     * Получает инвентарь пользователя (ресурсы + предметы)
-     */
-    public function getUserInventory(int $userId): array
+    public function getCharacterResources(Character $character, ?string $storageType = null): Collection
     {
-        // Ресурсы
-        $resources = ResourceBalance::where('user_id', $userId)
-            ->where('quantity', '>', 0)
-            ->with('template')
-            ->get()
-            ->map(fn($balance) => [
-                'instance_id' => null,
-                'template_id' => $balance->template_id,
-                'name' => $balance->template->name,
-                'type' => $balance->template->type,
-                'icon' => $balance->template->icon,
-                'is_stackable' => true,
-                'quantity' => $balance->quantity,
-                'description' => $balance->template->description,
-                'stats' => [],
-            ]);
+        $storageQuery = Storage::where('characters_uuid', $character->uuid);
+        if ($storageType) {
+            $storageQuery->where('storage_type', $storageType);
+        }
+        $storageUuids = $storageQuery->pluck('uuid');
+        $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
 
-        // Предметы
-        $items = Item::where('owner_id', $userId)
-            ->with('template')
-            ->get()
-            ->map(fn($item) => [
-                'instance_id' => $item->id,
-                'template_id' => $item->template_id,
-                'name' => $item->template->name,
-                'type' => $item->template->type,
-                'icon' => $item->template->icon,
-                'is_stackable' => $item->template->is_stackable,
-                'quantity' => $item->template->is_stackable ? $item->quantity : null,
-                'description' => $item->template->description,
-                'stats' => $item->stats ?? [],
-            ]);
-
-        return $resources->merge($items)->values()->toArray();
-    }
-
-    /**
-     * Проверяет наличие ресурса
-     */
-    public function hasResource(int $userId, int $templateId, int $quantity): bool
-    {
-        $balance = ResourceBalance::where('user_id', $userId)
-            ->where('template_id', $templateId)
-            ->first();
-
-        return $balance && $balance->quantity >= $quantity;
-    }
-
-    /**
-     * Проверяет наличие предмета
-     */
-    public function hasItem(int $userId, int $instanceId, int $quantity = 1): bool
-    {
-        $item = Item::where('id', $instanceId)
-            ->where('owner_id', $userId)
-            ->first();
-
-        return $item && $item->quantity >= $quantity;
+        return Resource::whereIn('slot_uuid', $slotUuids)->with('template')->get();
     }
 }

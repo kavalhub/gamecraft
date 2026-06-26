@@ -5,72 +5,47 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Item;
-use App\Models\ItemTemplate;
-use App\Models\ResourceBalance;
-use App\Models\User;
+use App\Models\Character;
+use App\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class InventoryController extends Controller
 {
-    public function index(Request $request): JsonResponse
+    public function __construct(
+        private InventoryService $inventoryService
+    ) {}
+
+    public function index(string $characterUuid): JsonResponse
     {
-        $userId = $request->query('user_id');
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
 
-        if (!$userId) {
-            return response()->json(['error' => 'user_id required'], 400);
-        }
-
-        $user = User::find($userId);
-
-        if (!$user) {
-            return response()->json(['error' => 'User not found'], 404);
-        }
-
-        // Предметы (equipment, blueprint)
-        $items = Item::where('owner_id', $userId)
-            ->with('template')
-            ->get()
-            ->map(fn($item) => [
-                'instance_id' => $item->id,
-                'template_id' => $item->template_id,
-                'name' => $item->template->name,
-                'type' => $item->template->type,
-                'icon' => $item->template->icon,
-                'is_stackable' => $item->template->is_stackable,
-                'quantity' => $item->template->is_stackable ? $item->quantity : null,
-                'description' => $item->template->description,
-                'stats' => $item->stats ?? [],
-            ]);
-
-        // Ресурсы (material, consumable)
-        $resources = ResourceBalance::where('user_id', $userId)
-            ->where('quantity', '>', 0)
-            ->with('template')
-            ->get()
-            ->map(fn($balance) => [
-                'instance_id' => null,
-                'template_id' => $balance->template_id,
-                'name' => $balance->template->name,
-                'type' => $balance->template->type,
-                'icon' => $balance->template->icon,
-                'is_stackable' => true,
-                'quantity' => $balance->quantity,
-                'description' => $balance->template->description,
-                'stats' => [],
-            ]);
-
-        // Объединяем: сначала ресурсы, потом предметы
-        $inventory = $resources->merge($items)->values()->toArray();
+        $resources = $this->inventoryService->getCharacterResources($character);
+        $items = $this->inventoryService->getCharacterItems($character);
 
         return response()->json([
-            'user' => [
-                'id' => $user->id,
-                'username' => $user->name,
-                'gold' => $user->getGold(),
-            ],
-            'inventory' => $inventory,
+            'character_uuid' => $character->uuid,
+            'character_name' => $character->name,
+            'resources' => $resources->map(fn($r) => [
+                'uuid' => $r->uuid,
+                'template_slug' => $r->template_slug,
+                'name' => $r->template->name,
+                'icon' => $r->template->icon,
+                'quantity' => $r->quantity,
+                'slot_uuid' => $r->slot_uuid,
+            ]),
+            'items' => $items->map(fn($i) => [
+                'uuid' => $i->uuid,
+                'template_slug' => $i->template_slug,
+                'name' => $i->custom_name ?? $i->template->name,
+                'icon' => $i->template->icon,
+                'stage' => $i->stage,
+                'recipe_slug' => $i->recipe_slug,
+                'custom_name' => $i->custom_name,
+                'stats' => $i->stats,
+                'materials_used' => $i->materials_used,
+                'slot_uuid' => $i->slot_uuid,
+            ]),
         ]);
     }
 }

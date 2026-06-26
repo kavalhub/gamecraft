@@ -5,9 +5,10 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\GameEvent;
-use App\Models\ItemTemplate;
-use App\Models\ResourceBalance;
+use App\Models\Character;
+use App\Models\Resource;
+use App\Models\Slot;
+use App\Models\Storage;
 use App\Models\User;
 use App\Services\EventStore;
 use Illuminate\Http\JsonResponse;
@@ -28,52 +29,116 @@ class AuthController extends Controller
         try {
             return DB::transaction(function () use ($request) {
                 $user = User::create([
+                    'uuid' => Str::uuid()->toString(),
                     'name' => $request->username,
                     'email' => $request->username . '@game.local',
                     'password' => Hash::make($request->password),
                 ]);
 
-                // Начисляем 100 золота как ресурс
-                $goldTemplate = ItemTemplate::where('slug', 'gold')->first();
-                if ($goldTemplate) {
-                    ResourceBalance::create([
-                        'user_id' => $user->id,
-                        'template_id' => $goldTemplate->id,
-                        'quantity' => 100,
+                // Создаём персонажа
+                $character = Character::create([
+                    'uuid' => Str::uuid()->toString(),
+                    'user_uuid' => $user->uuid,
+                    'character_type' => 'player',
+                    'name' => $request->username,
+                    'active' => true,
+                ]);
+
+                // Создаём хранилища
+                $inventory = Storage::create([
+                    'uuid' => Str::uuid()->toString(),
+                    'characters_uuid' => $character->uuid,
+                    'storage_type' => 'inventory',
+                    'name' => 'Инвентарь',
+                    'active' => true,
+                ]);
+
+                $equipment = Storage::create([
+                    'uuid' => Str::uuid()->toString(),
+                    'characters_uuid' => $character->uuid,
+                    'storage_type' => 'equipment',
+                    'name' => 'Экипировка',
+                    'active' => true,
+                ]);
+
+                $bank = Storage::create([
+                    'uuid' => Str::uuid()->toString(),
+                    'characters_uuid' => $character->uuid,
+                    'storage_type' => 'bank',
+                    'name' => 'Банк',
+                    'active' => true,
+                ]);
+
+                // Создаём слоты
+                for ($i = 0; $i < 50; $i++) {
+                    Slot::create([
+                        'uuid' => Str::uuid()->toString(),
+                        'storage_uuid' => $inventory->uuid,
+                        'slot_type' => null,
                     ]);
                 }
+
+                $slotTypes = ['equipment_head', 'equipment_chest', 'equipment_legs', 'equipment_weapon', 'equipment_offhand', 'equipment_ring', 'equipment_ring', 'equipment_amulet'];
+                foreach ($slotTypes as $slotType) {
+                    Slot::create([
+                        'uuid' => Str::uuid()->toString(),
+                        'storage_uuid' => $equipment->uuid,
+                        'slot_type' => $slotType,
+                    ]);
+                }
+
+                for ($i = 0; $i < 100; $i++) {
+                    Slot::create([
+                        'uuid' => Str::uuid()->toString(),
+                        'storage_uuid' => $bank->uuid,
+                        'slot_type' => null,
+                    ]);
+                }
+
+                // Начисляем 100 золота
+                $goldSlot = $inventory->slots()->first();
+                Resource::create([
+                    'uuid' => Str::uuid()->toString(),
+                    'slot_uuid' => $goldSlot->uuid,
+                    'recipe_slug' => 'gold',
+                    'template_slug' => 'gold',
+                    'slot_type' => 'gold',
+                    'max_stack' => null,
+                    'quantity' => 100,
+                ]);
 
                 $correlationId = Str::uuid()->toString();
 
                 app(EventStore::class)->record(
-                    GameEvent::USER_REGISTERED,
+                    'user.registered',
                     'user',
-                    $user->id,
+                    $user->uuid,
                     [
                         'username' => $user->name,
                         'starting_gold' => 100,
                     ],
-                    $user->id,
+                    $user->uuid,
                     $correlationId
                 );
 
                 app(EventStore::class)->record(
-                    GameEvent::USER_GOLD_CHANGED,
-                    'user',
-                    $user->id,
+                    'character.created',
+                    'character',
+                    $character->uuid,
                     [
-                        'delta' => 100,
-                        'new_balance' => 100,
-                        'reason' => 'starting_bonus',
+                        'user_uuid' => $user->uuid,
+                        'name' => $character->name,
                     ],
-                    $user->id,
+                    $user->uuid,
                     $correlationId
                 );
 
                 return response()->json([
                     'message' => 'User registered successfully',
                     'user_id' => $user->id,
+                    'user_uuid' => $user->uuid,
                     'username' => $user->name,
+                    'character_uuid' => $character->uuid,
                 ], 201);
             });
         } catch (\Exception $e) {
@@ -93,9 +158,16 @@ class AuthController extends Controller
             return response()->json(['error' => 'User not found'], 404);
         }
 
+        $characters = $user->characters()->where('character_type', 'player')->get();
+
         return response()->json([
             'user_id' => $user->id,
+            'user_uuid' => $user->uuid,
             'username' => $user->name,
+            'characters' => $characters->map(fn($c) => [
+                'uuid' => $c->uuid,
+                'name' => $c->name,
+            ]),
         ]);
     }
 }

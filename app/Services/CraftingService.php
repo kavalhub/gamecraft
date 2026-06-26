@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Models\GameEvent;
+use App\Models\Character;
+use App\Models\Formula;
 use App\Models\Item;
 use App\Models\ItemTemplate;
 use App\Models\Recipe;
+use App\Models\Slot;
+use App\Models\Storage;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -18,218 +22,315 @@ class CraftingService
         private EventStore $eventStore
     ) {}
 
-    public function getRecipes(): array
+    public function getAvailableRecipes(Character $character): Collection
     {
-        return Recipe::with(['components.template', 'resultTemplate'])
-            ->get()
-            ->map(fn(Recipe $recipe) => [
-                'recipe_id' => $recipe->id,
-                'recipe_slug' => $recipe->slug,
-                'recipe_name' => $recipe->name,
-                'recipe_description' => $recipe->description,
-                'result_template_id' => $recipe->result_template_id,
-                'result_template_slug' => $recipe->resultTemplate->slug,
-                'result_quantity' => $recipe->result_quantity,
-                'result' => [
-                    'template_id' => $recipe->resultTemplate->id,
-                    'template_slug' => $recipe->resultTemplate->slug,
-                    'template_name' => $recipe->resultTemplate->name,
-                    'template_type' => $recipe->resultTemplate->type,
-                    'template_icon' => $recipe->resultTemplate->icon,
-                    'description' => $recipe->resultTemplate->description ?? '',
-                    'name' => $recipe->resultTemplate->name,
-                    'type' => $recipe->resultTemplate->type,
-                    'icon' => $recipe->resultTemplate->icon,
-                    'quantity' => $recipe->result_quantity,
-                ],
-                'components' => $recipe->components->map(fn($c) => [
-                    'template_id' => $c->template_id,
-                    'template_slug' => $c->template->slug,
-                    'template_name' => $c->template->name,
-                    'template_type' => $c->template->type,
-                    'template_icon' => $c->template->icon,
-                    'description' => $c->template->description ?? '',
-                    'name' => $c->template->name,
-                    'type' => $c->template->type,
-                    'icon' => $c->template->icon,
-                    'quantity' => $c->quantity,
-                ])->toArray(),
-            ])
-            ->toArray();
+        return Recipe::all()->map(function (Recipe $recipe) {
+            $craftFormula = $recipe->craftFormulas()->first();
+            return [
+                'slug' => $recipe->slug,
+                'type' => $recipe->type,
+                'name' => $recipe->name,
+                'description' => $recipe->description,
+                'craft_formula' => $craftFormula ? $craftFormula->formula : [],
+            ];
+        });
     }
 
-    public function craft(int $userId, int $recipeId, int $quantity = 1): Item
-    {
-        return DB::transaction(function () use ($userId, $recipeId, $quantity) {
-            $recipe = Recipe::with(['components.template', 'resultTemplate'])->findOrFail($recipeId);
+    public function craftResource(
+        Character $character,
+        string $recipeSlug,
+        int $times = 1
+    ): array {
+        return DB::transaction(function () use ($character, $recipeSlug, $times) {
+            $recipe = Recipe::where('slug', $recipeSlug)->where('type', 'resource')->firstOrFail();
+            $formula = $recipe->craftFormulas()->firstOrFail();
 
-            if (!$recipe->components || $recipe->components->isEmpty()) {
-                throw new \RuntimeException('Рецепт не имеет компонентов');
+            if ($times < 1) {
+                throw new \RuntimeException('Количество должно быть больше 0');
             }
 
-            if (!$recipe->resultTemplate) {
-                throw new \RuntimeException('Рецепт не имеет результата');
-            }
-
-            foreach ($recipe->components as $component) {
-                if (!$component->template) {
-                    throw new \RuntimeException('Компонент рецепта не имеет шаблона');
-                }
-
-                $needed = $component->quantity * $quantity;
-                $available = Item::where('owner_id', $userId)
-                    ->where('template_id', $component->template_id)
-                    ->sum('quantity');
-
+            $inputs = $formula->formula;
+            foreach ($inputs as $templateSlug => $quantity) {
+                $available = $this->inventoryService->getResourceQuantity($character, $templateSlug);
+                $needed = $quantity * $times;
                 if ($available < $needed) {
                     throw new \RuntimeException(
-                        "Недостаточно {$component->template->name}: нужно {$needed}, есть {$available}"
+                        "Недостаточно ресурса {$templateSlug}: есть {$available}, нужно {$needed}"
                     );
                 }
             }
 
-            $correlationId = Str::uuid()->toString();
-
-            foreach ($recipe->components as $component) {
-                $remaining = $component->quantity * $quantity;
-
-                $stacks = Item::where('owner_id', $userId)
-                    ->where('template_id', $component->template_id)
-                    ->orderBy('quantity', 'desc')
-                    ->get();
-
-                foreach ($stacks as $stack) {
-                    if ($remaining <= 0) break;
-                    $toRemove = min($remaining, $stack->quantity);
-                    $this->inventoryService->removeItem(
-                        $userId,
-                        $stack->id,
-                        $toRemove,
-                        $correlationId,
-                        'craft',
-                        false
-                    );
-                    $remaining -= $toRemove;
-                }
+            foreach ($inputs as $templateSlug => $quantity) {
+                $this->inventoryService->removeResource($character, $templateSlug, $quantity * $times);
             }
 
-            $resultQuantity = $recipe->result_quantity * $quantity;
-            $resultInstance = $this->inventoryService->addItem(
-                $userId,
-                $recipe->result_template_id,
-                $resultQuantity,
-                $correlationId,
-                false
+            $resultTemplateSlug = $this->determineResourceResult($recipeSlug);
+            $resultQuantity = $this->determineResourceResultQuantity($recipeSlug) * $times;
+
+            $result = $this->inventoryService->addResource(
+                $character,
+                $resultTemplateSlug,
+                $resultQuantity
             );
+
+            $correlationUuid = Str::uuid()->toString();
 
             $this->eventStore->record(
-                GameEvent::ITEM_CRAFTED,
-                'user',
-                $userId,
+                'resource.crafted',
+                'character',
+                $character->uuid,
                 [
-                    'recipe_id' => $recipeId,
-                    'quantity' => $resultQuantity,
-                    'result' => [
-                        'template_id' => $recipe->result_template_id,
-                        'template_name' => $recipe->resultTemplate->name,
-                        'template_type' => $recipe->resultTemplate->type,
-                        'template_icon' => $recipe->resultTemplate->icon,
-                        'description' => $recipe->resultTemplate->description ?? '',
-                        'instance_id' => $resultInstance->id,
-                        'stats' => $resultInstance->stats ?? [],
-                        'quantity' => $resultQuantity,
-                    ],
-                    'components' => $recipe->components->map(fn($c) => [
-                        'template_id' => $c->template_id,
-                        'template_name' => $c->template->name,
-                        'template_type' => $c->template->type,
-                        'template_icon' => $c->template->icon,
-                        'description' => $c->template->description ?? '',
-                        'quantity' => $c->quantity * $quantity,
-                    ])->toArray(),
+                    'recipe_slug' => $recipeSlug,
+                    'times' => $times,
+                    'inputs' => $inputs,
+                    'result_template_slug' => $resultTemplateSlug,
+                    'result_quantity' => $resultQuantity,
                 ],
-                $userId,
-                $correlationId
+                $character->uuid,
+                $correlationUuid
             );
 
-            return $resultInstance;
+            return [
+                'recipe' => $recipe,
+                'inputs' => $inputs,
+                'result_template_slug' => $resultTemplateSlug,
+                'result_quantity' => $resultQuantity,
+                'times' => $times,
+            ];
         });
     }
 
-    public function disassemble(int $userId, int $instanceId): array
-    {
-        return DB::transaction(function () use ($userId, $instanceId) {
-            $item = Item::where('id', $instanceId)
-                ->where('owner_id', $userId)
-                ->with('template')
+    public function craftItem(
+        Character $character,
+        string $recipeSlug,
+        string $blueprintItemUuid,
+        ?string $customName = null
+    ): Item {
+        return DB::transaction(function () use ($character, $recipeSlug, $blueprintItemUuid, $customName) {
+            $recipe = Recipe::where('slug', $recipeSlug)->where('type', 'blueprint')->firstOrFail();
+            $formula = $recipe->craftFormulas()->firstOrFail();
+
+            $blueprint = Item::where('uuid', $blueprintItemUuid)
+                ->where('stage', 'blueprint')
+                ->where('recipe_slug', $recipeSlug)
                 ->firstOrFail();
 
-            $materials = [];
-            $disassembleData = $item->template->disassemble_data;
-
-            // Если это строка — декодируем в массив
-            if (is_string($disassembleData)) {
-                $disassembleData = json_decode($disassembleData, true);
+            $blueprintSlot = Slot::where('uuid', $blueprint->slot_uuid)->firstOrFail();
+            $blueprintStorage = Storage::where('uuid', $blueprintSlot->storage_uuid)->firstOrFail();
+            if ($blueprintStorage->characters_uuid !== $character->uuid) {
+                throw new \RuntimeException('Чертёж не принадлежит персонажу');
             }
 
-            // Если null или не массив — предмет нельзя разобрать
-            if (!is_array($disassembleData) || empty($disassembleData)) {
-                throw new \RuntimeException('Этот предмет нельзя разобрать');
-            }
-
-            // disassemble_data теперь содержит slug'и
-            foreach ($disassembleData as $templateSlug => $quantity) {
-                $template = ItemTemplate::where('slug', $templateSlug)->first();
-                if (!$template) {
-                    throw new \RuntimeException("Шаблон с slug '{$templateSlug}' не найден");
+            $inputs = $formula->formula;
+            foreach ($inputs as $templateSlug => $quantity) {
+                $available = $this->inventoryService->getResourceQuantity($character, $templateSlug);
+                if ($available < $quantity) {
+                    throw new \RuntimeException(
+                        "Недостаточно ресурса {$templateSlug}: есть {$available}, нужно {$quantity}"
+                    );
                 }
-
-                $this->inventoryService->addItem(
-                    $userId,
-                    $template->id,
-                    $quantity,
-                    null,
-                    false
-                );
-
-                $materials[] = [
-                    'template_id' => $template->id,
-                    'template_slug' => $template->slug,
-                    'template_name' => $template->name,
-                    'template_type' => $template->type,
-                    'template_icon' => $template->icon,
-                    'description' => $template->description ?? '',
-                    'quantity' => $quantity,
-                ];
             }
 
-            $this->inventoryService->removeItem(
-                $userId,
-                $instanceId,
-                1,
-                null,
-                'disassemble',
-                false
-            );
+            $materialsUsed = [];
+            foreach ($inputs as $templateSlug => $quantity) {
+                $materialsUsed[$templateSlug] = $quantity;
+                $this->inventoryService->removeResource($character, $templateSlug, $quantity);
+            }
 
-            $correlationId = Str::uuid()->toString();
+            // Определяем template_slug для предмета (не blueprint!)
+            $itemTemplateSlug = $this->getResultTemplateSlug($recipeSlug);
+            $itemTemplate = ItemTemplate::where('slug', $itemTemplateSlug)->firstOrFail();
+
+            // Трансформируем чертёж в предмет
+            $blueprint->update([
+                'stage' => 'item',
+                'template_slug' => $itemTemplateSlug,
+                'slot_type' => $itemTemplate->slot_type,
+                'custom_name' => $customName ?? $this->generateItemName($recipe, $materialsUsed),
+                'materials_used' => $materialsUsed,
+                'stats' => $this->generateItemStats($itemTemplateSlug),
+            ]);
+
+            $correlationUuid = Str::uuid()->toString();
 
             $this->eventStore->record(
-                GameEvent::ITEM_DISASSEMBLED,
-                'user',
-                $userId,
+                'item.crafted',
+                'item',
+                $blueprint->uuid,
                 [
-                    'item_name' => $item->template->name,
-                    'item_type' => $item->template->type,
-                    'item_icon' => $item->template->icon,
-                    'description' => $item->template->description ?? '',
-                    'materials' => $materials,
+                    'recipe_slug' => $recipeSlug,
+                    'blueprint_uuid' => $blueprintItemUuid,
+                    'item_template_slug' => $itemTemplateSlug,
+                    'custom_name' => $blueprint->custom_name,
+                    'materials_used' => $materialsUsed,
+                    'stats' => $blueprint->stats,
                 ],
-                $userId,
-                $correlationId
+                $character->uuid,
+                $correlationUuid
             );
 
-            return $materials;
+            return $blueprint->fresh();
         });
+    }
+
+    public function disassembleItem(
+        Character $character,
+        string $itemUuid,
+        array $context = []
+    ): array {
+        return DB::transaction(function () use ($character, $itemUuid, $context) {
+            $item = Item::where('uuid', $itemUuid)
+                ->where('stage', 'item')
+                ->firstOrFail();
+
+            $slot = Slot::where('uuid', $item->slot_uuid)->firstOrFail();
+            $storage = Storage::where('uuid', $slot->storage_uuid)->firstOrFail();
+            if ($storage->characters_uuid !== $character->uuid) {
+                throw new \RuntimeException('Предмет не принадлежит персонажу');
+            }
+
+            $recipe = Recipe::where('slug', $item->recipe_slug)->firstOrFail();
+            $formula = $this->selectDisassembleFormula($recipe, $context);
+            if (!$formula) {
+                throw new \RuntimeException('Нет доступной формулы разбора');
+            }
+
+            $blueprintTemplateSlug = $this->getBlueprintTemplateSlug($recipe->slug);
+
+            $item->update([
+                'stage' => 'blueprint',
+                'template_slug' => $blueprintTemplateSlug,
+                'slot_type' => 'blueprint',
+                'custom_name' => null,
+                'materials_used' => null,
+                'stats' => null,
+            ]);
+
+            $returnedResources = [];
+            foreach ($formula->formula as $templateSlug => $quantity) {
+                $this->inventoryService->addResource($character, $templateSlug, $quantity);
+                $returnedResources[$templateSlug] = $quantity;
+            }
+
+            $correlationUuid = Str::uuid()->toString();
+
+            $this->eventStore->record(
+                'item.disassembled',
+                'item',
+                $item->uuid,
+                [
+                    'recipe_slug' => $recipe->slug,
+                    'formula_description' => $formula->description,
+                    'returned_resources' => $returnedResources,
+                ],
+                $character->uuid,
+                $correlationUuid
+            );
+
+            return [
+                'item' => $item->fresh(),
+                'formula' => $formula,
+                'returned_resources' => $returnedResources,
+            ];
+        });
+    }
+
+    public function createBlueprint(
+        Character $character,
+        string $recipeSlug
+    ): Item {
+        $recipe = Recipe::where('slug', $recipeSlug)->where('type', 'blueprint')->firstOrFail();
+        $templateSlug = $this->getBlueprintTemplateSlug($recipeSlug);
+
+        return $this->inventoryService->addItem(
+            $character,
+            $templateSlug,
+            'blueprint',
+            null,
+            $recipeSlug,
+            null,
+            null,
+            'inventory'
+        );
+    }
+
+    private function selectDisassembleFormula(Recipe $recipe, array $context = []): ?Formula
+    {
+        $formulas = $recipe->disassembleFormulas()->orderBy('priority')->get();
+
+        foreach ($formulas as $formula) {
+            if ($formula->shouldApply($context)) {
+                return $formula;
+            }
+        }
+
+        return null;
+    }
+
+    private function determineResourceResult(string $recipeSlug): string
+    {
+        $mapping = [
+            'craft_wooden_plank' => 'wooden_plank',
+            'craft_iron_ingot' => 'iron_ingot',
+        ];
+
+        return $mapping[$recipeSlug] ?? throw new \RuntimeException("Неизвестный ресурсный рецепт: {$recipeSlug}");
+    }
+
+    private function determineResourceResultQuantity(string $recipeSlug): int
+    {
+        $mapping = [
+            'craft_wooden_plank' => 5,
+            'craft_iron_ingot' => 2,
+        ];
+
+        return $mapping[$recipeSlug] ?? 1;
+    }
+
+    private function getBlueprintTemplateSlug(string $recipeSlug): string
+    {
+        $mapping = [
+            'craft_wooden_sword' => 'recipe_wooden_sword',
+            'craft_iron_sword' => 'recipe_iron_sword',
+        ];
+
+        return $mapping[$recipeSlug] ?? throw new \RuntimeException("Неизвестный blueprint рецепт: {$recipeSlug}");
+    }
+
+    private function getResultTemplateSlug(string $recipeSlug): string
+    {
+        $mapping = [
+            'craft_wooden_sword' => 'wooden_sword',
+            'craft_iron_sword' => 'iron_sword',
+        ];
+
+        return $mapping[$recipeSlug] ?? throw new \RuntimeException("Неизвестный результат для рецепта: {$recipeSlug}");
+    }
+
+    private function generateItemName(Recipe $recipe, array $materialsUsed): string
+    {
+        $templateSlug = $this->getResultTemplateSlug($recipe->slug);
+        $template = ItemTemplate::where('slug', $templateSlug)->first();
+        return $template ? $template->name : $recipe->name;
+    }
+
+    private function generateItemStats(string $templateSlug): ?array
+    {
+        $template = ItemTemplate::where('slug', $templateSlug)->first();
+
+        if (!$template || !$template->base_stats) {
+            return null;
+        }
+
+        $stats = [];
+        foreach ($template->base_stats as $statName => $range) {
+            if (is_array($range) && isset($range['min'], $range['max'])) {
+                $stats[$statName] = (int) round(($range['min'] + $range['max']) / 2);
+            } else {
+                $stats[$statName] = $range;
+            }
+        }
+
+        return $stats;
     }
 }
