@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\InventoryController;
 use App\Http\Controllers\Api\CraftingController;
 use App\Http\Controllers\Api\AuctionController;
 use App\Http\Controllers\Api\TradeController;
+use App\Http\Controllers\Api\SettingsController;
 use Illuminate\Support\Facades\Route;
 
 // Auth
@@ -36,3 +37,8 @@ Route::post('/trade/{characterUuid}/add-item', [TradeController::class, 'addItem
 Route::post('/trade/{characterUuid}/add-resource', [TradeController::class, 'addResource']);
 Route::post('/trade/{characterUuid}/confirm', [TradeController::class, 'confirm']);
 Route::post('/trade/{characterUuid}/cancel', [TradeController::class, 'cancel']);
+
+// Settings
+Route::get('/settings/{characterUuid}', [SettingsController::class, 'get']);
+Route::post('/settings/{characterUuid}', [SettingsController::class, 'set']);
+Route::post('/settings/{characterUuid}/multiple', [SettingsController::class, 'setMultiple']);
