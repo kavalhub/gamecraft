@@ -63,14 +63,27 @@ class TradeService
                 throw new \RuntimeException('Обмен не в статусе ожидания');
             }
 
-            $item = Item::where('uuid', $itemUuid)
-                ->where('stage', 'item')
-                ->whereNull('temporary_slot_uuid')
-                ->firstOrFail();
+            $item = Item::where('uuid', $itemUuid)->first();
+            
+            if (!$item) {
+                throw new \RuntimeException('Предмет не найден');
+            }
+            
+            if (!in_array($item->stage, ['item', 'blueprint'])) {
+                throw new \RuntimeException('Этот предмет нельзя обменять');
+            }
+            
+            if ($item->temporary_slot_uuid) {
+                throw new \RuntimeException('Предмет уже участвует в другом обмене или аукционе');
+            }
 
-            $slot = Slot::where('uuid', $item->slot_uuid)->firstOrFail();
-            $storage = Storage::where('uuid', $slot->storage_uuid)->firstOrFail();
-            if ($storage->characters_uuid !== $character->uuid) {
+            $slot = Slot::where('uuid', $item->slot_uuid)->first();
+            if (!$slot) {
+                throw new \RuntimeException('Слот предмета не найден');
+            }
+            
+            $storage = Storage::where('uuid', $slot->storage_uuid)->first();
+            if (!$storage || $storage->characters_uuid !== $character->uuid) {
                 throw new \RuntimeException('Предмет не принадлежит вам');
             }
 

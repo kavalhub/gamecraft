@@ -299,6 +299,81 @@
         ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+        /* Tooltip */
+        .tooltip {
+            position: fixed;
+            background: rgba(20, 20, 35, 0.98);
+            border: 2px solid rgba(102, 126, 234, 0.6);
+            border-radius: 8px;
+            padding: 12px 15px;
+            max-width: 300px;
+            z-index: 99999;
+            pointer-events: none;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            display: none;
+            font-size: 13px;
+        }
+        .tooltip.visible {
+            display: block;
+            animation: tooltipFadeIn 0.15s ease-out;
+        }
+        @keyframes tooltipFadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .tooltip-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .tooltip-icon { font-size: 28px; }
+        .tooltip-name { font-weight: 700; font-size: 15px; color: #fff; }
+        .tooltip-type { font-size: 11px; color: #888; text-transform: uppercase; margin-top: 2px; }
+        .tooltip-description { color: #bbb; font-size: 12px; line-height: 1.4; margin-bottom: 8px; font-style: italic; }
+        .tooltip-stats { display: flex; flex-direction: column; gap: 4px; }
+        .tooltip-stat { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+        .tooltip-stat-label { color: #888; }
+        .tooltip-stat-value { color: #10b981; font-weight: 600; }
+        .tooltip-quantity { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); text-align: center; font-size: 14px; color: #fbbf24; font-weight: 700; }
+
+        /* Mobile adaptation */
+        @media (max-width: 768px) {
+            .game-canvas {
+                bottom: 60px;
+            }
+            .toolbar {
+                height: 60px;
+                gap: 8px;
+                padding: 0 10px;
+            }
+            .tool-btn {
+                width: 50px;
+                height: 50px;
+            }
+            .tool-btn .icon { font-size: 20px; }
+            .tool-btn .label { font-size: 9px; }
+            .toolbar-separator { height: 30px; margin: 0 4px; }
+
+            .window {
+                width: 100% !important;
+                height: calc(100% - 60px) !important;
+                left: 0 !important;
+                top: 0 !important;
+                right: 0 !important;
+                border-radius: 0;
+            }
+            .window-header {
+                cursor: default;
+            }
+            #window-journal, #window-inventory {
+                width: 100% !important;
+                height: calc(100% - 60px) !important;
+            }
+        }
     </style>
     @stack('styles')
 </head>
@@ -384,10 +459,7 @@
             </div>
         </div>
         <div class="window-body">
-            <div style="text-align:center;padding:40px;color:#666">
-                <h2 style="color:#d4a574;margin-bottom:20px">🤝 Обмен между игроками</h2>
-                <p>Функция в разработке</p>
-            </div>
+            @include('partials.trade')
         </div>
     </div>
 </div>
@@ -422,6 +494,7 @@
 </nav>
 
 <div id="msg" class="msg"></div>
+<div id="itemTooltip" class="tooltip"></div>
 
 <script>
     window.GameState = {
@@ -606,6 +679,9 @@
             }
             if (name === 'workbench' && typeof window.initWorkbench === 'function') {
                 setTimeout(() => window.initWorkbench(), 50);
+            }
+            if (name === 'trade' && typeof window.initTrade === 'function') {
+                setTimeout(() => window.initTrade(), 50);
             }
         },
 
@@ -819,13 +895,289 @@
                      data-name="${item.name}"
                      data-stage="${item.stage || ''}"
                      data-recipe-slug="${item.recipe_slug || ''}"
-                     data-template-slug="${item.template_slug || ''}">
+                     data-template-slug="${item.template_slug || ''}"
+                     data-description="${item.description || ''}"
+                     data-stats='${JSON.stringify(item.stats || {})}'
+                     data-quantity="${item.quantity || 1}">
                     <div class="item-icon">${icon}</div>
                     ${qty}
                 </div>
             `;
         }).join('');
+
+        // Добавляю обработчики тултипа
+        el.querySelectorAll('.item').forEach(itemEl => {
+            itemEl.addEventListener('mouseenter', showItemTooltip);
+            itemEl.addEventListener('mouseleave', hideItemTooltip);
+            itemEl.addEventListener('mousemove', moveItemTooltip);
+        });
     }
+
+    function showItemTooltip(e) {
+        const tooltip = document.getElementById('itemTooltip');
+        const element = e.currentTarget;
+
+        const name = element.dataset.name;
+        const stage = element.dataset.stage;
+        const quantity = parseInt(element.dataset.quantity) || 1;
+        const description = element.dataset.description || '';
+        const stats = JSON.parse(element.dataset.stats || '{}');
+        const icon = element.querySelector('.item-icon').textContent;
+
+        let type = 'Предмет';
+        if (stage === 'blueprint') type = 'Чертёж';
+        else if (stage === 'item') type = 'Предмет';
+        else if (quantity > 1) type = 'Ресурс';
+
+        let html = `
+            <div class="tooltip-header">
+                <div class="tooltip-icon">${icon}</div>
+                <div>
+                    <div class="tooltip-name">${name}</div>
+                    <div class="tooltip-type">${type}</div>
+                </div>
+            </div>
+        `;
+
+        if (description) {
+            html += `<div class="tooltip-description">${description}</div>`;
+        }
+
+        if (Object.keys(stats).length > 0) {
+            html += '<div class="tooltip-stats">';
+            for (const [key, value] of Object.entries(stats)) {
+                const label = {
+                    attack: 'Атака',
+                    defense: 'Защита',
+                    health: 'Здоровье',
+                    durability: 'Прочность',
+                    level: 'Уровень',
+                    weight: 'Вес',
+                    value: 'Ценность'
+                }[key] || key;
+                html += `
+                    <div class="tooltip-stat">
+                        <span class="tooltip-stat-label">${label}:</span>
+                        <span class="tooltip-stat-value">${value}</span>
+                    </div>
+                `;
+            }
+            html += '</div>';
+        }
+
+        if (quantity > 1) {
+            html += `<div class="tooltip-quantity">Количество: ${quantity}</div>`;
+        }
+
+        tooltip.innerHTML = html;
+        tooltip.classList.add('visible');
+        moveItemTooltip(e);
+    }
+
+    function hideItemTooltip() {
+        const tooltip = document.getElementById('itemTooltip');
+        tooltip.classList.remove('visible');
+    }
+
+    function moveItemTooltip(e) {
+        const tooltip = document.getElementById('itemTooltip');
+        const offsetX = 15;
+        const offsetY = 15;
+
+        let x = e.clientX + offsetX;
+        let y = e.clientY + offsetY;
+
+        const rect = tooltip.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+
+        if (x + rect.width > viewportWidth) {
+            x = e.clientX - rect.width - offsetX;
+        }
+        if (y + rect.height > viewportHeight) {
+            y = e.clientY - rect.height - offsetY;
+        }
+
+        tooltip.style.left = x + 'px';
+        tooltip.style.top = y + 'px';
+    }
+
+    // ================================================================
+    //                     EVENT POLLER
+    // ================================================================
+    window.EventPoller = {
+        lastEventId: 0,
+        pollingInterval: null,
+        listeners: [],
+
+        start(characterUuid) {
+            this.characterUuid = characterUuid;
+            this.loadInitial();
+            this.pollingInterval = setInterval(() => this.poll(), 2000);
+        },
+
+        stop() {
+            if (this.pollingInterval) clearInterval(this.pollingInterval);
+        },
+
+        on(callback) {
+            this.listeners.push(callback);
+        },
+
+        async loadInitial() {
+            try {
+                const res = await fetch(`/api/events/${this.characterUuid}/latest?limit=30`);
+                const data = await res.json();
+                if (data.events && data.events.length > 0) {
+                    this.lastEventId = Math.max(...data.events.map(e => e.id));
+                }
+            } catch (e) { console.error('Events load error:', e); }
+        },
+
+        async poll() {
+            if (!this.characterUuid) return;
+            try {
+                const res = await fetch(`/api/events/${this.characterUuid}/latest?after_id=${this.lastEventId}`);
+                const data = await res.json();
+                if (data.events && data.events.length > 0) {
+                    data.events.forEach(e => {
+                        if (e.id > this.lastEventId) this.lastEventId = e.id;
+                    });
+                    this.listeners.forEach(cb => {
+                        try { cb(data.events); } catch (e) { console.error('Listener error:', e); }
+                    });
+                }
+            } catch (e) { console.error('Events poll error:', e); }
+        }
+    };
+
+    // ================================================================
+    //                     JOURNAL
+    // ================================================================
+    window.Journal = {
+        init() {
+            EventPoller.on((events) => {
+                events.forEach(e => this.addEvent(e, true));
+            });
+        },
+
+        async loadInitial() {
+            try {
+                const res = await fetch(`/api/events/${EventPoller.characterUuid}/latest?limit=30`);
+                const data = await res.json();
+                if (data.events && data.events.length > 0) {
+                    const list = document.getElementById('eventsList');
+                    list.innerHTML = '';
+                    data.events.forEach(e => this.addEvent(e, false));
+                } else {
+                    const list = document.getElementById('eventsList');
+                    list.innerHTML = '<div class="events-empty">Пока нет событий</div>';
+                }
+            } catch (e) { console.error('Journal load error:', e); }
+        },
+
+        addEvent(event, isNew) {
+            const list = document.getElementById('eventsList');
+            if (!list) return;
+            const empty = list.querySelector('.events-empty');
+            if (empty) empty.remove();
+
+            const formatted = this.formatEvent(event);
+            if (!formatted) return;
+
+            const el = document.createElement('div');
+            el.className = 'event-item';
+            el.innerHTML = `
+                <div class="event-header">
+                    <div>
+                        <span class="event-icon">${formatted.icon}</span>
+                        <span class="event-title">${formatted.title}</span>
+                    </div>
+                    <span class="event-time">${event.occurred_at}</span>
+                </div>
+                <div class="event-body">${formatted.body}</div>
+            `;
+            list.appendChild(el);
+
+            while (list.children.length > 50) list.removeChild(list.firstChild);
+            if (isNew) list.scrollTop = list.scrollHeight;
+        },
+
+        formatEvent(event) {
+            const p = event.payload || {};
+            switch (event.type) {
+                case 'user.registered':
+                    return { icon: '🎉', title: 'Регистрация', body: `Создан герой <b>${p.username || '???'}</b>` };
+                case 'item.received':
+                    return { icon: '📥', title: 'Получен предмет', body: `<b>${p.name || p.template_slug || '???'}</b> x${p.quantity || 1}` };
+                case 'item.removed':
+                    return { icon: '📤', title: 'Предмет изъят', body: `<b>${p.name || p.template_slug || '???'}</b> x${p.quantity || 1}` };
+                case 'item.crafted':
+                    return { icon: '⚒️', title: 'Крафт', body: `Создан <b>${p.name || '???'}</b>` };
+                case 'item.disassembled':
+                    return { icon: '🔧', title: 'Разборка', body: `<b>${p.item_name || '???'}</b> разобран` };
+                case 'auction.listed':
+                    return { icon: '📢', title: 'Лот выставлен', body: `<b>${p.template_slug || '???'}</b> за ${p.price || 0} 💰` };
+                case 'auction.purchase':
+                    return { icon: '🛒', title: 'Покупка', body: `Куплено <b>${p.template_slug || '???'}</b> за ${p.payment_amount || 0} 💰` };
+                case 'auction.sale':
+                    return { icon: '💰', title: 'Продажа', body: `Продано <b>${p.template_slug || '???'}</b> за ${p.payment_amount || 0} 💰` };
+                case 'auction.cancelled':
+                    return { icon: '❌', title: 'Лот отменён', body: `<b>${p.template_slug || '???'}</b>` };
+                case 'trade.created':
+                    return { icon: '🤝', title: 'Обмен создан', body: `С <b>${p.partner_name || '???'}</b>` };
+                case 'trade.completed':
+                    return { icon: '✨', title: 'Обмен завершён', body: `С <b>${p.partner_name || '???'}</b>` };
+                case 'trade.cancelled':
+                    return { icon: '❌', title: 'Обмен отменён', body: `ID: ${p.trade_uuid || '???'}` };
+                default:
+                    return { icon: '📌', title: event.type, body: JSON.stringify(p).slice(0, 100) };
+            }
+        }
+    };
+
+    // ================================================================
+    //                     UI UPDATER
+    // ================================================================
+    window.UIUpdater = {
+        init() {
+            EventPoller.on((events) => this.handle(events));
+        },
+
+        handle(events) {
+            let needsInventoryUpdate = false;
+            let needsAuctionUpdate = false;
+            let needsTradeUpdate = false;
+
+            events.forEach(e => {
+                if (['item.received', 'item.removed', 'item.crafted', 'item.disassembled'].includes(e.type)) {
+                    needsInventoryUpdate = true;
+                }
+                if (['auction.listed', 'auction.purchase', 'auction.sale', 'auction.cancelled'].includes(e.type)) {
+                    needsInventoryUpdate = true;
+                    needsAuctionUpdate = true;
+                }
+                if (['trade.created', 'trade.updated', 'trade.completed', 'trade.cancelled'].includes(e.type)) {
+                    needsTradeUpdate = true;
+                }
+            });
+
+            if (needsInventoryUpdate) {
+                setTimeout(() => loadPlayerData(), 100);
+            }
+            if (needsAuctionUpdate && WindowManager.isOpen('auction')) {
+                setTimeout(() => {
+                    if (typeof window.loadMarket === 'function') window.loadMarket();
+                    if (typeof window.loadMyLots === 'function') window.loadMyLots();
+                }, 150);
+            }
+            if (needsTradeUpdate && WindowManager.isOpen('trade')) {
+                setTimeout(() => {
+                    if (typeof window.loadTrades === 'function') window.loadTrades();
+                }, 150);
+            }
+        }
+    };
 
     document.addEventListener('DOMContentLoaded', async () => {
         const characterUuid = localStorage.getItem('characterUuid');
@@ -843,6 +1195,19 @@
 
         WindowManager.open('journal');
         WindowManager.open('inventory');
+
+        // Запускаем polling событий
+        EventPoller.start(characterUuid);
+        Journal.init();
+        Journal.loadInitial();
+        UIUpdater.init();
+
+        // Heartbeat каждые 30 секунд
+        setInterval(() => {
+            fetch(`/api/heartbeat/${characterUuid}`, { method: 'POST' }).catch(() => {});
+        }, 30000);
+        // Сразу отправляем
+        fetch(`/api/heartbeat/${characterUuid}`, { method: 'POST' }).catch(() => {});
 
         const inventoryContent = document.getElementById('inventoryContent');
         inventoryContent.addEventListener('dblclick', (e) => {
