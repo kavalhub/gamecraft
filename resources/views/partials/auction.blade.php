@@ -103,7 +103,7 @@
 
     window.loadMarket = async function() {
         try {
-            const res = await fetch('/api/auction/lots');
+            const res = await GameApi.fetch('/api/auction/lots');
             const data = await res.json();
             window.renderMarket(data.lots || []);
         } catch (e) {
@@ -113,7 +113,7 @@
 
     window.loadMyLots = async function() {
         try {
-            const res = await fetch(`/api/auction/${GameState.characterUuid}/my-lots`);
+            const res = await GameApi.fetch(`/api/auction/${GameState.characterUuid}/my-lots`);
             const data = await res.json();
             window.renderMyLots(data.lots || []);
         } catch (e) {
@@ -182,7 +182,7 @@
             return;
         }
         try {
-            const res = await fetch(`/api/auction/${GameState.characterUuid}/prepare`, {
+            const res = await GameApi.fetch(`/api/auction/${GameState.characterUuid}/prepare`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({
@@ -206,7 +206,7 @@
     window.confirmLot = async function() {
         if (!auctionState.preparedLot) return;
         try {
-            const res = await fetch(`/api/auction/${GameState.characterUuid}/confirm`, {
+            const res = await GameApi.fetch(`/api/auction/${GameState.characterUuid}/confirm`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify(auctionState.preparedLot)
@@ -230,7 +230,7 @@
 
     window.buyLot = async function(lotUuid) {
         try {
-            const res = await fetch(`/api/auction/${GameState.characterUuid}/buy`, {
+            const res = await GameApi.fetch(`/api/auction/${GameState.characterUuid}/buy`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({ lot_uuid: lotUuid })
@@ -250,7 +250,7 @@
 
     window.cancelLot = async function(lotUuid) {
         try {
-            const res = await fetch(`/api/auction/${GameState.characterUuid}/cancel`, {
+            const res = await GameApi.fetch(`/api/auction/${GameState.characterUuid}/cancel`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({ lot_uuid: lotUuid })

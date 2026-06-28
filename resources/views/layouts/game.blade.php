@@ -497,6 +497,39 @@
 <div id="itemTooltip" class="tooltip"></div>
 
 <script>
+    window.GameApi = {
+        get token() {
+            return localStorage.getItem('authToken');
+        },
+        headers(extra = {}) {
+            const headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                ...extra,
+            };
+            if (this.token) {
+                headers['Authorization'] = `Bearer ${this.token}`;
+            }
+            return headers;
+        },
+        async fetch(url, options = {}) {
+            const response = await fetch(url, {
+                ...options,
+                headers: this.headers(options.headers || {}),
+            });
+            if (response.status === 401) {
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('characterUuid');
+                localStorage.removeItem('username');
+                window.location.href = '/';
+            }
+            return response;
+        },
+        setToken(token) {
+            localStorage.setItem('authToken', token);
+        },
+    };
+
     window.GameState = {
         characterUuid: null,
         inventory: [],
@@ -747,7 +780,7 @@
             }
 
             try {
-                const res = await fetch(`/api/settings/${GameState.characterUuid}`);
+                const res = await GameApi.fetch(`/api/settings/${GameState.characterUuid}`);
                 const data = await res.json();
                 this.positions = data.settings?.window_positions || {};
                 
@@ -804,7 +837,7 @@
             console.log('Saving positions:', positions);
 
             try {
-                const res = await fetch(`/api/settings/${GameState.characterUuid}/multiple`, {
+                const res = await GameApi.fetch(`/api/settings/${GameState.characterUuid}/multiple`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ settings: { window_positions: positions } })
@@ -854,7 +887,7 @@
 
     async function loadPlayerData() {
         try {
-            const res = await fetch(`/api/inventory/${GameState.characterUuid}`);
+            const res = await GameApi.fetch(`/api/inventory/${GameState.characterUuid}`);
             const data = await res.json();
 
             document.getElementById('playerName').textContent = data.character_name;
@@ -872,7 +905,7 @@
 
     async function loadRecipes() {
         try {
-            const res = await fetch(`/api/crafting/${GameState.characterUuid}/recipes`);
+            const res = await GameApi.fetch(`/api/crafting/${GameState.characterUuid}/recipes`);
             const data = await res.json();
             GameState.recipes = data.recipes || [];
         } catch (e) {
@@ -913,16 +946,17 @@
         });
     }
 
-    function showItemTooltip(e) {
+    window.showItemTooltip = function(e) {
         const tooltip = document.getElementById('itemTooltip');
         const element = e.currentTarget;
 
-        const name = element.dataset.name;
-        const stage = element.dataset.stage;
+        const name = element.dataset.name || 'Предмет';
+        const stage = element.dataset.stage || 'item';
         const quantity = parseInt(element.dataset.quantity) || 1;
         const description = element.dataset.description || '';
         const stats = JSON.parse(element.dataset.stats || '{}');
-        const icon = element.querySelector('.item-icon').textContent;
+        const iconElement = element.querySelector('.item-icon');
+        const icon = iconElement ? iconElement.textContent : (stage === 'blueprint' ? '📜' : '📦');
 
         let type = 'Предмет';
         if (stage === 'blueprint') type = 'Чертёж';
@@ -974,12 +1008,12 @@
         moveItemTooltip(e);
     }
 
-    function hideItemTooltip() {
+    window.hideItemTooltip = function() {
         const tooltip = document.getElementById('itemTooltip');
         tooltip.classList.remove('visible');
     }
 
-    function moveItemTooltip(e) {
+    window.moveItemTooltip = function(e) {
         const tooltip = document.getElementById('itemTooltip');
         const offsetX = 15;
         const offsetY = 15;
@@ -1003,51 +1037,63 @@
     }
 
     // ================================================================
-    //                     EVENT POLLER
+    //                     WEBSOCKET CLIENT
     // ================================================================
     window.EventPoller = {
-        lastEventId: 0,
-        pollingInterval: null,
+        ws: null,
         listeners: [],
+        reconnectTimer: null,
+        reconnectAttempts: 0,
 
         start(characterUuid) {
+            window.characterUuid = characterUuid;
             this.characterUuid = characterUuid;
-            this.loadInitial();
-            this.pollingInterval = setInterval(() => this.poll(), 2000);
+            this.connect();
         },
 
         stop() {
-            if (this.pollingInterval) clearInterval(this.pollingInterval);
+            if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+            if (this.ws) { this.ws.close(); this.ws = null; }
         },
 
         on(callback) {
             this.listeners.push(callback);
         },
 
-        async loadInitial() {
-            try {
-                const res = await fetch(`/api/events/${this.characterUuid}/latest?limit=30`);
-                const data = await res.json();
-                if (data.events && data.events.length > 0) {
-                    this.lastEventId = Math.max(...data.events.map(e => e.id));
-                }
-            } catch (e) { console.error('Events load error:', e); }
-        },
+        connect() {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = `${protocol}//${location.host}/ws?character_uuid=${this.characterUuid}`;
+            console.log('WebSocket connecting to:', url);
 
-        async poll() {
-            if (!this.characterUuid) return;
-            try {
-                const res = await fetch(`/api/events/${this.characterUuid}/latest?after_id=${this.lastEventId}`);
-                const data = await res.json();
-                if (data.events && data.events.length > 0) {
-                    data.events.forEach(e => {
-                        if (e.id > this.lastEventId) this.lastEventId = e.id;
-                    });
+            this.ws = new WebSocket(url);
+
+            this.ws.onopen = () => {
+                console.log('WebSocket connected');
+                this.reconnectAttempts = 0;
+            };
+
+            this.ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'connected') return;
                     this.listeners.forEach(cb => {
-                        try { cb(data.events); } catch (e) { console.error('Listener error:', e); }
+                        try { cb([data]); } catch (e) { console.error('Listener error:', e); }
                     });
+                } catch (e) {
+                    console.error('WebSocket parse error:', e);
                 }
-            } catch (e) { console.error('Events poll error:', e); }
+            };
+
+            this.ws.onerror = (err) => {
+                console.error('WebSocket error');
+            };
+
+            this.ws.onclose = () => {
+                console.log('WebSocket closed, reconnecting...');
+                const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+                this.reconnectAttempts++;
+                this.reconnectTimer = setTimeout(() => this.connect(), delay);
+            };
         }
     };
 
@@ -1063,7 +1109,7 @@
 
         async loadInitial() {
             try {
-                const res = await fetch(`/api/events/${EventPoller.characterUuid}/latest?limit=30`);
+                const res = await GameApi.fetch(`/api/events/${EventPoller.characterUuid}/latest?limit=30`);
                 const data = await res.json();
                 if (data.events && data.events.length > 0) {
                     const list = document.getElementById('eventsList');
@@ -1181,7 +1227,8 @@
 
     document.addEventListener('DOMContentLoaded', async () => {
         const characterUuid = localStorage.getItem('characterUuid');
-        if (!characterUuid) {
+        const authToken = localStorage.getItem('authToken');
+        if (!characterUuid || !authToken) {
             window.location.href = '/';
             return;
         }
@@ -1197,6 +1244,10 @@
         WindowManager.open('inventory');
 
         // Запускаем polling событий
+        window.characterUuid = characterUuid;
+        if (window.tradeState) {
+            window.tradeState.characterUuid = characterUuid;
+        }
         EventPoller.start(characterUuid);
         Journal.init();
         Journal.loadInitial();
@@ -1204,10 +1255,9 @@
 
         // Heartbeat каждые 30 секунд
         setInterval(() => {
-            fetch(`/api/heartbeat/${characterUuid}`, { method: 'POST' }).catch(() => {});
+            GameApi.fetch(`/api/heartbeat/${characterUuid}`, { method: 'POST' }).catch(() => {});
         }, 30000);
-        // Сразу отправляем
-        fetch(`/api/heartbeat/${characterUuid}`, { method: 'POST' }).catch(() => {});
+        GameApi.fetch(`/api/heartbeat/${characterUuid}`, { method: 'POST' }).catch(() => {});
 
         const inventoryContent = document.getElementById('inventoryContent');
         inventoryContent.addEventListener('dblclick', (e) => {

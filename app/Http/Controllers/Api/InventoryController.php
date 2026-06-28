@@ -20,8 +20,8 @@ class InventoryController extends Controller
     {
         $character = Character::where('uuid', $characterUuid)->firstOrFail();
 
-        $resources = $this->inventoryService->getCharacterResources($character);
-        $items = $this->inventoryService->getCharacterItems($character);
+        $resources = $this->inventoryService->getCharacterResources($character)->whereNull('temporary_slot_uuid');
+        $items = $this->inventoryService->getCharacterItems($character)->whereNull('temporary_slot_uuid');
 
         return response()->json([
             'character_uuid' => $character->uuid,

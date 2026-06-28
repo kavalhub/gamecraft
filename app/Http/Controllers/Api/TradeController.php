@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\TradeUuidRequest;
 use App\Models\Character;
+use App\Models\TradeOffer;
 use App\Services\TradeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,158 +18,169 @@ class TradeController extends Controller
         private TradeService $tradeService
     ) {}
 
-    public function index(string $characterUuid): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+        /** @var Character $character */
+        $character = $request->attributes->get('character');
         $trades = $this->tradeService->getCharacterTrades($character);
 
         return response()->json([
-            'trades' => $trades->map(fn($trade) => [
-                'uuid' => $trade->uuid,
-                'initiator' => [
-                    'uuid' => $trade->initiator->uuid,
-                    'name' => $trade->initiator->name,
-                ],
-                'partner' => [
-                    'uuid' => $trade->partner->uuid,
-                    'name' => $trade->partner->name,
-                ],
-                'status' => $trade->status,
-                'initiator_accepted' => $trade->initiator_accepted,
-                'partner_accepted' => $trade->partner_accepted,
-                'items' => $trade->items->map(fn($item) => [
-                    'character_uuid' => $item->character_uuid,
-                    'item_uuid' => $item->item_uuid,
-                    'resource_uuid' => $item->resource_uuid,
-                    'quantity' => $item->quantity,
-                ]),
-            ]),
+            'trades' => $trades->map(fn (TradeOffer $trade) => $this->formatTrade($trade)),
         ]);
     }
 
-    public function create(Request $request, string $characterUuid): JsonResponse
+    public function getCurrentTrade(Request $request): JsonResponse
+    {
+        /** @var Character $character */
+        $character = $request->attributes->get('character');
+
+        $trade = TradeOffer::where('status', 'pending')
+            ->where(function ($q) use ($character) {
+                $q->where('initiator_uuid', $character->uuid)
+                    ->orWhere('partner_uuid', $character->uuid);
+            })
+            ->with(['initiator', 'partner', 'items.item.template', 'items.resource.template'])
+            ->first();
+
+        return response()->json([
+            'trade' => $trade ? $this->formatTrade($trade) : null,
+        ]);
+    }
+
+    public function create(Request $request): JsonResponse
     {
         $request->validate([
-            'partner_uuid' => 'required|string',
+            'partner_uuid' => 'required|string|exists:characters,uuid',
         ]);
 
-        $initiator = Character::where('uuid', $characterUuid)->firstOrFail();
+        /** @var Character $character */
+        $character = $request->attributes->get('character');
         $partner = Character::where('uuid', $request->partner_uuid)->firstOrFail();
 
         try {
-            $trade = $this->tradeService->createTrade($initiator, $partner);
+            $trade = $this->tradeService->createTrade($character, $partner);
 
             return response()->json([
                 'success' => true,
-                'trade' => [
-                    'uuid' => $trade->uuid,
-                    'status' => $trade->status,
-                ],
-            ], 201);
-        } catch (\RuntimeException $e) {
-            return response()->json(['error' => $e->getMessage()], 400);
-        }
-    }
-
-    public function addItem(Request $request, string $characterUuid): JsonResponse
-    {
-        $request->validate([
-            'trade_uuid' => 'required|string',
-            'item_uuid' => 'required|string',
-        ]);
-
-        $character = Character::where('uuid', $characterUuid)->firstOrFail();
-        $trade = \App\Models\TradeOffer::where('uuid', $request->trade_uuid)->firstOrFail();
-
-        try {
-            $tradeItem = $this->tradeService->addItemToTrade(
-                $character,
-                $trade,
-                $request->item_uuid
-            );
-
-            return response()->json([
-                'success' => true,
-                'trade_item_uuid' => $tradeItem->uuid,
+                'trade' => $this->formatTrade($trade->load(['initiator', 'partner', 'items'])),
             ]);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 400);
         }
     }
 
-    public function addResource(Request $request, string $characterUuid): JsonResponse
+    public function addItem(Request $request): JsonResponse
     {
         $request->validate([
-            'trade_uuid' => 'required|string',
+            'trade_uuid' => 'required|string|exists:trade_offers,uuid',
+            'item_uuid' => 'required|string|exists:items,uuid',
+        ]);
+
+        /** @var Character $character */
+        $character = $request->attributes->get('character');
+        $trade = TradeOffer::where('uuid', $request->trade_uuid)->firstOrFail();
+
+        try {
+            $this->tradeService->addItemToTrade($character, $trade, $request->item_uuid);
+
+            return response()->json(['success' => true]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 400);
+        }
+    }
+
+    public function addResource(Request $request): JsonResponse
+    {
+        $request->validate([
+            'trade_uuid' => 'required|string|exists:trade_offers,uuid',
             'template_slug' => 'required|string',
             'quantity' => 'required|integer|min:1',
         ]);
 
-        $character = Character::where('uuid', $characterUuid)->firstOrFail();
-        $trade = \App\Models\TradeOffer::where('uuid', $request->trade_uuid)->firstOrFail();
+        /** @var Character $character */
+        $character = $request->attributes->get('character');
+        $trade = TradeOffer::where('uuid', $request->trade_uuid)->firstOrFail();
 
         try {
-            $tradeItem = $this->tradeService->addResourceToTrade(
+            $this->tradeService->addResourceToTrade(
                 $character,
                 $trade,
                 $request->template_slug,
-                $request->quantity
+                (int) $request->quantity
             );
 
-            return response()->json([
-                'success' => true,
-                'trade_item_uuid' => $tradeItem->uuid,
-            ]);
+            return response()->json(['success' => true]);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 400);
         }
     }
 
-    public function confirm(Request $request, string $characterUuid): JsonResponse
+    public function confirm(TradeUuidRequest $request): JsonResponse
     {
-        $request->validate([
-            'trade_uuid' => 'required|string',
-        ]);
-
-        $character = Character::where('uuid', $characterUuid)->firstOrFail();
-        $trade = \App\Models\TradeOffer::where('uuid', $request->trade_uuid)->firstOrFail();
+        /** @var Character $character */
+        $character = $request->attributes->get('character');
+        $trade = TradeOffer::where('uuid', $request->trade_uuid)->firstOrFail();
 
         try {
             $trade = $this->tradeService->confirmTrade($character, $trade);
+            $trade->load(['initiator', 'partner', 'items.item.template', 'items.resource.template']);
 
             return response()->json([
                 'success' => true,
-                'trade' => [
-                    'uuid' => $trade->uuid,
-                    'status' => $trade->status,
-                    'initiator_accepted' => $trade->initiator_accepted,
-                    'partner_accepted' => $trade->partner_accepted,
-                ],
+                'trade' => $this->formatTrade($trade),
             ]);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 400);
         }
     }
 
-    public function cancel(Request $request, string $characterUuid): JsonResponse
+    public function cancel(TradeUuidRequest $request): JsonResponse
     {
-        $request->validate([
-            'trade_uuid' => 'required|string',
-        ]);
-
-        $character = Character::where('uuid', $characterUuid)->firstOrFail();
-        $trade = \App\Models\TradeOffer::where('uuid', $request->trade_uuid)->firstOrFail();
+        /** @var Character $character */
+        $character = $request->attributes->get('character');
+        $trade = TradeOffer::where('uuid', $request->trade_uuid)->firstOrFail();
 
         try {
-            $trade = $this->tradeService->cancelTrade($character, $trade);
+            $this->tradeService->cancelTrade($character, $trade);
 
-            return response()->json([
-                'success' => true,
-                'trade_uuid' => $trade->uuid,
-                'status' => $trade->status,
-            ]);
+            return response()->json(['success' => true]);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 400);
         }
+    }
+
+    private function formatTrade(TradeOffer $trade): array
+    {
+        $trade->loadMissing(['initiator', 'partner', 'items.item.template', 'items.resource.template']);
+
+        return [
+            'uuid' => $trade->uuid,
+            'status' => $trade->status,
+            'initiator_uuid' => $trade->initiator_uuid,
+            'partner_uuid' => $trade->partner_uuid,
+            'initiator_accepted' => $trade->initiator_accepted,
+            'partner_accepted' => $trade->partner_accepted,
+            'created_at' => $trade->created_at,
+            'initiator' => $trade->initiator ? [
+                'uuid' => $trade->initiator->uuid,
+                'name' => $trade->initiator->name,
+            ] : null,
+            'partner' => $trade->partner ? [
+                'uuid' => $trade->partner->uuid,
+                'name' => $trade->partner->name,
+            ] : null,
+            'items' => $trade->items->map(function ($item) {
+                return [
+                    'uuid' => $item->uuid,
+                    'character_uuid' => $item->character_uuid,
+                    'item_uuid' => $item->item_uuid,
+                    'resource_uuid' => $item->resource_uuid,
+                    'template_slug' => $item->template_slug
+                        ?? $item->item?->template_slug
+                        ?? $item->resource?->template_slug,
+                    'quantity' => $item->quantity,
+                ];
+            }),
+        ];
     }
 }

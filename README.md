@@ -1,60 +1,85 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Крафт-Мир
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Браузерная крафт-игра на Laravel 12 + Octane (Swoole).
 
-## About Laravel
+## Возможности
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- Slot-based инвентарь (инвентарь, экипировка, банк)
+- Крафт ресурсов, чертежей и предметов
+- Аукцион и P2P-обмен
+- Real-time события через WebSocket
+- Контент через `content/base.json`
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Требования
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- PHP 8.2+
+- MySQL
+- Composer, Node.js
+- Swoole (для Octane и WebSocket)
 
-## Learning Laravel
+## Установка
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+```bash
+composer install
+cp .env.example .env   # если ещё нет
+php artisan key:generate
+php artisan migrate --seed
+npm install && npm run build
+```
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## Запуск
 
-## Laravel Sponsors
+### Режим разработки
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+```bash
+composer dev
+```
 
-### Premium Partners
+### Octane (production-like)
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+```bash
+php artisan octane:start --server=swoole
+```
 
-## Contributing
+### WebSocket-сервер событий
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```bash
+php artisan websocket:serve --port=8001
+```
 
-## Code of Conduct
+## API и авторизация
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+Все игровые эндпоинты (кроме `/api/register` и `/api/login`) требуют Bearer-токен Sanctum.
 
-## Security Vulnerabilities
+```bash
+# Регистрация
+curl -X POST /api/register -d '{"username":"hero","password":"secret"}'
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+# Вход
+curl -X POST /api/login -d '{"username":"hero","password":"secret"}'
 
-## License
+# Запрос с токеном
+curl -H "Authorization: Bearer {token}" /api/inventory/{characterUuid}
+```
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
-test
+Маршруты с `{characterUuid}` проверяют, что персонаж принадлежит авторизованному пользователю.
+
+## Тесты
+
+```bash
+php artisan test
+```
+
+## Структура
+
+```
+app/Services/     — бизнес-логика (Inventory, Crafting, Auction, Trade)
+app/Services/EventStore.php — журнал игровых событий
+content/base.json — рецепты, шаблоны, NPC
+resources/views/  — Blade UI + клиентский JS
+```
+
+## Импорт контента
+
+Контент загружается при `php artisan db:seed` из `content/base.json`.
+Для обновления баланса отредактируйте JSON и перезапустите сидер.

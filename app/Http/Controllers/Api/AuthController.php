@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\LoginRequest;
+use App\Http\Requests\Api\RegisterRequest;
 use App\Models\Character;
 use App\Models\Resource;
 use App\Models\Slot;
@@ -12,20 +14,14 @@ use App\Models\Storage;
 use App\Models\User;
 use App\Services\EventStore;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
-    public function register(Request $request): JsonResponse
+    public function register(RegisterRequest $request): JsonResponse
     {
-        $request->validate([
-            'username' => 'required|string|min:3|max:50|unique:users,name',
-            'password' => 'required|string|min:4',
-        ]);
-
         try {
             return DB::transaction(function () use ($request) {
                 $user = User::create([
@@ -35,7 +31,6 @@ class AuthController extends Controller
                     'password' => Hash::make($request->password),
                 ]);
 
-                // Создаём персонажа
                 $character = Character::create([
                     'uuid' => Str::uuid()->toString(),
                     'user_uuid' => $user->uuid,
@@ -44,7 +39,6 @@ class AuthController extends Controller
                     'active' => true,
                 ]);
 
-                // Создаём хранилища
                 $inventory = Storage::create([
                     'uuid' => Str::uuid()->toString(),
                     'characters_uuid' => $character->uuid,
@@ -69,7 +63,6 @@ class AuthController extends Controller
                     'active' => true,
                 ]);
 
-                // Создаём слоты
                 for ($i = 0; $i < 50; $i++) {
                     Slot::create([
                         'uuid' => Str::uuid()->toString(),
@@ -95,7 +88,6 @@ class AuthController extends Controller
                     ]);
                 }
 
-                // Начисляем 100 золота
                 $goldSlot = $inventory->slots()->first();
                 Resource::create([
                     'uuid' => Str::uuid()->toString(),
@@ -108,8 +100,9 @@ class AuthController extends Controller
                 ]);
 
                 $correlationId = Str::uuid()->toString();
+                $eventStore = app(EventStore::class);
 
-                app(EventStore::class)->record(
+                $eventStore->record(
                     'user.registered',
                     'user',
                     $user->uuid,
@@ -121,7 +114,7 @@ class AuthController extends Controller
                     $correlationId
                 );
 
-                app(EventStore::class)->record(
+                $eventStore->record(
                     'character.created',
                     'character',
                     $character->uuid,
@@ -133,12 +126,15 @@ class AuthController extends Controller
                     $correlationId
                 );
 
+                $token = $user->createToken('game')->plainTextToken;
+
                 return response()->json([
                     'message' => 'User registered successfully',
                     'user_id' => $user->id,
                     'user_uuid' => $user->uuid,
                     'username' => $user->name,
                     'character_uuid' => $character->uuid,
+                    'token' => $token,
                 ], 201);
             });
         } catch (\Exception $e) {
@@ -146,17 +142,16 @@ class AuthController extends Controller
         }
     }
 
-    public function login(Request $request): JsonResponse
+    public function login(LoginRequest $request): JsonResponse
     {
-        $request->validate([
-            'username' => 'required|string',
-        ]);
-
         $user = User::where('name', $request->username)->first();
 
-        if (!$user) {
-            return response()->json(['error' => 'User not found'], 404);
+        if (!$user || !Hash::check($request->password, $user->password)) {
+            return response()->json(['error' => 'Неверное имя или пароль'], 401);
         }
+
+        $user->tokens()->delete();
+        $token = $user->createToken('game')->plainTextToken;
 
         $characters = $user->characters()->where('character_type', 'player')->get();
 
@@ -164,7 +159,8 @@ class AuthController extends Controller
             'user_id' => $user->id,
             'user_uuid' => $user->uuid,
             'username' => $user->name,
-            'characters' => $characters->map(fn($c) => [
+            'token' => $token,
+            'characters' => $characters->map(fn ($c) => [
                 'uuid' => $c->uuid,
                 'name' => $c->name,
             ]),

@@ -83,6 +83,10 @@
                 <label for="loginUsername">Имя героя</label>
                 <input type="text" id="loginUsername" name="username" required>
             </div>
+            <div class="form-group">
+                <label for="loginPassword">Пароль</label>
+                <input type="password" id="loginPassword" name="password" required minlength="4">
+            </div>
             <button type="submit" style="background:linear-gradient(135deg,#10b981,#059669)">Войти</button>
         </form>
     </div>
@@ -99,9 +103,12 @@
         setTimeout(() => messageDiv.classList.remove('show'), 5000);
     }
 
-    function goToGame(characterUuid, username) {
+    function goToGame(characterUuid, username, token) {
         localStorage.setItem('characterUuid', characterUuid);
         localStorage.setItem('username', username);
+        if (token) {
+            localStorage.setItem('authToken', token);
+        }
         showMessage(`✅ Добро пожаловать, ${username}!`, 'success');
         setTimeout(() => window.location.href = '/play', 1500);
     }
@@ -123,7 +130,7 @@
             const data = await response.json();
 
             if (response.ok && data.character_uuid) {
-                goToGame(data.character_uuid, data.username);
+                goToGame(data.character_uuid, data.username, data.token);
             } else {
                 showMessage(`❌ ${data.error || 'Ошибка'}`, 'error');
             }
@@ -135,6 +142,7 @@
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value;
 
         try {
             const response = await fetch('/api/login', {
@@ -143,14 +151,14 @@
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
                 },
-                body: JSON.stringify({ username })
+                body: JSON.stringify({ username, password })
             });
             const data = await response.json();
 
-            if (data.characters && data.characters.length > 0) {
-                goToGame(data.characters[0].uuid, data.username);
+            if (response.ok && data.characters && data.characters.length > 0) {
+                goToGame(data.characters[0].uuid, data.username, data.token);
             } else {
-                showMessage('❌ Пользователь не найден', 'error');
+                showMessage(`❌ ${data.error || 'Пользователь не найден'}`, 'error');
             }
         } catch (error) {
             showMessage(`❌ ${error.message}`, 'error');

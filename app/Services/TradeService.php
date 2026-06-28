@@ -28,6 +28,30 @@ class TradeService
             throw new \RuntimeException('Нельзя обмениваться с самим собой');
         }
 
+        // Проверяем что инициатор не участвует в других активных обменах
+        $initiatorHasActiveTrade = TradeOffer::where('status', 'pending')
+            ->where(function ($q) use ($initiator) {
+                $q->where('initiator_uuid', $initiator->uuid)
+                  ->orWhere('partner_uuid', $initiator->uuid);
+            })
+            ->exists();
+
+        if ($initiatorHasActiveTrade) {
+            throw new \RuntimeException('Вы уже участвуете в другом обмене');
+        }
+
+        // Проверяем что партнёр не участвует в других активных обменах
+        $partnerHasActiveTrade = TradeOffer::where('status', 'pending')
+            ->where(function ($q) use ($partner) {
+                $q->where('initiator_uuid', $partner->uuid)
+                  ->orWhere('partner_uuid', $partner->uuid);
+            })
+            ->exists();
+
+        if ($partnerHasActiveTrade) {
+            throw new \RuntimeException('Этот игрок уже участвует в другом обмене');
+        }
+
         return DB::transaction(function () use ($initiator, $partner) {
             $trade = TradeOffer::create([
                 'initiator_uuid' => $initiator->uuid,
@@ -158,12 +182,41 @@ class TradeService
                 ->firstOrFail();
 
             $existingTradeItem = TradeItem::where('trade_uuid', $trade->uuid)
-                ->where('resource_uuid', $resource->uuid)
+                ->where('template_slug', $templateSlug)
+                ->where('character_uuid', $character->uuid)
                 ->first();
 
             if ($existingTradeItem) {
-                throw new \RuntimeException('Ресурс уже в обмене');
+                // Обновляем количество
+                $existingTradeItem->update(['quantity' => $existingTradeItem->quantity + $quantity]);
+                
+                // Создаём temporary slot для нового количества
+                $tempSlot = TemporarySlot::create([
+                    'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                    'storage_uuid' => $resource->slot->storage_uuid,
+                    'character_uuid' => $character->uuid,
+                    'timestamps_end' => now()->addHours(24),
+                    'active' => true,
+                ]);
+                $resource->update(['temporary_slot_uuid' => $tempSlot->uuid]);
+                
+                // Обновляем количество в TradeItem
+                $existingTradeItem->update(['quantity' => $existingTradeItem->quantity + $quantity]);
+                
+                return $existingTradeItem;
             }
+            
+            // Создаём temporary slot
+            $tempSlot = TemporarySlot::create([
+                'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                'storage_uuid' => $resource->slot->storage_uuid,
+                'character_uuid' => $character->uuid,
+                'timestamps_end' => now()->addHours(24),
+                'active' => true,
+            ]);
+            
+            // Привязываем ресурс к temporary slot
+            $resource->update(['temporary_slot_uuid' => $tempSlot->uuid]);
 
             $tradeStorage = $this->getTradeStorage();
             $temporarySlot = TemporarySlot::create([
@@ -180,6 +233,7 @@ class TradeService
                 'character_uuid' => $character->uuid,
                 'item_uuid' => null,
                 'resource_uuid' => $resource->uuid,
+                'template_slug' => $templateSlug,
                 'quantity' => $quantity,
             ]);
 
@@ -302,10 +356,7 @@ class TradeService
             ->where('storage_type', 'inventory')
             ->firstOrFail();
 
-        $occupiedSlotUuids = Item::pluck('slot_uuid')->merge(Resource::pluck('slot_uuid'));
-        $freeSlot = $toInventory->slots()
-            ->whereNotIn('uuid', $occupiedSlotUuids)
-            ->first();
+        $freeSlot = $this->inventoryService->findFreeSlot($toInventory);
 
         if (!$freeSlot) {
             throw new \RuntimeException('У получателя нет свободных слотов');
@@ -340,10 +391,7 @@ class TradeService
                 ->where('storage_type', 'inventory')
                 ->firstOrFail();
 
-            $occupiedSlotUuids = Item::pluck('slot_uuid')->merge(Resource::pluck('slot_uuid'));
-            $freeSlot = $toInventory->slots()
-                ->whereNotIn('uuid', $occupiedSlotUuids)
-                ->first();
+            $freeSlot = $this->inventoryService->findFreeSlot($toInventory);
 
             if (!$freeSlot) {
                 throw new \RuntimeException('У получателя нет свободных слотов');
@@ -417,6 +465,36 @@ class TradeService
             }
 
             $trade->update(['status' => 'cancelled']);
+            
+            // Сбрасываем temporary_slot_uuid у всех предметов и ресурсов
+            $tradeItems = TradeItem::where('trade_uuid', $trade->uuid)->get();
+            foreach ($tradeItems as $tradeItem) {
+                if ($tradeItem->item_uuid) {
+                    Item::where('uuid', $tradeItem->item_uuid)->update(['temporary_slot_uuid' => null]);
+                } elseif ($tradeItem->resource_uuid) {
+                    Resource::where('uuid', $tradeItem->resource_uuid)->update(['temporary_slot_uuid' => null]);
+                }
+            }
+            
+            // Деактивируем temporary slots
+            $tempSlotUuids = TemporarySlot::where('active', true)
+                ->whereIn('uuid', function($q) use ($trade) {
+                    $q->select('temporary_slot_uuid')
+                      ->from('items')
+                      ->join('trade_items', 'items.uuid', '=', 'trade_items.item_uuid')
+                      ->where('trade_items.trade_uuid', $trade->uuid)
+                      ->whereNotNull('items.temporary_slot_uuid');
+                })->orWhereIn('uuid', function($q) use ($trade) {
+                    $q->select('temporary_slot_uuid')
+                      ->from('resources')
+                      ->join('trade_items', 'resources.uuid', '=', 'trade_items.resource_uuid')
+                      ->where('trade_items.trade_uuid', $trade->uuid)
+                      ->whereNotNull('resources.temporary_slot_uuid');
+                })->pluck('uuid');
+            
+            if ($tempSlotUuids->isNotEmpty()) {
+                TemporarySlot::whereIn('uuid', $tempSlotUuids)->update(['active' => false]);
+            }
 
             $this->eventStore->record(
                 'trade.cancelled',

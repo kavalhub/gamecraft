@@ -190,7 +190,7 @@
         const customName = document.getElementById('customName').value.trim();
 
         try {
-            const res = await fetch(`/api/crafting/${GameState.characterUuid}/craft-item`, {
+            const res = await GameApi.fetch(`/api/crafting/${GameState.characterUuid}/craft-item`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({
@@ -216,7 +216,7 @@
         if (!workbenchState.center) return;
 
         try {
-            const res = await fetch(`/api/crafting/${GameState.characterUuid}/disassemble`, {
+            const res = await GameApi.fetch(`/api/crafting/${GameState.characterUuid}/disassemble`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({

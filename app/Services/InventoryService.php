@@ -56,10 +56,7 @@ class InventoryService
             }
 
             // Находим свободный слот
-            $occupiedSlotUuids = Resource::pluck('slot_uuid')->merge(Item::pluck('slot_uuid'));
-            $slot = $storage->slots()
-                ->whereNotIn('uuid', $occupiedSlotUuids)
-                ->first();
+            $slot = $this->findFreeSlot($storage);
 
             if (!$slot) {
                 throw new \RuntimeException("Нет свободных слотов в хранилище {$storageType}");
@@ -163,14 +160,7 @@ class InventoryService
             $storage = $character->storages()->where('storage_type', $storageType)->firstOrFail();
             
             // Находим свободный слот подходящего типа
-            $occupiedSlotUuids = Item::pluck('slot_uuid')->merge(Resource::pluck('slot_uuid'));
-            $slot = $storage->slots()
-                ->where(function ($query) use ($template) {
-                    $query->whereNull('slot_type')
-                        ->orWhere('slot_type', $template->slot_type);
-                })
-                ->whereNotIn('uuid', $occupiedSlotUuids)
-                ->first();
+            $slot = $this->findFreeSlot($storage, $template->slot_type);
 
             if (!$slot) {
                 throw new \RuntimeException("Нет свободных слотов подходящего типа в хранилище {$storageType}");
@@ -254,5 +244,24 @@ class InventoryService
         $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
 
         return Resource::whereIn('slot_uuid', $slotUuids)->with('template')->get();
+    }
+
+    public function findFreeSlot(Storage $storage, ?string $slotType = null): ?Slot
+    {
+        $slotUuids = $storage->slots()->pluck('uuid');
+
+        $occupiedSlotUuids = Item::whereIn('slot_uuid', $slotUuids)
+            ->pluck('slot_uuid')
+            ->merge(Resource::whereIn('slot_uuid', $slotUuids)->pluck('slot_uuid'));
+
+        $query = $storage->slots()->whereNotIn('uuid', $occupiedSlotUuids);
+
+        if ($slotType !== null) {
+            $query->where(function ($q) use ($slotType) {
+                $q->whereNull('slot_type')->orWhere('slot_type', $slotType);
+            });
+        }
+
+        return $query->first();
     }
 }
