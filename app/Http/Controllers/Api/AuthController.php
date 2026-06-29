@@ -96,7 +96,7 @@ class AuthController extends Controller
                     'template_slug' => 'gold',
                     'slot_type' => 'gold',
                     'max_stack' => null,
-                    'quantity' => 100,
+                    'quantity' => 1000,
                 ]);
 
                 $correlationId = Str::uuid()->toString();

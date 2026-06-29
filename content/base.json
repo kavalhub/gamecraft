@@ -478,13 +478,13 @@
       "character_name": "Wulfric Goldsmyth",
       "template_slug": "recipe_wooden_sword",
       "quantity": 1,
-      "price": 50
+      "price": 10
     },
     {
       "character_name": "Wulfric Goldsmyth",
       "template_slug": "recipe_iron_sword",
       "quantity": 1,
-      "price": 200
+      "price": 10
     }
   ]
 }
