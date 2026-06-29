@@ -4,14 +4,20 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\CharacterHeartbeat;
+use App\Services\PresenceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class HeartbeatController extends Controller
 {
+    public function __construct(
+        private PresenceService $presenceService
+    ) {}
+
     public function ping(Request $request, string $characterUuid): JsonResponse
     {
-        CharacterHeartbeat::ping($characterUuid);
+        $this->presenceService->markOnline($characterUuid);
+
         return response()->json(['success' => true]);
     }
 

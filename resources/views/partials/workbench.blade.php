@@ -64,7 +64,21 @@
         const customNameInput = document.getElementById('customName');
         if (customNameInput) customNameInput.value = '';
 
-        if (item.stage === 'blueprint') {
+        function resolveMode(it) {
+            if (it.stage === 'blueprint') return 'craft';
+            if (it.stage === 'item') return 'disassemble';
+            const recipe = (GameState.recipes || []).find(r => r.slug === it.recipe_slug);
+            if (recipe && recipe.type === 'blueprint') return 'craft';
+            if (it.template_slug && String(it.template_slug).indexOf('recipe_') === 0) return 'craft';
+            if (it.template_slug && typeof window.findResourceCraftRecipe === 'function') {
+                const craftRecipe = window.findResourceCraftRecipe(it);
+                if (craftRecipe) return 'resource';
+            }
+            return null;
+        }
+
+        const mode = resolveMode(item);
+        if (mode === 'craft') {
             const recipe = GameState.recipes.find(r => r.slug === item.recipe_slug);
             if (!recipe) {
                 showMsg('Рецепт не найден для этого чертежа', 'error');
@@ -73,10 +87,19 @@
             workbenchState.center = item;
             workbenchState.mode = 'craft';
             workbenchState.recipe = recipe;
-        } else if (item.stage === 'item') {
+        } else if (mode === 'disassemble') {
             workbenchState.center = item;
             workbenchState.mode = 'disassemble';
             workbenchState.recipe = null;
+        } else if (mode === 'resource') {
+            const recipe = window.findResourceCraftRecipe(item);
+            if (!recipe) {
+                showMsg('Нет рецепта преобразования для этого ресурса', 'error');
+                return;
+            }
+            workbenchState.center = item;
+            workbenchState.mode = 'resource';
+            workbenchState.recipe = recipe;
         } else {
             showMsg('Можно положить только чертёж или предмет', 'error');
             return;
@@ -85,10 +108,14 @@
     };
 
     function initWorkbench() {
+        if (window._workbenchInitialized) return;
+        window._workbenchInitialized = true;
         document.getElementById('btnCraft').addEventListener('click', craftItem);
         document.getElementById('btnDisassemble').addEventListener('click', disassembleItem);
         document.getElementById('btnClearWorkbench').addEventListener('click', clearWorkbench);
     }
+
+    window.initWorkbench = initWorkbench;
 
     function renderWorkbench() {
         const craftMode = document.getElementById('craftMode');
@@ -99,17 +126,29 @@
         disassembleMode.style.display = 'none';
         emptyMode.style.display = 'none';
 
-        if (workbenchState.mode === 'craft') {
+        if (workbenchState.mode === 'craft' || workbenchState.mode === 'resource') {
             craftMode.style.display = 'block';
             renderCenterSlot();
             renderIngredientsList();
             renderResultSlot();
+            const btn = document.getElementById('btnCraft');
+            if (btn) {
+                btn.textContent = workbenchState.mode === 'resource' ? '🔄 Преобразовать' : '⚒️ Создать';
+            }
         } else if (workbenchState.mode === 'disassemble') {
             disassembleMode.style.display = 'block';
             renderCenterSlot();
             renderDisassembleResult();
         } else {
             emptyMode.style.display = 'block';
+            const slot = document.getElementById('centerSlot');
+            if (slot) {
+                slot.innerHTML = `
+                    <div style="font-size:11px;color:#aaa;text-transform:uppercase;margin-bottom:5px">Чертёж / Предмет</div>
+                    <div style="font-size:36px">?</div>
+                    <div style="font-size:11px;color:#888">Двойной клик на предмете из инвентаря</div>
+                `;
+            }
         }
     }
 
@@ -119,7 +158,7 @@
             const item = workbenchState.center;
             const icon = item.icon || (item.stage === 'blueprint' ? '📜' : '⚔️');
             slot.innerHTML = `
-                <div style="font-size:11px;color:#aaa;text-transform:uppercase;margin-bottom:5px">${workbenchState.mode === 'craft' ? 'Чертёж' : 'Предмет'}</div>
+                <div style="font-size:11px;color:#aaa;text-transform:uppercase;margin-bottom:5px">${workbenchState.mode === 'craft' ? 'Чертёж' : workbenchState.mode === 'resource' ? 'Ресурс' : 'Предмет'}</div>
                 <div style="font-size:36px">${icon}</div>
                 <div style="font-size:13px;font-weight:600;margin-top:5px">${item.name}</div>
             `;
@@ -181,11 +220,45 @@
 
     function clearWorkbench() {
         workbenchState = { center: null, mode: null, recipe: null };
+        const slot = document.getElementById('centerSlot');
+        if (slot) {
+            slot.innerHTML = `
+                <div style="font-size:11px;color:#aaa;text-transform:uppercase;margin-bottom:5px">Чертёж / Предмет</div>
+                <div style="font-size:36px">?</div>
+                <div style="font-size:11px;color:#888">Двойной клик на предмете из инвентаря</div>
+            `;
+        }
         renderWorkbench();
     }
 
     async function craftItem() {
-        if (!workbenchState.recipe || !workbenchState.center) return;
+        if (!workbenchState.recipe) return;
+
+        if (workbenchState.mode === 'resource') {
+            try {
+                const res = await GameApi.fetch(`/api/crafting/${GameState.characterUuid}/craft-resource`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({
+                        recipe_slug: workbenchState.recipe.slug,
+                        times: 1,
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    showMsg(data.error || data.message || 'Ошибка преобразования', 'error');
+                    return;
+                }
+                showMsg('✅ Ресурс преобразован', 'success');
+                clearWorkbench();
+                await loadPlayerData();
+            } catch (e) {
+                showMsg('Ошибка: ' + e.message, 'error');
+            }
+            return;
+        }
+
+        if (!workbenchState.center) return;
 
         const customName = document.getElementById('customName').value.trim();
 
@@ -200,12 +273,20 @@
                 })
             });
             const data = await res.json();
-            if (data.error) {
-                showMsg(data.error, 'error');
-            } else {
-                showMsg(`✅ Создано: ${data.item.custom_name || data.item.template_slug}`, 'success');
-                clearWorkbench();
-                loadPlayerData();
+            if (!res.ok || data.error) {
+                showMsg(data.error || data.message || 'Ошибка крафта', 'error');
+                return;
+            }
+            if (!data.item) {
+                showMsg('Сервер не вернул созданный предмет', 'error');
+                return;
+            }
+            showMsg(`✅ Создано: ${data.item.custom_name || data.item.template_slug}`, 'success');
+            clearWorkbench();
+            await loadPlayerData();
+            const refreshed = GameState.inventory.find(i => i.uuid === data.item.uuid);
+            if (refreshed && refreshed.stage === 'item') {
+                handleWorkbenchDrop(refreshed);
             }
         } catch (e) {
             showMsg('Ошибка: ' + e.message, 'error');
@@ -224,13 +305,13 @@
                 })
             });
             const data = await res.json();
-            if (data.error) {
-                showMsg(data.error, 'error');
-            } else {
-                showMsg(`✅ Разобрано. Получено: ${Object.entries(data.returned_resources).map(([k,v]) => `${k} x${v}`).join(', ')}`, 'success');
-                clearWorkbench();
-                loadPlayerData();
+            if (!res.ok || data.error) {
+                showMsg(data.error || data.message || 'Ошибка разборки', 'error');
+                return;
             }
+            showMsg(`✅ Разобрано. Получено: ${Object.entries(data.returned_resources || {}).map(([k,v]) => `${k} x${v}`).join(', ')}`, 'success');
+            clearWorkbench();
+            loadPlayerData();
         } catch (e) {
             showMsg('Ошибка: ' + e.message, 'error');
         }

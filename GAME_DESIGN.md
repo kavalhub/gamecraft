@@ -224,7 +224,7 @@ storages_type
   "slots": [
     {"slot_type": "material", "count": 20},
     {"slot_type": "equipment_head", "count": 1},
-    {"slot_type": null, "count": 50}
+    {"slot_type": null, "count": 36}
   ]
 }
 ```
@@ -233,7 +233,7 @@ storages_type
 
 | type | name | allowed_types |
 |------|------|---------------|
-| `inventory` | Инвентарь | `{"slots": [{"slot_type": null, "count": 50}]}` |
+| `inventory` | Инвентарь | `{"slots": [{"slot_type": null, "count": 36}]}` |
 | `equipment` | Экипировка | `{"slots": [{"slot_type": "equipment_head", "count": 1}, ...]}` |
 | `bank` | Банк | `{"slots": [{"slot_type": null, "count": 100}]}` |
 | `auction` | Аукцион | `null` (безлимит) |
@@ -365,6 +365,7 @@ temporary_slots
 ├── uuid : VARCHAR(36) (UNIQUE, UUIDv4)
 ├── storage_uuid : VARCHAR(36) (FK → storages.uuid)
 ├── character_uuid : VARCHAR(36) (FK → characters.uuid)
+├── slot_index : TINYINT (nullable, 0–19 для trade)
 ├── active : BOOLEAN (default: true)
 ├── timestamps
 ├── timestamps_end : TIMESTAMP (nullable)
@@ -652,6 +653,19 @@ game_events
 - `trade.created` — создание обмена
 - `trade.completed` — завершение обмена
 - `trade.cancelled` — отмена обмена
+- `presence.changed` — игрок вошёл в игру (после офлайн-паузы)
+
+**Публичные vs системные (UI «Чат» → вкладка «Журнал»):**
+
+Публичные типы задаются в `config/game_events.php` (`public_types`). Во вкладке «Журнал» показываются только публичные события **текущего персонажа** (до 20 последних): свои крафт, аукцион (только своя сторона сделки), вход в игру, завершённые обмены. События других игроков в журнал не попадают. Остальные типы — системные: используются для персонального polling, обновления инвентаря и внутренней логики.
+
+| Публичные (в персональном журнале) | Системные (примеры) |
+|-----------|---------------------|
+| `user.registered`, `auction.listed`, `auction.purchased`, `auction.sold`, `trade.completed`, `item.crafted`, `item.disassembled`, `presence.changed` | `trade.created`, `item.transferred`, `resource.received`, `auction.cancelled` |
+
+API: `GET /api/events/{uuid}/latest?visibility=public&limit=20` — персональный журнал персонажа `{uuid}`.
+
+**Фаза 2 — верстак:** целевой UI с типовыми слотами материалов по `craft_formula`, центральным слотом и preview stats из `materials_used` (см. §12–13).
 
 **Пример события:**
 ```json
@@ -899,7 +913,82 @@ resource (1) → (N) game_events (через aggregate_uuid)
 
 ---
 
+## 🗄️ Унифицированная система хранилищ (v3.1)
+
+### StorageProvisioningService
+
+Централизованное создание хранилищ и слотов по шаблону `storages_type.allowed_types`:
+
+| Тип | Слотов | Сетка UI |
+|-----|--------|----------|
+| `inventory` | **1 gold** (hidden) + **36** grid (4×9) | cols=4 |
+| `equipment` | 8 typed | — |
+| `bank` | 100 | — |
+| `trade` | **20 temporary_slots** на персонажа | cols=5 (5×4) |
+
+- `provisionDefaults(Character)` — при регистрации: inventory, equipment, bank
+- `grantStorage(Character, type)` — идемпотентная выдача хранилища
+- `ensureTradeStorage(Character)` — **lazy**: при первом обмене создаёт `storage_type=trade` и 20 `temporary_slots` с `slot_index` 0–19; событие `storage.trade_granted`
+
+### Спец-слоты (SpecialSlotService)
+
+Шаблон `storages_type.allowed_types.slots[]` поддерживает флаги:
+
+| Флаг | Назначение |
+|------|------------|
+| `hidden` | Не показывать в сетке (золото — chip в шапке) |
+| `priority_fill` | `addResource` сначала заполняет спец-слоты |
+| `auto_reclaim` | Возврат из trade → merge в спец-слот |
+
+Текущий инвентарь: `gold×1` (hidden, priority_fill, auto_reclaim) + `null×36` (сетка).
+
+- `GET /api/storage` → `grid_slots[]`, `special_slots[]`, `gold` (сумма в gold-слоте)
+- `relocateGoldToSpecialSlot` при загрузке layout сливает золото из сетки в спец-слот
+
+### StorageMoveService
+
+Единая точка перемещения между ячейками `Slot` (regular) и `TemporarySlot` (temporary):
+
+```
+POST /api/storage/{characterUuid}/move
+{ from_slot_uuid, to_slot_uuid, quantity? }
+```
+
+| Направление | Поведение |
+|-------------|-----------|
+| regular → regular | move / merge стаков / swap |
+| regular → temporary | overlay: `temporary_slot_uuid` ( `slot_uuid` не меняется ) |
+| temporary → regular | снятие overlay + опционально смена `slot_uuid` |
+| temporary → temporary | swap overlay внутри пула персонажа |
+
+### Обмен: overlay-модель
+
+- Пул из 20 `temporary_slots` закреплён за персонажем навсегда (lazy при первом обмене)
+- Предмет/ресурс физически остаётся в `slot_uuid` инвентаря
+- UI обмена читает occupant по `temporary_slot_uuid`
+- При завершении: `slot_uuid` → инвентарь партнёра, `temporary_slot_uuid = null`
+- При отмене: только `temporary_slot_uuid = null`
+
+### StorageLayoutService + API
+
+- `GET /api/storage/{uuid}?include=inventory,trade` — сетки слотов с occupants
+- `formatTradeSlotGrids()` — `my_trade_slots[20]` + `partner_trade_slots[20]` для TradeController
+
+---
+
 ## 📝 История изменений
+
+### v3.2 (28 июня 2026) — Спец-слоты
+- `SpecialSlotService`: priority_fill, auto_reclaim, hidden
+- Золото вынесено из сетки в gold-слот; шапка «💰 N» из API `gold`
+- Drag: обычный = весь стак; Shift+drag = модалка разделения
+
+### v3.1 (29 июня 2026) — Унифицированные хранилища
+- Инвентарь: 50 → **36 слотов** (4×9)
+- `StorageProvisioningService`, `StorageMoveService`, `StorageLayoutService`
+- Обмен переведён на persistent `temporary_slots` (overlay), убран system trade storage
+- Глобальный drag: `POST /api/storage/{uuid}/move`
+- `temporary_slots.slot_index` для стабильного порядка в UI
 
 ### v3.0 (27 июня 2026) — Финальная версия
 - Добавлены UUIDv4 для всех сущностей

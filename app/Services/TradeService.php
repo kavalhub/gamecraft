@@ -6,10 +6,10 @@ namespace App\Services;
 
 use App\Models\Character;
 use App\Models\Item;
-use App\Models\Resource;
+use App\Models\ItemTemplate;
+use App\Models\Resources;
 use App\Models\Slot;
 use App\Models\Storage;
-use App\Models\TemporarySlot;
 use App\Models\TradeOffer;
 use App\Models\TradeItem;
 use Illuminate\Support\Facades\DB;
@@ -19,7 +19,9 @@ class TradeService
 {
     public function __construct(
         private InventoryService $inventoryService,
-        private EventStore $eventStore
+        private EventStore $eventStore,
+        private ResourceStackingService $stackingService,
+        private StorageProvisioningService $provisioningService
     ) {}
 
     public function createTrade(Character $initiator, Character $partner): TradeOffer
@@ -28,11 +30,10 @@ class TradeService
             throw new \RuntimeException('Нельзя обмениваться с самим собой');
         }
 
-        // Проверяем что инициатор не участвует в других активных обменах
         $initiatorHasActiveTrade = TradeOffer::where('status', 'pending')
             ->where(function ($q) use ($initiator) {
                 $q->where('initiator_uuid', $initiator->uuid)
-                  ->orWhere('partner_uuid', $initiator->uuid);
+                    ->orWhere('partner_uuid', $initiator->uuid);
             })
             ->exists();
 
@@ -40,11 +41,10 @@ class TradeService
             throw new \RuntimeException('Вы уже участвуете в другом обмене');
         }
 
-        // Проверяем что партнёр не участвует в других активных обменах
         $partnerHasActiveTrade = TradeOffer::where('status', 'pending')
             ->where(function ($q) use ($partner) {
                 $q->where('initiator_uuid', $partner->uuid)
-                  ->orWhere('partner_uuid', $partner->uuid);
+                    ->orWhere('partner_uuid', $partner->uuid);
             })
             ->exists();
 
@@ -53,6 +53,9 @@ class TradeService
         }
 
         return DB::transaction(function () use ($initiator, $partner) {
+            $this->provisioningService->ensureTradeStorage($initiator);
+            $this->provisioningService->ensureTradeStorage($partner);
+
             $trade = TradeOffer::create([
                 'initiator_uuid' => $initiator->uuid,
                 'partner_uuid' => $partner->uuid,
@@ -88,15 +91,15 @@ class TradeService
             }
 
             $item = Item::where('uuid', $itemUuid)->first();
-            
+
             if (!$item) {
                 throw new \RuntimeException('Предмет не найден');
             }
-            
+
             if (!in_array($item->stage, ['item', 'blueprint'])) {
                 throw new \RuntimeException('Этот предмет нельзя обменять');
             }
-            
+
             if ($item->temporary_slot_uuid) {
                 throw new \RuntimeException('Предмет уже участвует в другом обмене или аукционе');
             }
@@ -105,7 +108,7 @@ class TradeService
             if (!$slot) {
                 throw new \RuntimeException('Слот предмета не найден');
             }
-            
+
             $storage = Storage::where('uuid', $slot->storage_uuid)->first();
             if (!$storage || $storage->characters_uuid !== $character->uuid) {
                 throw new \RuntimeException('Предмет не принадлежит вам');
@@ -119,15 +122,15 @@ class TradeService
                 throw new \RuntimeException('Предмет уже в обмене');
             }
 
-            $tradeStorage = $this->getTradeStorage();
-            $temporarySlot = TemporarySlot::create([
-                'storage_uuid' => $tradeStorage->uuid,
-                'character_uuid' => $character->uuid,
-                'active' => true,
-                'timestamps_end' => now()->addMinutes(10),
-            ]);
+            $this->provisioningService->ensureTradeStorage($character);
+            $this->provisioningService->ensureTradeStorage($this->getPartner($character, $trade));
 
-            $item->update(['temporary_slot_uuid' => $temporarySlot->uuid]);
+            $tradeTempSlot = $this->provisioningService->findFreeTradeTemporarySlot($character);
+            if (!$tradeTempSlot) {
+                throw new \RuntimeException('Нет свободных слотов в обмене');
+            }
+
+            $item->update(['temporary_slot_uuid' => $tradeTempSlot->uuid]);
 
             $tradeItem = TradeItem::create([
                 'trade_uuid' => $trade->uuid,
@@ -149,10 +152,12 @@ class TradeService
                 [
                     'character_uuid' => $character->uuid,
                     'item_uuid' => $itemUuid,
-                    'temporary_slot_uuid' => $temporarySlot->uuid,
+                    'temporary_slot_uuid' => $tradeTempSlot->uuid,
                 ],
                 $character->uuid
             );
+
+            $this->recordTradeUpdated($trade, $character);
 
             return $tradeItem;
         });
@@ -169,73 +174,41 @@ class TradeService
                 throw new \RuntimeException('Обмен не в статусе ожидания');
             }
 
+            if ($quantity < 1) {
+                throw new \RuntimeException('Количество должно быть больше 0');
+            }
+
             $available = $this->inventoryService->getResourceQuantity($character, $templateSlug);
             if ($available < $quantity) {
-                throw new \RuntimeException("Недостаточно ресурса {$templateSlug}: есть {$available}, нужно {$quantity}");
+                throw new \RuntimeException("Недостаточно ресурса {$templateSlug}: доступно {$available}, нужно {$quantity}");
             }
 
-            $storageUuids = $character->storages()->pluck('uuid');
-            $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
-            $resource = Resource::whereIn('slot_uuid', $slotUuids)
-                ->where('template_slug', $templateSlug)
-                ->whereNull('temporary_slot_uuid')
-                ->firstOrFail();
+            $this->provisioningService->ensureTradeStorage($character);
+            $this->provisioningService->ensureTradeStorage($this->getPartner($character, $trade));
 
-            $existingTradeItem = TradeItem::where('trade_uuid', $trade->uuid)
-                ->where('template_slug', $templateSlug)
-                ->where('character_uuid', $character->uuid)
-                ->first();
+            $template = ItemTemplate::where('slug', $templateSlug)->firstOrFail();
+            $chunks = $this->stackingService->split($quantity, $template->max_stack);
 
-            if ($existingTradeItem) {
-                // Обновляем количество
-                $existingTradeItem->update(['quantity' => $existingTradeItem->quantity + $quantity]);
-                
-                // Создаём temporary slot для нового количества
-                $tempSlot = TemporarySlot::create([
-                    'uuid' => (string) \Illuminate\Support\Str::uuid(),
-                    'storage_uuid' => $resource->slot->storage_uuid,
+            $lastTradeItem = null;
+
+            foreach ($chunks as $chunkQty) {
+                $tradeTempSlot = $this->provisioningService->findFreeTradeTemporarySlot($character);
+                if (!$tradeTempSlot) {
+                    throw new \RuntimeException('Нет свободных слотов в обмене');
+                }
+
+                $tradeResource = $this->reserveResourceForTrade($character, $templateSlug, $chunkQty);
+                $tradeResource->update(['temporary_slot_uuid' => $tradeTempSlot->uuid]);
+
+                $lastTradeItem = TradeItem::create([
+                    'trade_uuid' => $trade->uuid,
                     'character_uuid' => $character->uuid,
-                    'timestamps_end' => now()->addHours(24),
-                    'active' => true,
+                    'item_uuid' => null,
+                    'resource_uuid' => $tradeResource->uuid,
+                    'template_slug' => $templateSlug,
+                    'quantity' => $chunkQty,
                 ]);
-                $resource->update(['temporary_slot_uuid' => $tempSlot->uuid]);
-                
-                // Обновляем количество в TradeItem
-                $existingTradeItem->update(['quantity' => $existingTradeItem->quantity + $quantity]);
-                
-                return $existingTradeItem;
             }
-            
-            // Создаём temporary slot
-            $tempSlot = TemporarySlot::create([
-                'uuid' => (string) \Illuminate\Support\Str::uuid(),
-                'storage_uuid' => $resource->slot->storage_uuid,
-                'character_uuid' => $character->uuid,
-                'timestamps_end' => now()->addHours(24),
-                'active' => true,
-            ]);
-            
-            // Привязываем ресурс к temporary slot
-            $resource->update(['temporary_slot_uuid' => $tempSlot->uuid]);
-
-            $tradeStorage = $this->getTradeStorage();
-            $temporarySlot = TemporarySlot::create([
-                'storage_uuid' => $tradeStorage->uuid,
-                'character_uuid' => $character->uuid,
-                'active' => true,
-                'timestamps_end' => now()->addMinutes(10),
-            ]);
-
-            $resource->update(['temporary_slot_uuid' => $temporarySlot->uuid]);
-
-            $tradeItem = TradeItem::create([
-                'trade_uuid' => $trade->uuid,
-                'character_uuid' => $character->uuid,
-                'item_uuid' => null,
-                'resource_uuid' => $resource->uuid,
-                'template_slug' => $templateSlug,
-                'quantity' => $quantity,
-            ]);
 
             $trade->update([
                 'initiator_accepted' => false,
@@ -248,15 +221,16 @@ class TradeService
                 $trade->uuid,
                 [
                     'character_uuid' => $character->uuid,
-                    'resource_uuid' => $resource->uuid,
                     'template_slug' => $templateSlug,
                     'quantity' => $quantity,
-                    'temporary_slot_uuid' => $temporarySlot->uuid,
+                    'stacks' => count($chunks),
                 ],
                 $character->uuid
             );
 
-            return $tradeItem;
+            $this->recordTradeUpdated($trade, $character);
+
+            return $lastTradeItem;
         });
     }
 
@@ -295,6 +269,8 @@ class TradeService
                 $character->uuid
             );
 
+            $this->recordTradeUpdated($trade, $character);
+
             return $trade;
         });
     }
@@ -311,32 +287,12 @@ class TradeService
                 $item = Item::where('uuid', $tradeItem->item_uuid)->firstOrFail();
                 $this->transferItem($item, $fromCharacter, $toCharacter);
             } elseif ($tradeItem->resource_uuid) {
-                $resource = Resource::where('uuid', $tradeItem->resource_uuid)->firstOrFail();
+                $resource = Resources::where('uuid', $tradeItem->resource_uuid)->firstOrFail();
                 $this->transferResource($resource, $tradeItem->quantity, $fromCharacter, $toCharacter);
             }
         }
 
         $trade->update(['status' => 'completed']);
-
-        // Деактивируем все временные слоты
-        $temporarySlotUuids = [];
-        foreach ($tradeItems as $tradeItem) {
-            if ($tradeItem->item_uuid) {
-                $item = Item::where('uuid', $tradeItem->item_uuid)->first();
-                if ($item && $item->temporary_slot_uuid) {
-                    $temporarySlotUuids[] = $item->temporary_slot_uuid;
-                }
-            } elseif ($tradeItem->resource_uuid) {
-                $resource = Resource::where('uuid', $tradeItem->resource_uuid)->first();
-                if ($resource && $resource->temporary_slot_uuid) {
-                    $temporarySlotUuids[] = $resource->temporary_slot_uuid;
-                }
-            }
-        }
-
-        if (!empty($temporarySlotUuids)) {
-            TemporarySlot::whereIn('uuid', $temporarySlotUuids)->update(['active' => false]);
-        }
 
         $this->eventStore->record(
             'trade.completed',
@@ -356,13 +312,8 @@ class TradeService
             ->where('storage_type', 'inventory')
             ->firstOrFail();
 
-        $freeSlot = $this->inventoryService->findFreeSlot($toInventory);
+        $freeSlot = $this->getOrCreateSlot($toInventory);
 
-        if (!$freeSlot) {
-            throw new \RuntimeException('У получателя нет свободных слотов');
-        }
-
-        $oldSlotUuid = $item->slot_uuid;
         $item->update([
             'slot_uuid' => $freeSlot->uuid,
             'temporary_slot_uuid' => null,
@@ -375,7 +326,6 @@ class TradeService
             [
                 'from_character_uuid' => $from->uuid,
                 'to_character_uuid' => $to->uuid,
-                'from_slot_uuid' => $oldSlotUuid,
                 'to_slot_uuid' => $freeSlot->uuid,
                 'reason' => 'trade',
             ],
@@ -383,42 +333,23 @@ class TradeService
         );
     }
 
-    private function transferResource(Resource $resource, int $quantity, Character $from, Character $to): void
+    private function transferResource(Resources $resource, int $quantity, Character $from, Character $to): void
     {
-        // Если передаём всё количество ресурса
-        if ($quantity >= $resource->quantity) {
-            $toInventory = Storage::where('characters_uuid', $to->uuid)
-                ->where('storage_type', 'inventory')
-                ->firstOrFail();
+        $templateSlug = $resource->template_slug;
+        $resourceUuid = $resource->uuid;
 
-            $freeSlot = $this->inventoryService->findFreeSlot($toInventory);
+        $resource->delete();
 
-            if (!$freeSlot) {
-                throw new \RuntimeException('У получателя нет свободных слотов');
-            }
-
-            // Перемещаем весь ресурс
-            $resource->update([
-                'slot_uuid' => $freeSlot->uuid,
-                'temporary_slot_uuid' => null,
-            ]);
-        } else {
-            // Передаём часть количества
-            $resource->quantity -= $quantity;
-            $resource->save();
-
-            // Добавляем часть получателю
-            $this->inventoryService->addResource($to, $resource->template_slug, $quantity);
-        }
+        app(SpecialSlotService::class)->depositResource($to, $templateSlug, $quantity);
 
         $this->eventStore->record(
             'resource.transferred',
             'resource',
-            $resource->uuid,
+            $resourceUuid,
             [
                 'from_character_uuid' => $from->uuid,
                 'to_character_uuid' => $to->uuid,
-                'template_slug' => $resource->template_slug,
+                'template_slug' => $templateSlug,
                 'quantity' => $quantity,
                 'reason' => 'trade',
             ],
@@ -438,63 +369,24 @@ class TradeService
             }
 
             $tradeItems = TradeItem::where('trade_uuid', $trade->uuid)->get();
-            $temporarySlotUuids = [];
 
             foreach ($tradeItems as $tradeItem) {
                 if ($tradeItem->item_uuid) {
                     $item = Item::where('uuid', $tradeItem->item_uuid)->first();
                     if ($item) {
-                        if ($item->temporary_slot_uuid) {
-                            $temporarySlotUuids[] = $item->temporary_slot_uuid;
-                        }
                         $item->update(['temporary_slot_uuid' => null]);
                     }
                 } elseif ($tradeItem->resource_uuid) {
-                    $resource = Resource::where('uuid', $tradeItem->resource_uuid)->first();
+                    $resource = Resources::where('uuid', $tradeItem->resource_uuid)->first();
                     if ($resource) {
-                        if ($resource->temporary_slot_uuid) {
-                            $temporarySlotUuids[] = $resource->temporary_slot_uuid;
-                        }
                         $resource->update(['temporary_slot_uuid' => null]);
                     }
                 }
             }
 
-            if (!empty($temporarySlotUuids)) {
-                TemporarySlot::whereIn('uuid', $temporarySlotUuids)->update(['active' => false]);
-            }
+            TradeItem::where('trade_uuid', $trade->uuid)->delete();
 
             $trade->update(['status' => 'cancelled']);
-            
-            // Сбрасываем temporary_slot_uuid у всех предметов и ресурсов
-            $tradeItems = TradeItem::where('trade_uuid', $trade->uuid)->get();
-            foreach ($tradeItems as $tradeItem) {
-                if ($tradeItem->item_uuid) {
-                    Item::where('uuid', $tradeItem->item_uuid)->update(['temporary_slot_uuid' => null]);
-                } elseif ($tradeItem->resource_uuid) {
-                    Resource::where('uuid', $tradeItem->resource_uuid)->update(['temporary_slot_uuid' => null]);
-                }
-            }
-            
-            // Деактивируем temporary slots
-            $tempSlotUuids = TemporarySlot::where('active', true)
-                ->whereIn('uuid', function($q) use ($trade) {
-                    $q->select('temporary_slot_uuid')
-                      ->from('items')
-                      ->join('trade_items', 'items.uuid', '=', 'trade_items.item_uuid')
-                      ->where('trade_items.trade_uuid', $trade->uuid)
-                      ->whereNotNull('items.temporary_slot_uuid');
-                })->orWhereIn('uuid', function($q) use ($trade) {
-                    $q->select('temporary_slot_uuid')
-                      ->from('resources')
-                      ->join('trade_items', 'resources.uuid', '=', 'trade_items.resource_uuid')
-                      ->where('trade_items.trade_uuid', $trade->uuid)
-                      ->whereNotNull('resources.temporary_slot_uuid');
-                })->pluck('uuid');
-            
-            if ($tempSlotUuids->isNotEmpty()) {
-                TemporarySlot::whereIn('uuid', $tempSlotUuids)->update(['active' => false]);
-            }
 
             $this->eventStore->record(
                 'trade.cancelled',
@@ -506,6 +398,8 @@ class TradeService
                 $character->uuid
             );
 
+            $this->recordTradeUpdated($trade, $character);
+
             return $trade;
         });
     }
@@ -514,14 +408,102 @@ class TradeService
     {
         return TradeOffer::where('initiator_uuid', $character->uuid)
             ->orWhere('partner_uuid', $character->uuid)
-            ->with(['initiator', 'partner', 'items'])
+            ->with(['initiator', 'partner', 'items.item.template', 'items.resource'])
             ->orderBy('created_at', 'desc')
             ->get();
+    }
+
+    private function reserveResourceForTrade(Character $character, string $templateSlug, int $quantity): Resources
+    {
+        $remaining = $quantity;
+        $storageUuids = $character->storages()->pluck('uuid');
+        $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
+
+        $resources = Resources::whereIn('slot_uuid', $slotUuids)
+            ->where('template_slug', $templateSlug)
+            ->whereNull('temporary_slot_uuid')
+            ->orderBy('quantity', 'asc')
+            ->get();
+
+        $reservedResource = null;
+
+        foreach ($resources as $resource) {
+            if ($remaining <= 0) {
+                break;
+            }
+
+            $take = min($remaining, $resource->quantity);
+
+            if (!$reservedResource) {
+                if ($take === $resource->quantity) {
+                    $reservedResource = $resource;
+                } else {
+                    $resource->update(['quantity' => $resource->quantity - $take]);
+                    $reservedResource = Resources::create([
+                        'uuid' => Str::uuid()->toString(),
+                        'slot_uuid' => $resource->slot_uuid,
+                        'recipe_slug' => $resource->recipe_slug,
+                        'template_slug' => $resource->template_slug,
+                        'slot_type' => $resource->slot_type,
+                        'max_stack' => $resource->max_stack,
+                        'quantity' => $take,
+                    ]);
+                }
+            } elseif ($take === $resource->quantity) {
+                $reservedResource->update(['quantity' => $reservedResource->quantity + $take]);
+                $resource->delete();
+            } else {
+                $resource->update(['quantity' => $resource->quantity - $take]);
+                $reservedResource->update(['quantity' => $reservedResource->quantity + $take]);
+            }
+
+            $remaining -= $take;
+        }
+
+        if ($remaining > 0 || !$reservedResource) {
+            throw new \RuntimeException("Не удалось зарезервировать {$quantity} {$templateSlug}");
+        }
+
+        return $reservedResource;
+    }
+
+    private function getOrCreateSlot(Storage $storage): Slot
+    {
+        $freeSlot = $this->inventoryService->findFreeSlot($storage);
+
+        if ($freeSlot) {
+            return $freeSlot;
+        }
+
+        return Slot::create([
+            'uuid' => Str::uuid()->toString(),
+            'storage_uuid' => $storage->uuid,
+            'slot_type' => null,
+        ]);
     }
 
     private function isParticipant(Character $character, TradeOffer $trade): bool
     {
         return $character->uuid === $trade->initiator_uuid || $character->uuid === $trade->partner_uuid;
+    }
+
+    private function recordTradeUpdated(TradeOffer $trade, Character $actor): void
+    {
+        $partner = $this->getPartner($actor, $trade);
+
+        $this->eventStore->record(
+            'trade.updated',
+            'trade',
+            $trade->uuid,
+            [
+                'character_uuid' => $actor->uuid,
+                'partner_uuid' => $partner->uuid,
+                'status' => $trade->status,
+                'initiator_accepted' => $trade->initiator_accepted,
+                'partner_accepted' => $trade->partner_accepted,
+            ],
+            $actor->uuid
+        );
     }
 
     private function getPartner(Character $character, TradeOffer $trade): Character
@@ -531,18 +513,5 @@ class TradeService
             : $trade->initiator_uuid;
 
         return Character::where('uuid', $partnerUuid)->firstOrFail();
-    }
-
-    private function getTradeStorage(): Storage
-    {
-        $systemCharacter = Character::firstOrCreate(
-            ['character_type' => 'system', 'name' => 'System'],
-            ['active' => true]
-        );
-
-        return Storage::firstOrCreate(
-            ['characters_uuid' => $systemCharacter->uuid, 'storage_type' => 'trade'],
-            ['name' => 'Обмен', 'active' => true]
-        );
     }
 }

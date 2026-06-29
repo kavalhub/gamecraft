@@ -29,7 +29,7 @@ class Slot extends Model
 
     public function resource(): HasOne
     {
-        return $this->hasOne(Resource::class, 'slot_uuid', 'uuid');
+        return $this->hasOne(Resources::class, 'slot_uuid', 'uuid');
     }
 
     public function isEmpty(): bool

@@ -115,7 +115,7 @@
       "type": "material",
       "icon": "🪵",
       "is_stackable": true,
-      "max_stack": 200,
+      "max_stack": 20,
       "description": "Обычное дерево, основа многих крафтов",
       "slot_type": "wood"
     },
@@ -125,7 +125,7 @@
       "type": "material",
       "icon": "⛏️",
       "is_stackable": true,
-      "max_stack": 100,
+      "max_stack": 20,
       "description": "Необработанная железная руда",
       "slot_type": "ore"
     },
@@ -135,7 +135,7 @@
       "type": "material",
       "icon": "🪵",
       "is_stackable": true,
-      "max_stack": 200,
+      "max_stack": 20,
       "description": "Обработанный деревянный брусок",
       "slot_type": "plank"
     },
@@ -145,7 +145,7 @@
       "type": "material",
       "icon": "🔩",
       "is_stackable": true,
-      "max_stack": 100,
+      "max_stack": 20,
       "description": "Очищенный железный слиток",
       "slot_type": "ingot"
     },

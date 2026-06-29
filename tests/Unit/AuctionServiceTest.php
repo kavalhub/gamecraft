@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use App\Models\Character;
+use App\Models\Resources;
 use App\Models\User;
 use App\Services\AuctionService;
 use App\Services\CraftingService;
@@ -66,6 +67,21 @@ class AuctionServiceTest extends TestCase
 
         // Даём покупателю 1000 золота
         $this->inventoryService->addResource($this->buyer, 'gold', 1000);
+    }
+
+    public function test_list_lot_lists_item_in_one_step(): void
+    {
+        $this->inventoryService->addResource($this->seller, 'wood', 10);
+        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
+        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
+
+        $lot = $this->auctionService->listLot($this->seller, $item->uuid, 150);
+
+        $this->assertEquals('active', $lot->status);
+        $this->assertEquals(150, $lot->price);
+
+        $item->refresh();
+        $this->assertNull($item->temporary_slot_uuid);
     }
 
     public function test_prepare_lot_creates_temporary_slot(): void
@@ -198,13 +214,68 @@ class AuctionServiceTest extends TestCase
     public function test_buy_infinite_lot_creates_new_item(): void
     {
         $infiniteLot = \App\Models\AuctionLot::where('is_infinite', true)->first();
-        
+
         $buyerGoldBefore = $this->inventoryService->getResourceQuantity($this->buyer, 'gold');
 
-        $result = $this->auctionService->buyLot($this->buyer, $infiniteLot->uuid);
+        $result = $this->auctionService->buyLot($this->buyer, $infiniteLot->uuid, 1);
 
         $this->assertTrue($result['is_infinite']);
         $this->assertEquals($infiniteLot->template_slug, $result['result']->template_slug);
         $this->assertEquals($buyerGoldBefore - $infiniteLot->price, $this->inventoryService->getResourceQuantity($this->buyer, 'gold'));
+    }
+
+    public function test_buy_infinite_lot_bulk_stacks_resources(): void
+    {
+        $infiniteLot = \App\Models\AuctionLot::where('is_infinite', true)
+            ->where('template_slug', 'wood')
+            ->first();
+
+        $quantity = 45;
+        $buyerGoldBefore = $this->inventoryService->getResourceQuantity($this->buyer, 'gold');
+
+        $result = $this->auctionService->buyLot($this->buyer, $infiniteLot->uuid, $quantity);
+
+        $this->assertTrue($result['is_infinite']);
+        $this->assertEquals($quantity, $result['quantity']);
+        $this->assertEquals($buyerGoldBefore - ($infiniteLot->price * $quantity), $this->inventoryService->getResourceQuantity($this->buyer, 'gold'));
+        $this->assertEquals($quantity, $this->inventoryService->getResourceQuantity($this->buyer, 'wood'));
+
+        $woodStacks = Resources::where('template_slug', 'wood')
+            ->whereIn('slot_uuid', function ($q) {
+                $q->select('uuid')->from('slots')->whereIn('storage_uuid', function ($q2) {
+                    $q2->select('uuid')->from('storages')->where('characters_uuid', $this->buyer->uuid);
+                });
+            })->get();
+
+        $this->assertCount(3, $woodStacks);
+        $this->assertEquals(45, $woodStacks->sum('quantity'));
+    }
+
+    public function test_get_max_purchasable_quantity_for_infinite_lot(): void
+    {
+        $infiniteLot = \App\Models\AuctionLot::where('is_infinite', true)
+            ->where('template_slug', 'wood')
+            ->first();
+
+        $limits = $this->auctionService->getBuyLimits($this->buyer, $infiniteLot);
+
+        $this->assertGreaterThan(0, $limits['max_purchasable']);
+        $this->assertLessThanOrEqual(intdiv(1000, $infiniteLot->price), $limits['max_purchasable']);
+        $this->assertEquals(1000, $limits['gold_available']);
+        $this->assertEquals(intdiv(1000, $infiniteLot->price), $limits['max_by_gold']);
+    }
+
+    public function test_finite_lot_requires_exact_quantity(): void
+    {
+        $this->inventoryService->addResource($this->seller, 'wood', 10);
+        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
+        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
+
+        $this->auctionService->prepareLot($this->seller, $item->uuid, 100);
+        $lot = $this->auctionService->confirmLot($this->seller, $item->uuid, 100);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Можно купить только весь лот целиком');
+        $this->auctionService->buyLot($this->buyer, $lot->uuid, 2);
     }
 }

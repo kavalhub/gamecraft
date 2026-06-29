@@ -161,7 +161,9 @@ class CraftingService
                     'recipe_slug' => $recipeSlug,
                     'blueprint_uuid' => $blueprintItemUuid,
                     'item_template_slug' => $itemTemplateSlug,
+                    'template_slug' => $itemTemplateSlug,
                     'custom_name' => $blueprint->custom_name,
+                    'icon' => $itemTemplate->icon,
                     'materials_used' => $materialsUsed,
                     'stats' => $blueprint->stats,
                 ],
@@ -196,6 +198,8 @@ class CraftingService
             }
 
             $blueprintTemplateSlug = $this->getBlueprintTemplateSlug($recipe->slug);
+            $disassembledTemplateSlug = $item->template_slug;
+            $disassembledName = $item->custom_name;
 
             $item->update([
                 'stage' => 'blueprint',
@@ -220,6 +224,8 @@ class CraftingService
                 $item->uuid,
                 [
                     'recipe_slug' => $recipe->slug,
+                    'item_template_slug' => $disassembledTemplateSlug,
+                    'custom_name' => $disassembledName,
                     'formula_description' => $formula->description,
                     'returned_resources' => $returnedResources,
                 ],

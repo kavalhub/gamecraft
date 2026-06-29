@@ -12,9 +12,13 @@
             min-height: 100vh; color: #eee; overflow: hidden;
         }
 
+        :root {
+            --slot-size: 44px;
+        }
+
         .game-canvas {
             position: fixed;
-            top: 0; left: 0; right: 0; bottom: 80px;
+            top: 0; left: 0; right: 0; bottom: 60px;
             overflow: hidden;
         }
 
@@ -56,7 +60,8 @@
         }
 
         .window-header {
-            padding: 12px 16px;
+            padding: 6px 10px;
+            min-height: 32px;
             background: rgba(255,255,255,0.05);
             border-bottom: 1px solid rgba(255,255,255,0.1);
             display: flex;
@@ -69,24 +74,24 @@
         .window-title {
             display: flex;
             align-items: center;
-            gap: 10px;
-            font-size: 14px;
-            font-weight: 700;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
             color: #d4a574;
         }
 
         .window-title .icon {
-            font-size: 18px;
+            font-size: 15px;
         }
 
         .window-controls {
             display: flex;
-            gap: 6px;
+            gap: 4px;
         }
 
         .window-btn {
-            width: 28px; height: 28px;
-            border-radius: 6px;
+            width: 24px; height: 24px;
+            border-radius: 5px;
             background: rgba(255,255,255,0.05);
             border: 1px solid rgba(255,255,255,0.1);
             display: flex;
@@ -124,12 +129,79 @@
         }
 
         #window-journal .window-body {
-            padding: 10px;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        #window-players {
+            width: 420px;
+            height: 500px;
+        }
+
+        #window-players .window-body {
+            padding: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #playersContent {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
         }
 
         #window-inventory {
-            width: 360px;
-            height: calc(100% - 40px);
+            width: 220px;
+            height: auto;
+            max-height: calc(100% - 40px);
+        }
+
+        .storage-grid { display: grid; width: max-content; max-width: 100%; }
+        .storage-slot {
+            width: var(--slot-size, 44px);
+            height: var(--slot-size, 44px);
+            min-height: unset;
+            aspect-ratio: unset;
+            background: rgba(0,0,0,0.25);
+            border: 2px solid rgba(255,255,255,0.12);
+            border-radius: 6px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            touch-action: none;
+            box-sizing: border-box;
+        }
+        .storage-slot--empty {
+            border-style: dashed;
+            border-color: rgba(255,255,255,0.18);
+            background: rgba(255,255,255,0.03);
+            opacity: 1;
+        }
+        .storage-slot--draggable { cursor: grab; }
+        .storage-slot--readonly { opacity: 0.85; pointer-events: none; }
+        .storage-slot--drag-over { border-color: #667eea; background: rgba(102,126,234,0.15); }
+        .storage-slot .item {
+            width: 100%; height: 100%; border: none; background: transparent;
+            padding: 4px; aspect-ratio: auto;
+        }
+        .storage-slot .item-icon { font-size: 28px; }
+        .storage-slot .item-qty {
+            position: absolute; bottom: 2px; right: 4px;
+            font-size: 11px; font-weight: 700; color: #fbbf24;
+        }
+
+        #window-inventory .window-body {
+            padding: 10px;
+            overflow: visible;
+        }
+
+        #inventoryContent.items {
+            display: block;
         }
 
         #window-inventory .player-bar {
@@ -144,39 +216,6 @@
         #window-inventory .player-name { font-size: 16px; font-weight: 600; }
         #window-inventory .gold { font-size: 15px; color: #fbbf24; font-weight: 700; }
 
-        #window-inventory .items {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
-            gap: 8px;
-        }
-
-        #window-inventory .item {
-            background: rgba(255,255,255,0.05);
-            border: 2px solid rgba(255,255,255,0.1);
-            border-radius: 8px;
-            padding: 8px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.2s;
-            user-select: none;
-            position: relative;
-            aspect-ratio: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        #window-inventory .item:hover { border-color: #667eea; transform: translateY(-2px); }
-        #window-inventory .item-icon { font-size: 32px; }
-        #window-inventory .item-qty {
-            position: absolute;
-            bottom: 2px;
-            right: 4px;
-            font-size: 11px;
-            font-weight: 700;
-            color: #fbbf24;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
-        }
-
         #window-workbench {
             width: 900px;
             height: 650px;
@@ -187,9 +226,250 @@
             height: 650px;
         }
 
+        #window-settings {
+            width: 400px;
+            height: auto;
+        }
+
+        #window-trade .window-body {
+            padding: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .game-tabs {
+            display: flex;
+            gap: 4px;
+            padding: 8px 12px 0;
+            background: rgba(0,0,0,0.15);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            flex-shrink: 0;
+        }
+
+        .game-tab {
+            padding: 6px 14px;
+            border: none;
+            border-radius: 6px 6px 0 0;
+            background: rgba(255,255,255,0.05);
+            color: #aaa;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .game-tab.active {
+            background: rgba(102,126,234,0.25);
+            color: #fff;
+        }
+
+        .chat-panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 12px;
+            min-height: 0;
+        }
+
+        .chat-journal-entry {
+            font-size: 12px;
+            line-height: 1.5;
+            color: #ccc;
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .chat-journal-entry .journal-time {
+            color: #888;
+            margin-right: 6px;
+        }
+
+        #window-item-preview {
+            width: 340px;
+            height: auto;
+            max-height: 80%;
+        }
+
+        #window-item-preview .window-body {
+            padding: 12px 15px;
+        }
+
+        #window-item-preview .tooltip-header {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        #window-character {
+            width: 520px;
+            height: auto;
+            min-height: 420px;
+        }
+
+        #window-character .window-body {
+            padding: 12px;
+        }
+
+        .character-panel {
+            display: flex;
+            gap: 16px;
+            min-height: 380px;
+        }
+
+        .character-equipment {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .equipment-slots {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .equipment-slot-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .equipment-slot-label {
+            font-size: 10px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .equipment-slot {
+            width: var(--slot-size, 44px);
+            height: var(--slot-size, 44px);
+        }
+
+        .character-stats {
+            width: 180px;
+            flex-shrink: 0;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            padding: 12px;
+        }
+
+        .character-stats-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #d4a574;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .character-stat-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            padding: 4px 0;
+            color: #ccc;
+        }
+
+        .character-stat-row strong {
+            color: #10b981;
+        }
+
+        .chat-placeholder {
+            padding: 24px;
+            text-align: center;
+            color: #888;
+            font-size: 13px;
+        }
+
+        .online-player-row {
+            display: flex;
+            align-items: center;
+            padding: 10px 12px;
+            background: #2a2a2a;
+            border-radius: 4px;
+            cursor: context-menu;
+        }
+
+        .online-player-row:hover {
+            background: #333;
+        }
+
+        .player-context-menu {
+            position: fixed;
+            z-index: 100050;
+            min-width: 180px;
+            background: rgba(20, 20, 35, 0.98);
+            border: 2px solid rgba(102, 126, 234, 0.6);
+            border-radius: 8px;
+            padding: 6px 0;
+            display: none;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+
+        .player-context-menu.visible { display: block; }
+
+        .player-context-menu button {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 8px 14px;
+            border: none;
+            background: transparent;
+            color: #eee;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .player-context-menu button:hover {
+            background: rgba(102,126,234,0.2);
+        }
+
+        .player-context-menu button:disabled {
+            opacity: 0.45;
+            cursor: default;
+        }
+
+        .inventory-context-menu {
+            position: fixed;
+            z-index: 100050;
+            min-width: 180px;
+            background: rgba(20, 20, 35, 0.98);
+            border: 2px solid rgba(102, 126, 234, 0.6);
+            border-radius: 8px;
+            padding: 6px 0;
+            display: none;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+
+        .inventory-context-menu.visible { display: block; }
+
+        .inventory-context-menu button {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 8px 14px;
+            border: none;
+            background: transparent;
+            color: #eee;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .inventory-context-menu button:hover {
+            background: rgba(102,126,234,0.2);
+        }
+
         #window-trade {
-            width: 800px;
-            height: 600px;
+            width: 360px;
+            height: auto;
+            max-height: calc(100% - 40px);
+        }
+
+        #tradeContent {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
         }
 
         .events-list {
@@ -197,6 +477,77 @@
             flex-direction: column;
             gap: 8px;
             height: 100%;
+        }
+
+        .play-panel {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 10000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 8px 12px;
+            pointer-events: none;
+        }
+
+        .play-panel-grid {
+            display: grid;
+            gap: 5px;
+            pointer-events: auto;
+        }
+
+        .play-panel-slot.storage-slot--empty {
+            padding: 0;
+        }
+
+        .play-panel-chip {
+            width: 100%;
+            height: 100%;
+            border: none;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.06);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            cursor: grab;
+            color: #eee;
+            transition: all 0.15s;
+            box-sizing: border-box;
+        }
+
+        .play-panel-chip:hover {
+            background: rgba(255,255,255,0.12);
+        }
+
+        .play-panel-chip.active {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            box-shadow: 0 4px 16px rgba(102,126,234,0.35);
+        }
+
+        .play-panel-chip .pp-icon {
+            font-size: calc(var(--slot-size, 44px) * 0.45);
+            line-height: 1;
+        }
+
+        .play-panel-slot--drag-over {
+            border-color: #667eea !important;
+            background: rgba(102,126,234,0.15) !important;
+        }
+
+        .play-panel-drag-ghost {
+            position: fixed;
+            z-index: 10003;
+            pointer-events: none;
+            opacity: 0.9;
+            padding: 6px 10px;
+            background: rgba(30,30,46,0.96);
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            font-size: 12px;
         }
 
         .event-item {
@@ -385,16 +736,29 @@
     <div class="window" id="window-journal" data-window="journal">
         <div class="window-header">
             <div class="window-title">
-                <span class="icon">📜</span>
-                <span>Журнал событий</span>
+                <span class="icon">💬</span>
+                <span>Чат</span>
             </div>
             <div class="window-controls">
                 <div class="window-btn" onclick="WindowManager.close('journal')">✕</div>
             </div>
         </div>
         <div class="window-body">
-            <div class="events-list" id="eventsList">
-                <div class="events-empty">Загрузка...</div>
+            <div id="chatTabs" class="game-tabs">
+                <button type="button" class="game-tab" data-tab="general" onclick="ChatPanel.switchTab('general')">Общий</button>
+                <button type="button" class="game-tab" data-tab="guild" onclick="ChatPanel.switchTab('guild')">Гильдия</button>
+                <button type="button" class="game-tab active" data-tab="journal" onclick="ChatPanel.switchTab('journal')">Журнал</button>
+            </div>
+            <div id="chatGeneral" class="chat-panel-content" style="display:none">
+                <div class="chat-placeholder">Общий чат — скоро</div>
+            </div>
+            <div id="chatGuild" class="chat-panel-content" style="display:none">
+                <div class="chat-placeholder">Чат гильдии — скоро</div>
+            </div>
+            <div id="chatJournal" class="chat-panel-content">
+                <div id="eventsList">
+                    <div class="chat-placeholder">Загрузка...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -415,6 +779,21 @@
         </div>
         <div class="window-body">
             <div id="inventoryContent" class="items"></div>
+        </div>
+    </div>
+
+    <div class="window" id="window-character" data-window="character">
+        <div class="window-header">
+            <div class="window-title">
+                <span class="icon">🛡️</span>
+                <span>Персонаж</span>
+            </div>
+            <div class="window-controls">
+                <div class="window-btn" onclick="WindowManager.close('character')">✕</div>
+            </div>
+        </div>
+        <div class="window-body">
+            @include('partials.equipment')
         </div>
     </div>
 
@@ -448,10 +827,25 @@
         </div>
     </div>
 
+    <div class="window" id="window-players" data-window="players">
+        <div class="window-header">
+            <div class="window-title">
+                <span class="icon">👥</span>
+                <span>Игроки</span>
+            </div>
+            <div class="window-controls">
+                <div class="window-btn" onclick="WindowManager.close('players')">✕</div>
+            </div>
+        </div>
+        <div class="window-body">
+            @include('partials.social')
+        </div>
+    </div>
+
     <div class="window" id="window-trade" data-window="trade">
         <div class="window-header">
             <div class="window-title">
-                <span class="icon">🤝</span>
+                <span class="icon">⇄</span>
                 <span>Обмен</span>
             </div>
             <div class="window-controls">
@@ -462,39 +856,54 @@
             @include('partials.trade')
         </div>
     </div>
+
+    <div class="window" id="window-settings" data-window="settings">
+        <div class="window-header">
+            <div class="window-title">
+                <span class="icon">⚙️</span>
+                <span>Настройки</span>
+            </div>
+            <div class="window-controls">
+                <div class="window-btn" onclick="WindowManager.close('settings')">✕</div>
+            </div>
+        </div>
+        <div class="window-body">
+            @include('partials.settings')
+        </div>
+    </div>
+
+    <div class="window" id="window-item-preview" data-window="item-preview">
+        <div class="window-header">
+            <div class="window-title">
+                <span class="icon">🔍</span>
+                <span id="itemPreviewTitle">Предмет</span>
+            </div>
+            <div class="window-controls">
+                <div class="window-btn" onclick="GameItemPreview.close()">✕</div>
+            </div>
+        </div>
+        <div class="window-body" id="itemPreviewBody"></div>
+    </div>
 </div>
 
-<nav class="toolbar">
-    <div class="tool-btn" data-window="journal" onclick="WindowManager.toggle('journal')">
-        <div class="icon">📜</div>
-        <div class="label">Журнал</div>
-    </div>
-    <div class="tool-btn" data-window="inventory" onclick="WindowManager.toggle('inventory')">
-        <div class="icon">🎒</div>
-        <div class="label">Инвентарь</div>
-    </div>
-    <div class="toolbar-separator"></div>
-    <div class="tool-btn" data-window="workbench" onclick="WindowManager.toggle('workbench')">
-        <div class="icon">🔨</div>
-        <div class="label">Верстак</div>
-    </div>
-    <div class="tool-btn" data-window="auction" onclick="WindowManager.toggle('auction')">
-        <div class="icon">🏪</div>
-        <div class="label">Аукцион</div>
-    </div>
-    <div class="tool-btn" data-window="trade" onclick="WindowManager.toggle('trade')">
-        <div class="icon">🤝</div>
-        <div class="label">Обмен</div>
-    </div>
-    <div class="toolbar-separator"></div>
-    <div class="tool-btn" onclick="WindowManager.resetPositions()" title="Сбросить позиции окон">
-        <div class="icon">🔄</div>
-        <div class="label">Сброс</div>
-    </div>
-</nav>
+<div id="playPanel" class="play-panel"></div>
+
+<div id="playerContextMenu" class="player-context-menu">
+    <button type="button" data-action="trade">Предложить обмен</button>
+    <button type="button" data-action="friend">Добавить друга</button>
+    <button type="button" data-action="guild">Пригласить в гильдию</button>
+</div>
+
+<div id="inventoryContextMenu" class="inventory-context-menu">
+    <button type="button" data-action="craft" style="display:none">Создать</button>
+    <button type="button" data-action="disassemble" style="display:none">Разобрать</button>
+    <button type="button" data-action="transform" style="display:none">Преобразовать</button>
+</div>
 
 <div id="msg" class="msg"></div>
 <div id="itemTooltip" class="tooltip"></div>
+@include('partials.resource-quantity-modal')
+<script src="{{ asset('js/game/game.bundle.js') }}?v=20260630"></script>
 
 <script>
     window.GameApi = {
@@ -536,6 +945,67 @@
         recipes: [],
     };
 
+    window.GameSettings = {
+        slotSize: 44,
+        _saveTimer: null,
+
+        getSlotSize() {
+            return this.slotSize || 44;
+        },
+
+        apply() {
+            document.documentElement.style.setProperty('--slot-size', this.getSlotSize() + 'px');
+            if (window.WindowResizer) WindowResizer.resizeAll();
+            if (window.PlayPanelManager) PlayPanelManager.resize();
+            if (typeof renderInventory === 'function' && window.StorageManager?.inventoryStorage) {
+                renderInventory();
+            }
+            if (window.tradeState?.currentTrade && typeof window.renderTradeView === 'function') {
+                window.renderTradeView();
+            }
+        },
+
+        async load(characterUuid) {
+            if (!characterUuid) return;
+            try {
+                const res = await GameApi.fetch(`/api/settings/${characterUuid}`);
+                const data = await res.json();
+                const prefs = data.settings?.ui_preferences || {};
+                if (prefs.slot_size) {
+                    this.slotSize = parseInt(prefs.slot_size, 10) || 44;
+                }
+            } catch (e) {
+                console.warn('GameSettings load error:', e);
+            }
+            this.apply();
+        },
+
+        setSlotSize(size, persist) {
+            this.slotSize = Math.max(32, Math.min(72, parseInt(size, 10) || 44));
+            this.apply();
+            if (!persist || !GameState.characterUuid) return;
+            clearTimeout(this._saveTimer);
+            this._saveTimer = setTimeout(() => this.save(), 400);
+        },
+
+        async save() {
+            if (!GameState.characterUuid) return;
+            try {
+                await GameApi.fetch(`/api/settings/${GameState.characterUuid}/multiple`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        settings: {
+                            ui_preferences: { slot_size: this.getSlotSize() },
+                        },
+                    }),
+                });
+            } catch (e) {
+                console.error('GameSettings save error:', e);
+            }
+        },
+    };
+
     window.WindowManager = {
         windows: {},
         zIndex: 100,
@@ -545,9 +1015,13 @@
         defaults: {
             journal:    { x: 20,  y: 20 },
             inventory:  { x: null, y: 20, right: 20 },
+            character:  { center: true, verticalCenter: true },
             workbench:  { center: true, verticalCenter: true },
             auction:    { center: true, verticalCenter: true },
+            players:    { center: true, verticalCenter: true },
             trade:      { center: true, verticalCenter: true },
+            'item-preview': { center: true, verticalCenter: true },
+            settings:   { x: null, y: null, right: 20, bottom: 80 },
         },
 
         init() {
@@ -597,10 +1071,14 @@
             } else {
                 if (defaults.right !== undefined) {
                     win.style.right = defaults.right + 'px';
-                } else if (defaults.x !== null) {
+                    win.style.left = '';
+                } else if (defaults.x !== null && defaults.x !== undefined) {
                     win.style.left = defaults.x + 'px';
                 }
-                if (defaults.y !== null) {
+                if (defaults.bottom !== undefined) {
+                    win.style.bottom = defaults.bottom + 'px';
+                    win.style.top = '';
+                } else if (defaults.y !== null && defaults.y !== undefined) {
                     win.style.top = defaults.y + 'px';
                 }
             }
@@ -686,7 +1164,7 @@
             const win = this.windows[name];
             if (!win) return;
 
-            const keepOpen = ['journal', 'inventory'];
+            const keepOpen = ['journal', 'inventory', 'settings', 'item-preview'];
             if (!keepOpen.includes(name)) {
                 Object.keys(this.windows).forEach(n => {
                     if (!keepOpen.includes(n) && n !== name) {
@@ -713,8 +1191,17 @@
             if (name === 'workbench' && typeof window.initWorkbench === 'function') {
                 setTimeout(() => window.initWorkbench(), 50);
             }
+            if (name === 'players' && typeof window.initPlayers === 'function') {
+                setTimeout(() => window.initPlayers(), 50);
+            }
+            if (name === 'character' && typeof window.initCharacter === 'function') {
+                setTimeout(() => window.initCharacter(), 50);
+            }
             if (name === 'trade' && typeof window.initTrade === 'function') {
                 setTimeout(() => window.initTrade(), 50);
+            }
+            if (name === 'settings' && typeof window.initSettings === 'function') {
+                setTimeout(() => window.initSettings(), 50);
             }
         },
 
@@ -738,13 +1225,9 @@
         },
 
         updateToolbar() {
-            document.querySelectorAll('.tool-btn').forEach(btn => {
-                const name = btn.dataset.window;
-                const win = this.windows[name];
-                if (win) {
-                    btn.classList.toggle('active', win.classList.contains('active'));
-                }
-            });
+            if (window.PlayPanelManager && typeof PlayPanelManager.refreshActiveState === 'function') {
+                PlayPanelManager.refreshActiveState();
+            }
         },
 
         isOpen(name) {
@@ -783,6 +1266,10 @@
                 const res = await GameApi.fetch(`/api/settings/${GameState.characterUuid}`);
                 const data = await res.json();
                 this.positions = data.settings?.window_positions || {};
+
+                if (this.positions.trade && !this.positions.players) {
+                    this.positions.players = this.positions.trade;
+                }
                 
                 console.log('Loaded positions:', this.positions);
                 
@@ -887,6 +1374,24 @@
 
     async function loadPlayerData() {
         try {
+            if (window.StorageManager) {
+                const data = await StorageManager.load(GameState.characterUuid, 'inventory,equipment,stats');
+                document.getElementById('playerName').textContent = data.character_name || 'Игрок';
+                const gold = data.gold != null ? data.gold : StorageManager.getGold();
+                if (window.GoldChip && StorageManager.inventoryStorage) {
+                    const goldEl = document.getElementById('playerGold');
+                    if (goldEl) GoldChip.mount(goldEl, StorageManager.inventoryStorage, gold);
+                } else {
+                    document.getElementById('playerGold').textContent = '💰 ' + gold;
+                }
+                renderInventory();
+                resizeInventoryWindow();
+                if (WindowManager.isOpen('character') && typeof window.renderCharacterPanel === 'function') {
+                    renderCharacterPanel();
+                }
+                return;
+            }
+
             const res = await GameApi.fetch(`/api/inventory/${GameState.characterUuid}`);
             const data = await res.json();
 
@@ -903,6 +1408,69 @@
         }
     }
 
+    function resizeInventoryWindow() {
+        const win = document.getElementById('window-inventory');
+        if (!win || !window.StorageManager?.inventoryStorage) return;
+        const cols = StorageManager.inventoryStorage.cols || 4;
+        const slots = StorageManager.inventoryStorage.grid_slots || StorageManager.inventoryStorage.slots || [];
+        const rows = Math.ceil(slots.length / cols) || 9;
+        const slotSize = (window.GameSettings ? GameSettings.getSlotSize() : 44);
+        const gap = 5, pad = 24;
+        const headerH = win.querySelector('.window-header')?.offsetHeight || 32;
+        const playerBar = win.querySelector('.player-bar')?.offsetHeight || 40;
+        const gridW = cols * slotSize + (cols - 1) * gap + pad;
+        const gridH = rows * slotSize + (rows - 1) * gap;
+        win.style.width = Math.max(220, gridW) + 'px';
+        win.style.height = (headerH + playerBar + gridH + pad) + 'px';
+    }
+
+    if (window.WindowResizer) {
+        WindowResizer.register('inventory', resizeInventoryWindow);
+    }
+
+    window.refreshStorageGrids = function() {
+        if (window.StorageManager && StorageManager.inventoryStorage) {
+            renderInventory();
+            resizeInventoryWindow();
+        }
+        if (window.StorageManager && StorageManager.equipmentStorage && typeof window.renderCharacterPanel === 'function') {
+            renderCharacterPanel();
+        }
+        if (typeof window.refreshTradeData === 'function' && window.tradeState?.currentTrade) {
+            window.refreshTradeData().then(function() {
+                if (typeof window.renderTradeView === 'function') window.renderTradeView();
+            });
+        }
+    };
+
+    function renderInventory() {
+        const el = document.getElementById('inventoryContent');
+        if (window.StorageGrid && window.StorageManager && StorageManager.inventoryStorage) {
+            StorageGrid.mount(el, StorageManager.inventoryStorage, {
+                draggable: true,
+                gridId: 'inventory-grid',
+                compact: true,
+            });
+            resizeInventoryWindow();
+            return;
+        }
+
+        if (!GameState.inventory.length) {
+            el.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:30px;color:#666">Инвентарь пуст</div>';
+            return;
+        }
+        el.innerHTML = GameState.inventory.map(item => {
+            if (window.GameItemPresenter) {
+                return GameItemPresenter.renderIcon(item);
+            }
+            const icon = item.icon || (item.stage === 'blueprint' ? '📜' : '📦');
+            const qty = item.quantity ? `<div class="item-qty">x${item.quantity}</div>` : '';
+            return `<div class="item game-item-interactive" data-item-uuid="${item.uuid}" data-name="${item.name}"><div class="item-icon">${icon}</div>${qty}</div>`;
+        }).join('');
+
+        window.bindItemTooltips(el);
+    }
+
     async function loadRecipes() {
         try {
             const res = await GameApi.fetch(`/api/crafting/${GameState.characterUuid}/recipes`);
@@ -913,129 +1481,6 @@
         }
     }
 
-    function renderInventory() {
-        const el = document.getElementById('inventoryContent');
-        if (!GameState.inventory.length) {
-            el.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:30px;color:#666">Инвентарь пуст</div>';
-            return;
-        }
-        el.innerHTML = GameState.inventory.map(item => {
-            const icon = item.icon || (item.stage === 'blueprint' ? '📜' : '📦');
-            const qty = item.quantity ? `<div class="item-qty">x${item.quantity}</div>` : '';
-            return `
-                <div class="item"
-                     data-uuid="${item.uuid}"
-                     data-name="${item.name}"
-                     data-stage="${item.stage || ''}"
-                     data-recipe-slug="${item.recipe_slug || ''}"
-                     data-template-slug="${item.template_slug || ''}"
-                     data-description="${item.description || ''}"
-                     data-stats='${JSON.stringify(item.stats || {})}'
-                     data-quantity="${item.quantity || 1}">
-                    <div class="item-icon">${icon}</div>
-                    ${qty}
-                </div>
-            `;
-        }).join('');
-
-        // Добавляю обработчики тултипа
-        el.querySelectorAll('.item').forEach(itemEl => {
-            itemEl.addEventListener('mouseenter', showItemTooltip);
-            itemEl.addEventListener('mouseleave', hideItemTooltip);
-            itemEl.addEventListener('mousemove', moveItemTooltip);
-        });
-    }
-
-    window.showItemTooltip = function(e) {
-        const tooltip = document.getElementById('itemTooltip');
-        const element = e.currentTarget;
-
-        const name = element.dataset.name || 'Предмет';
-        const stage = element.dataset.stage || 'item';
-        const quantity = parseInt(element.dataset.quantity) || 1;
-        const description = element.dataset.description || '';
-        const stats = JSON.parse(element.dataset.stats || '{}');
-        const iconElement = element.querySelector('.item-icon');
-        const icon = iconElement ? iconElement.textContent : (stage === 'blueprint' ? '📜' : '📦');
-
-        let type = 'Предмет';
-        if (stage === 'blueprint') type = 'Чертёж';
-        else if (stage === 'item') type = 'Предмет';
-        else if (quantity > 1) type = 'Ресурс';
-
-        let html = `
-            <div class="tooltip-header">
-                <div class="tooltip-icon">${icon}</div>
-                <div>
-                    <div class="tooltip-name">${name}</div>
-                    <div class="tooltip-type">${type}</div>
-                </div>
-            </div>
-        `;
-
-        if (description) {
-            html += `<div class="tooltip-description">${description}</div>`;
-        }
-
-        if (Object.keys(stats).length > 0) {
-            html += '<div class="tooltip-stats">';
-            for (const [key, value] of Object.entries(stats)) {
-                const label = {
-                    attack: 'Атака',
-                    defense: 'Защита',
-                    health: 'Здоровье',
-                    durability: 'Прочность',
-                    level: 'Уровень',
-                    weight: 'Вес',
-                    value: 'Ценность'
-                }[key] || key;
-                html += `
-                    <div class="tooltip-stat">
-                        <span class="tooltip-stat-label">${label}:</span>
-                        <span class="tooltip-stat-value">${value}</span>
-                    </div>
-                `;
-            }
-            html += '</div>';
-        }
-
-        if (quantity > 1) {
-            html += `<div class="tooltip-quantity">Количество: ${quantity}</div>`;
-        }
-
-        tooltip.innerHTML = html;
-        tooltip.classList.add('visible');
-        moveItemTooltip(e);
-    }
-
-    window.hideItemTooltip = function() {
-        const tooltip = document.getElementById('itemTooltip');
-        tooltip.classList.remove('visible');
-    }
-
-    window.moveItemTooltip = function(e) {
-        const tooltip = document.getElementById('itemTooltip');
-        const offsetX = 15;
-        const offsetY = 15;
-
-        let x = e.clientX + offsetX;
-        let y = e.clientY + offsetY;
-
-        const rect = tooltip.getBoundingClientRect();
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-
-        if (x + rect.width > viewportWidth) {
-            x = e.clientX - rect.width - offsetX;
-        }
-        if (y + rect.height > viewportHeight) {
-            y = e.clientY - rect.height - offsetY;
-        }
-
-        tooltip.style.left = x + 'px';
-        tooltip.style.top = y + 'px';
-    }
-
     // ================================================================
     //                     WEBSOCKET CLIENT
     // ================================================================
@@ -1044,6 +1489,7 @@
         listeners: [],
         reconnectTimer: null,
         reconnectAttempts: 0,
+        lastEventId: 0,
 
         start(characterUuid) {
             window.characterUuid = characterUuid;
@@ -1060,9 +1506,16 @@
             this.listeners.push(callback);
         },
 
+        trackEventId(eventId) {
+            if (eventId != null && eventId > this.lastEventId) {
+                this.lastEventId = eventId;
+            }
+        },
+
         connect() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const url = `${protocol}//${location.host}/ws?character_uuid=${this.characterUuid}`;
+            const lastId = this.lastEventId || 0;
+            const url = `${protocol}//${location.host}/ws?character_uuid=${this.characterUuid}&last_event_id=${lastId}`;
             console.log('WebSocket connecting to:', url);
 
             this.ws = new WebSocket(url);
@@ -1076,6 +1529,9 @@
                 try {
                     const data = JSON.parse(event.data);
                     if (data.type === 'connected') return;
+                    if (data.id != null) {
+                        this.trackEventId(data.id);
+                    }
                     this.listeners.forEach(cb => {
                         try { cb([data]); } catch (e) { console.error('Listener error:', e); }
                     });
@@ -1098,89 +1554,169 @@
     };
 
     // ================================================================
-    //                     JOURNAL
+    //                     CHAT PANEL (journal tab = personal public events)
     // ================================================================
-    window.Journal = {
+    window.ChatPanel = {
+        activeTab: 'journal',
+        maxEntries: 20,
+        lastEventId: 0,
+        seenIds: new Set(),
+        publicTypes: [
+            'user.registered',
+            'auction.listed',
+            'auction.purchased',
+            'auction.sold',
+            'trade.completed',
+            'item.crafted',
+            'item.disassembled',
+            'presence.changed',
+        ],
+
         init() {
             EventPoller.on((events) => {
-                events.forEach(e => this.addEvent(e, true));
+                events.forEach(e => {
+                    if (!this.publicTypes.includes(e.type)) return;
+                    if (e.id != null && e.id <= this.lastEventId) return;
+                    this.addEvent(e, true);
+                });
             });
+        },
+
+        itemLink(payload, slugKey, nameKey, quantityKey) {
+            const p = payload || {};
+            const slug = p[slugKey] || p.template_slug;
+            if (!slug || !window.GameItemPresenter) {
+                return `<b>${p[nameKey] || slug || '???'}</b>`;
+            }
+            const qty = quantityKey ? (p[quantityKey] || 1) : 1;
+            let desc = GameItemPresenter.descriptorFromSlug(slug, qty);
+            if (p[nameKey] || p.custom_name) {
+                desc.name = p.custom_name || p[nameKey];
+            }
+            if (p.icon) desc.icon = p.icon;
+            if (p.stats && Object.keys(p.stats).length) {
+                desc.stats = p.stats;
+            }
+            desc.stage = 'item';
+            return GameItemPresenter.renderLink(desc);
+        },
+
+        switchTab(tab) {
+            this.activeTab = tab;
+            document.querySelectorAll('#chatTabs .game-tab').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tab);
+            });
+            document.getElementById('chatGeneral').style.display = tab === 'general' ? 'block' : 'none';
+            document.getElementById('chatGuild').style.display = tab === 'guild' ? 'block' : 'none';
+            document.getElementById('chatJournal').style.display = tab === 'journal' ? 'block' : 'none';
         },
 
         async loadInitial() {
             try {
-                const res = await GameApi.fetch(`/api/events/${EventPoller.characterUuid}/latest?limit=30`);
+                const characterUuid = GameState.characterUuid || window.characterUuid;
+                const res = await GameApi.fetch(
+                    `/api/events/${characterUuid}/latest?visibility=public&limit=${this.maxEntries}`
+                );
                 const data = await res.json();
+                const list = document.getElementById('eventsList');
+                if (!list) return;
+
                 if (data.events && data.events.length > 0) {
-                    const list = document.getElementById('eventsList');
                     list.innerHTML = '';
+                    this.seenIds.clear();
+                    this.lastEventId = 0;
                     data.events.forEach(e => this.addEvent(e, false));
+                    EventPoller.lastEventId = this.lastEventId;
                 } else {
-                    const list = document.getElementById('eventsList');
-                    list.innerHTML = '<div class="events-empty">Пока нет событий</div>';
+                    list.innerHTML = '<div class="chat-placeholder">Пока нет событий</div>';
+                    this.lastEventId = 0;
+                    EventPoller.lastEventId = 0;
                 }
-            } catch (e) { console.error('Journal load error:', e); }
+            } catch (e) {
+                console.error('ChatPanel load error:', e);
+            }
         },
 
         addEvent(event, isNew) {
+            if (!this.publicTypes.includes(event.type)) return;
+            if (event.id != null && this.seenIds.has(event.id)) return;
+            if (event.id != null) {
+                this.seenIds.add(event.id);
+                if (event.id > this.lastEventId) {
+                    this.lastEventId = event.id;
+                }
+                if (window.EventPoller) {
+                    EventPoller.trackEventId(event.id);
+                }
+            }
+
             const list = document.getElementById('eventsList');
             if (!list) return;
-            const empty = list.querySelector('.events-empty');
-            if (empty) empty.remove();
 
-            const formatted = this.formatEvent(event);
-            if (!formatted) return;
+            const placeholder = list.querySelector('.chat-placeholder');
+            if (placeholder) placeholder.remove();
+
+            const html = this.formatPublicEventHtml(event);
+            if (!html) return;
 
             const el = document.createElement('div');
-            el.className = 'event-item';
-            el.innerHTML = `
-                <div class="event-header">
-                    <div>
-                        <span class="event-icon">${formatted.icon}</span>
-                        <span class="event-title">${formatted.title}</span>
-                    </div>
-                    <span class="event-time">${event.occurred_at}</span>
-                </div>
-                <div class="event-body">${formatted.body}</div>
-            `;
+            el.className = 'chat-journal-entry';
+            if (event.id != null) el.dataset.eventId = String(event.id);
+            el.innerHTML = html;
             list.appendChild(el);
+            if (window.GameItemPresenter) {
+                GameItemPresenter.applyItemInteractions(el);
+            }
 
-            while (list.children.length > 50) list.removeChild(list.firstChild);
+            while (list.children.length > this.maxEntries) {
+                const removed = list.firstChild;
+                if (removed && removed.dataset && removed.dataset.eventId) {
+                    this.seenIds.delete(Number(removed.dataset.eventId));
+                }
+                list.removeChild(removed);
+            }
             if (isNew) list.scrollTop = list.scrollHeight;
         },
 
-        formatEvent(event) {
+        formatPublicEventHtml(event) {
             const p = event.payload || {};
+            const actor = event.actor_name || p.character_name || p.username || 'Игрок';
+            const time = event.occurred_at || '';
+            const timeHtml = `<span class="journal-time">${time}</span>`;
+
             switch (event.type) {
                 case 'user.registered':
-                    return { icon: '🎉', title: 'Регистрация', body: `Создан герой <b>${p.username || '???'}</b>` };
-                case 'item.received':
-                    return { icon: '📥', title: 'Получен предмет', body: `<b>${p.name || p.template_slug || '???'}</b> x${p.quantity || 1}` };
-                case 'item.removed':
-                    return { icon: '📤', title: 'Предмет изъят', body: `<b>${p.name || p.template_slug || '???'}</b> x${p.quantity || 1}` };
-                case 'item.crafted':
-                    return { icon: '⚒️', title: 'Крафт', body: `Создан <b>${p.name || '???'}</b>` };
-                case 'item.disassembled':
-                    return { icon: '🔧', title: 'Разборка', body: `<b>${p.item_name || '???'}</b> разобран` };
+                    return `${timeHtml}${p.username || actor} зарегистрировался`;
                 case 'auction.listed':
-                    return { icon: '📢', title: 'Лот выставлен', body: `<b>${p.template_slug || '???'}</b> за ${p.price || 0} 💰` };
-                case 'auction.purchase':
-                    return { icon: '🛒', title: 'Покупка', body: `Куплено <b>${p.template_slug || '???'}</b> за ${p.payment_amount || 0} 💰` };
-                case 'auction.sale':
-                    return { icon: '💰', title: 'Продажа', body: `Продано <b>${p.template_slug || '???'}</b> за ${p.payment_amount || 0} 💰` };
-                case 'auction.cancelled':
-                    return { icon: '❌', title: 'Лот отменён', body: `<b>${p.template_slug || '???'}</b>` };
-                case 'trade.created':
-                    return { icon: '🤝', title: 'Обмен создан', body: `С <b>${p.partner_name || '???'}</b>` };
+                    return `${timeHtml}Аукцион: выставлен ${this.itemLink(p, 'template_slug', 'name', 'quantity')}`;
+                case 'auction.purchased':
+                    return `${timeHtml}Аукцион: покупка ${this.itemLink(p, 'template_slug', 'name', 'quantity')}`;
+                case 'auction.sold':
+                    return `${timeHtml}Аукцион: продажа ${this.itemLink(p, 'template_slug', 'name', 'quantity')}`;
                 case 'trade.completed':
-                    return { icon: '✨', title: 'Обмен завершён', body: `С <b>${p.partner_name || '???'}</b>` };
-                case 'trade.cancelled':
-                    return { icon: '❌', title: 'Обмен отменён', body: `ID: ${p.trade_uuid || '???'}` };
+                    return `${timeHtml}${actor} завершил обмен`;
+                case 'item.crafted':
+                    return `${timeHtml}Создан предмет ${this.itemLink(p, 'item_template_slug', 'custom_name')}`;
+                case 'item.disassembled':
+                    return `${timeHtml}Разобран предмет ${this.itemLink(p, 'item_template_slug', 'custom_name')}`;
+                case 'presence.changed':
+                    if (p.action === 'online') {
+                        return `${timeHtml}${p.character_name || actor} вошёл в игру`;
+                    }
+                    return null;
                 default:
-                    return { icon: '📌', title: event.type, body: JSON.stringify(p).slice(0, 100) };
+                    return null;
             }
-        }
+        },
+
+        formatPublicEventText(event) {
+            const el = document.createElement('div');
+            el.innerHTML = this.formatPublicEventHtml(event) || '';
+            return el.textContent;
+        },
     };
+
+    window.Journal = window.ChatPanel;
 
     // ================================================================
     //                     UI UPDATER
@@ -1194,21 +1730,38 @@
             let needsInventoryUpdate = false;
             let needsAuctionUpdate = false;
             let needsTradeUpdate = false;
+            let needsOnlineUpdate = false;
+            let tradeCompleted = false;
+            let tradeCreated = false;
 
             events.forEach(e => {
-                if (['item.received', 'item.removed', 'item.crafted', 'item.disassembled'].includes(e.type)) {
+                if (e.type === 'presence.changed') {
+                    needsOnlineUpdate = true;
+                }
+                if (['item.received', 'item.removed', 'item.crafted', 'item.disassembled', 'resource.transferred'].includes(e.type)) {
                     needsInventoryUpdate = true;
                 }
-                if (['auction.listed', 'auction.purchase', 'auction.sale', 'auction.cancelled'].includes(e.type)) {
+                if (['auction.listed', 'auction.purchased', 'auction.cancelled'].includes(e.type)) {
                     needsInventoryUpdate = true;
                     needsAuctionUpdate = true;
                 }
-                if (['trade.created', 'trade.updated', 'trade.completed', 'trade.cancelled'].includes(e.type)) {
+                if ([
+                    'trade.created', 'trade.updated', 'trade.item_added', 'trade.resource_added',
+                    'trade.confirmed', 'trade.cancelled', 'trade.completed',
+                ].includes(e.type)) {
                     needsTradeUpdate = true;
+                    if (e.type === 'trade.completed') tradeCompleted = true;
+                    if (e.type === 'trade.created') tradeCreated = true;
                 }
             });
 
-            if (needsInventoryUpdate) {
+            if (needsOnlineUpdate && WindowManager.isOpen('players')
+                && window.playersState?.activeTab === 'online'
+                && typeof window.renderOnlineView === 'function') {
+                setTimeout(() => window.renderOnlineView(), 100);
+            }
+
+            if (needsInventoryUpdate || needsTradeUpdate) {
                 setTimeout(() => loadPlayerData(), 100);
             }
             if (needsAuctionUpdate && WindowManager.isOpen('auction')) {
@@ -1217,13 +1770,135 @@
                     if (typeof window.loadMyLots === 'function') window.loadMyLots();
                 }, 150);
             }
-            if (needsTradeUpdate && WindowManager.isOpen('trade')) {
+            if (needsTradeUpdate) {
                 setTimeout(() => {
-                    if (typeof window.loadTrades === 'function') window.loadTrades();
+                    if (tradeCompleted && typeof window.onTradeCompleted === 'function') {
+                        window.onTradeCompleted();
+                    } else if (tradeCreated) {
+                        WindowManager.open('trade');
+                        if (typeof window.loadTrades === 'function') {
+                            window.loadTrades();
+                        }
+                    } else if (WindowManager.isOpen('trade') && typeof window.loadTrades === 'function') {
+                        window.loadTrades();
+                    }
                 }, 150);
             }
         }
     };
+
+    window.showPlayerContextMenu = function(event, uuid, name) {
+        if (window.GameItemTooltip) GameItemTooltip.hide();
+        const menu = document.getElementById('playerContextMenu');
+        if (!menu) return;
+        menu.dataset.playerUuid = uuid;
+        menu.dataset.playerName = name;
+        menu.style.left = event.clientX + 'px';
+        menu.style.top = event.clientY + 'px';
+        menu.classList.add('visible');
+    };
+
+    window.findResourceCraftRecipe = function(item) {
+        if (!item || !item.template_slug) return null;
+        return (GameState.recipes || []).find(r =>
+            r.type === 'resource' &&
+            r.craft_formula &&
+            Object.prototype.hasOwnProperty.call(r.craft_formula, item.template_slug)
+        ) || null;
+    };
+
+    window.readInventoryItemFromElement = function(itemEl) {
+        if (window.readItemDescriptorFromElement) {
+            return window.readItemDescriptorFromElement(itemEl);
+        }
+        return {
+            uuid: itemEl.dataset.itemUuid,
+            name: itemEl.dataset.name,
+            stage: itemEl.dataset.stage,
+            recipe_slug: itemEl.dataset.recipeSlug || '',
+            template_slug: itemEl.dataset.templateSlug,
+            quantity: parseInt(itemEl.dataset.quantity, 10) || 1,
+            max_stack: itemEl.dataset.maxStack ? parseInt(itemEl.dataset.maxStack, 10) : null,
+            icon: itemEl.dataset.icon,
+            slot_type: itemEl.dataset.slotType || '',
+            locked: itemEl.dataset.locked === '1',
+        };
+    };
+
+    window.showInventoryContextMenu = function(event, item) {
+        if (window.GameItemTooltip) GameItemTooltip.hide();
+        const menu = document.getElementById('inventoryContextMenu');
+        if (!menu || !item) return;
+
+        menu.dataset.itemJson = JSON.stringify(item);
+        const craftBtn = menu.querySelector('[data-action="craft"]');
+        const disBtn = menu.querySelector('[data-action="disassemble"]');
+        const transformBtn = menu.querySelector('[data-action="transform"]');
+
+        const isBlueprint = item.stage === 'blueprint';
+        const isItem = item.stage === 'item';
+        const resourceRecipe = findResourceCraftRecipe(item);
+
+        craftBtn.style.display = isBlueprint ? 'block' : 'none';
+        disBtn.style.display = isItem ? 'block' : 'none';
+        transformBtn.style.display = resourceRecipe ? 'block' : 'none';
+
+        if (!isBlueprint && !isItem && !resourceRecipe) return;
+
+        menu.style.left = event.clientX + 'px';
+        menu.style.top = event.clientY + 'px';
+        menu.classList.add('visible');
+    };
+
+    document.getElementById('inventoryContextMenu')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        const menu = document.getElementById('inventoryContextMenu');
+        const action = btn.dataset.action;
+        let item = null;
+        try {
+            item = JSON.parse(menu?.dataset.itemJson || 'null');
+        } catch (err) {
+            item = null;
+        }
+        menu.classList.remove('visible');
+
+        if (!item) return;
+
+        WindowManager.open('workbench');
+        setTimeout(() => {
+            if (typeof handleWorkbenchDrop === 'function') {
+                handleWorkbenchDrop(item);
+            }
+        }, 100);
+    });
+
+    document.addEventListener('click', () => {
+        document.getElementById('playerContextMenu')?.classList.remove('visible');
+        document.getElementById('inventoryContextMenu')?.classList.remove('visible');
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            document.getElementById('playerContextMenu')?.classList.remove('visible');
+            document.getElementById('inventoryContextMenu')?.classList.remove('visible');
+        }
+    });
+
+    document.getElementById('playerContextMenu')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        const menu = document.getElementById('playerContextMenu');
+        const uuid = menu?.dataset.playerUuid;
+        const action = btn.dataset.action;
+        menu.classList.remove('visible');
+
+        if (action === 'trade' && uuid) {
+            startTrade(uuid);
+        } else if (action === 'friend' || action === 'guild') {
+            showMsg('Скоро', 'info');
+        }
+    });
 
     document.addEventListener('DOMContentLoaded', async () => {
         const characterUuid = localStorage.getItem('characterUuid');
@@ -1238,19 +1913,29 @@
         WindowManager.init();
         await WindowManager.loadPositions();
 
-        await Promise.all([loadPlayerData(), loadRecipes()]);
+        await Promise.all([
+            loadPlayerData(),
+            loadRecipes(),
+            GameSettings.load(characterUuid),
+            window.PlayPanelManager ? PlayPanelManager.load(characterUuid) : Promise.resolve(),
+            window.GameItemPresenter ? GameItemPresenter.loadTemplateCache() : Promise.resolve(),
+        ]);
 
         WindowManager.open('journal');
         WindowManager.open('inventory');
 
         // Запускаем polling событий
         window.characterUuid = characterUuid;
+        if (window.playersState) {
+            window.playersState.characterUuid = characterUuid;
+        }
         if (window.tradeState) {
             window.tradeState.characterUuid = characterUuid;
         }
+        EventPoller.characterUuid = characterUuid;
+        ChatPanel.init();
+        await ChatPanel.loadInitial();
         EventPoller.start(characterUuid);
-        Journal.init();
-        Journal.loadInitial();
         UIUpdater.init();
 
         // Heartbeat каждые 30 секунд
@@ -1260,41 +1945,46 @@
         GameApi.fetch(`/api/heartbeat/${characterUuid}`, { method: 'POST' }).catch(() => {});
 
         const inventoryContent = document.getElementById('inventoryContent');
+        if (!inventoryContent) return;
+
+        inventoryContent.addEventListener('contextmenu', (e) => {
+            const itemEl = e.target.closest('.game-item-interactive');
+            if (!itemEl) return;
+            e.preventDefault();
+            const fullItem = readInventoryItemFromElement(itemEl);
+            showInventoryContextMenu(e, fullItem);
+        });
+
+        document.addEventListener('contextmenu', (e) => {
+            if (e.target.closest('#inventoryContent .game-item-interactive')) return;
+            if (e.target.closest('.online-player-row')) return;
+            e.preventDefault();
+        }, true);
+
         inventoryContent.addEventListener('dblclick', (e) => {
-            const itemEl = e.target.closest('.item');
+            const itemEl = e.target.closest('.game-item-interactive');
             if (!itemEl) return;
 
-            const uuid = itemEl.dataset.uuid;
-            const item = GameState.inventory.find(i => i.uuid === uuid);
-            if (!item) return;
+            const fullItem = readInventoryItemFromElement(itemEl);
+            if (fullItem.locked) {
+                if (typeof showMsg === 'function') showMsg('Предмет занят', 'info');
+                return;
+            }
+            if (!fullItem.uuid && fullItem.stage !== 'blueprint' && fullItem.stage !== 'item' && !fullItem.template_slug) return;
 
-            const fullItem = {
-                ...item,
-                uuid: itemEl.dataset.uuid,
-                name: itemEl.dataset.name,
-                stage: itemEl.dataset.stage || item.stage,
-                recipe_slug: itemEl.dataset.recipeSlug || item.recipe_slug,
-                template_slug: itemEl.dataset.templateSlug || item.template_slug,
-            };
+            const isResource = fullItem.template_slug && !fullItem.recipe_slug
+                && fullItem.stage !== 'blueprint' && fullItem.stage !== 'item';
 
-            const activeWindows = ['workbench', 'auction', 'trade'].filter(w => WindowManager.isOpen(w));
-            const activeWindow = activeWindows[0];
-
-            if (activeWindow === 'workbench' && typeof handleWorkbenchDrop === 'function') {
-                handleWorkbenchDrop(fullItem);
-            } else if (activeWindow === 'auction' && typeof handleAuctionDrop === 'function') {
+            if (WindowManager.isOpen('auction') && typeof handleAuctionDrop === 'function') {
                 handleAuctionDrop(fullItem);
-            } else if (activeWindow === 'trade' && typeof handleTradeDrop === 'function') {
-                handleTradeDrop(fullItem);
-            } else {
-                if (fullItem.stage === 'blueprint' || fullItem.stage === 'item') {
-                    WindowManager.open('workbench');
-                    setTimeout(() => {
-                        if (typeof handleWorkbenchDrop === 'function') {
-                            handleWorkbenchDrop(fullItem);
-                        }
-                    }, 100);
-                }
+            } else if (WindowManager.isOpen('trade') && typeof handleTradeDrop === 'function') {
+                handleTradeDrop(fullItem, { fullStack: isResource });
+            } else if (WindowManager.isOpen('workbench') && typeof handleWorkbenchDrop === 'function') {
+                handleWorkbenchDrop(fullItem);
+            } else if (window.StorageQuickActions && StorageQuickActions.isEquippable(fullItem)) {
+                const slotEl = itemEl.closest('.storage-slot[data-slot-uuid]');
+                const fromSlotUuid = slotEl ? slotEl.dataset.slotUuid : '';
+                StorageQuickActions.equipItem(fullItem, fromSlotUuid);
             }
         });
     });

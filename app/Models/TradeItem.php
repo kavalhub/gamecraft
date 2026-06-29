@@ -15,5 +15,5 @@ class TradeItem extends Model
     public function trade(): BelongsTo { return $this->belongsTo(TradeOffer::class, 'trade_uuid', 'uuid'); }
     public function character(): BelongsTo { return $this->belongsTo(Character::class, 'character_uuid', 'uuid'); }
     public function item(): BelongsTo { return $this->belongsTo(Item::class, 'item_uuid', 'uuid'); }
-    public function resource(): BelongsTo { return $this->belongsTo(Resource::class, 'resource_uuid', 'uuid'); }
+    public function resource(): BelongsTo { return $this->belongsTo(Resources::class, 'resource_uuid', 'uuid'); }
 }

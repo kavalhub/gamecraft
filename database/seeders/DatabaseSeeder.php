@@ -6,12 +6,13 @@ namespace Database\Seeders;
 
 use App\Models\Character;
 use App\Models\CharacterType;
-use App\Models\Resource;
+use App\Models\Resources;
 use App\Models\Slot;
 use App\Models\Storage;
 use App\Models\StorageType;
 use App\Models\User;
 use App\Services\ContentImportService;
+use App\Services\StorageProvisioningService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
@@ -25,7 +26,7 @@ class DatabaseSeeder extends Seeder
 
         $importService = app(ContentImportService::class);
         $baseContentPath = base_path('content/base.json');
-        
+
         if (File::exists($baseContentPath)) {
             $data = json_decode(File::get($baseContentPath), true);
             $report = $importService->import($data);
@@ -70,9 +71,13 @@ class DatabaseSeeder extends Seeder
     private function seedStorageTypes(): void
     {
         $types = [
-            ['type' => 'inventory', 'name' => 'Инвентарь', 'allowed_types' => ['slots' => [['slot_type' => null, 'count' => 50]]]],
+            ['type' => 'inventory', 'name' => 'Инвентарь', 'allowed_types' => ['slots' => [
+                ['slot_type' => 'gold', 'count' => 1, 'hidden' => true, 'priority_fill' => true, 'auto_reclaim' => true],
+                ['slot_type' => null, 'count' => 36],
+            ]]],
             ['type' => 'equipment', 'name' => 'Экипировка', 'allowed_types' => ['slots' => [
                 ['slot_type' => 'equipment_head', 'count' => 1],
+                ['slot_type' => 'equipment_shoulders', 'count' => 1],
                 ['slot_type' => 'equipment_chest', 'count' => 1],
                 ['slot_type' => 'equipment_legs', 'count' => 1],
                 ['slot_type' => 'equipment_weapon', 'count' => 1],
@@ -138,6 +143,8 @@ class DatabaseSeeder extends Seeder
             ['active' => true]
         );
 
+        $provisioning = app(StorageProvisioningService::class);
+
         $inventory = Storage::firstOrCreate(
             ['characters_uuid' => $character->uuid, 'storage_type' => 'inventory'],
             ['name' => 'Инвентарь', 'active' => true]
@@ -154,35 +161,18 @@ class DatabaseSeeder extends Seeder
         );
 
         if ($inventory->slots()->count() === 0) {
-            for ($i = 0; $i < 50; $i++) {
-                Slot::create(['storage_uuid' => $inventory->uuid, 'slot_type' => null]);
-            }
+            $provisioning->provisionStorageSlots($inventory);
         }
 
         if ($equipment->slots()->count() === 0) {
-            $slotTypes = ['equipment_head', 'equipment_chest', 'equipment_legs', 'equipment_weapon', 'equipment_offhand', 'equipment_ring', 'equipment_ring', 'equipment_amulet'];
-            foreach ($slotTypes as $slotType) {
-                Slot::create(['storage_uuid' => $equipment->uuid, 'slot_type' => $slotType]);
-            }
+            $provisioning->provisionStorageSlots($equipment);
         }
 
         if ($bank->slots()->count() === 0) {
-            for ($i = 0; $i < 100; $i++) {
-                Slot::create(['storage_uuid' => $bank->uuid, 'slot_type' => null]);
-            }
+            $provisioning->provisionStorageSlots($bank);
         }
 
-        $goldSlot = $inventory->slots()->first();
-        if ($goldSlot && !Resource::where('slot_uuid', $goldSlot->uuid)->where('template_slug', 'gold')->exists()) {
-            Resource::create([
-                'slot_uuid' => $goldSlot->uuid,
-                'recipe_slug' => 'gold',
-                'template_slug' => 'gold',
-                'slot_type' => 'gold',
-                'max_stack' => null,
-                'quantity' => 1000,
-            ]);
-        }
+        $provisioning->ensureStartingGold($character);
 
         $this->command->info("Test user created: {$user->email} ({$user->uuid})");
         $this->command->info("Test character created: {$character->name} ({$character->uuid})");

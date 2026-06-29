@@ -8,6 +8,7 @@ use App\Models\Character;
 use App\Models\User;
 use App\Services\CraftingService;
 use App\Services\InventoryService;
+use App\Services\StorageProvisioningService;
 use App\Services\TradeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -48,24 +49,8 @@ class TradeServiceTest extends TestCase
             'active' => true,
         ]);
 
-        // Создаём хранилища для player2
-        $inventory = \App\Models\Storage::create([
-            'uuid' => \Illuminate\Support\Str::uuid()->toString(),
-            'characters_uuid' => $this->player2->uuid,
-            'storage_type' => 'inventory',
-            'name' => 'Инвентарь',
-            'active' => true,
-        ]);
-        for ($i = 0; $i < 50; $i++) {
-            \App\Models\Slot::create([
-                'uuid' => \Illuminate\Support\Str::uuid()->toString(),
-                'storage_uuid' => $inventory->uuid,
-                'slot_type' => null,
-            ]);
-        }
-
-        // Player2 начинает с 0 золота, добавим 1000
-        $this->inventoryService->addResource($this->player2, 'gold', 1000);
+        // Создаём хранилища и стартовое золото для player2
+        app(StorageProvisioningService::class)->provisionDefaults($this->player2);
     }
 
     public function test_create_trade(): void
@@ -99,7 +84,10 @@ class TradeServiceTest extends TestCase
         $this->assertEquals($this->player1->uuid, $tradeItem->character_uuid);
 
         $item->refresh();
+        $player1Inventory = $this->player1->storages()->where('storage_type', 'inventory')->first();
+        $this->assertEquals($player1Inventory->uuid, $item->slot->storage_uuid);
         $this->assertNotNull($item->temporary_slot_uuid);
+        $this->assertDatabaseHas('temporary_slots', ['uuid' => $item->temporary_slot_uuid]);
     }
 
     public function test_add_resource_to_trade(): void
@@ -169,12 +157,17 @@ class TradeServiceTest extends TestCase
         $this->assertEquals('cancelled', $trade->status);
 
         $item->refresh();
-        $this->assertNull($item->temporary_slot_uuid);
+        $player1Inventory = $this->player1->storages()->where('storage_type', 'inventory')->first();
+        $this->assertEquals($player1Inventory->uuid, $item->slot->storage_uuid);
     }
 
     public function test_get_character_trades(): void
     {
+        // Создаём первый обмен и отменяем его
         $trade1 = $this->tradeService->createTrade($this->player1, $this->player2);
+        $this->tradeService->cancelTrade($this->player1, $trade1);
+
+        // Создаём второй обмен
         $trade2 = $this->tradeService->createTrade($this->player2, $this->player1);
 
         $trades = $this->tradeService->getCharacterTrades($this->player1);
