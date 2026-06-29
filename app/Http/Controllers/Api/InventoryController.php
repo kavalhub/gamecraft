@@ -31,7 +31,9 @@ class InventoryController extends Controller
                 'template_slug' => $r->template_slug,
                 'name' => $r->template->name,
                 'icon' => $r->template->icon,
+                'description' => $r->template->description,
                 'quantity' => $r->quantity,
+                'max_stack' => $r->max_stack ?? $r->template->max_stack,
                 'slot_uuid' => $r->slot_uuid,
             ]),
             'items' => $items->map(fn($i) => [
@@ -39,6 +41,7 @@ class InventoryController extends Controller
                 'template_slug' => $i->template_slug,
                 'name' => $i->custom_name ?? $i->template->name,
                 'icon' => $i->template->icon,
+                'description' => $i->template->description,
                 'stage' => $i->stage,
                 'recipe_slug' => $i->recipe_slug,
                 'custom_name' => $i->custom_name,

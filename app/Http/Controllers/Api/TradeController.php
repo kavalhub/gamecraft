@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\TradeUuidRequest;
 use App\Models\Character;
 use App\Models\TradeOffer;
+use App\Services\StorageLayoutService;
 use App\Services\TradeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,7 +16,8 @@ use Illuminate\Http\Request;
 class TradeController extends Controller
 {
     public function __construct(
-        private TradeService $tradeService
+        private TradeService $tradeService,
+        private StorageLayoutService $layoutService
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -83,7 +85,10 @@ class TradeController extends Controller
         try {
             $this->tradeService->addItemToTrade($character, $trade, $request->item_uuid);
 
-            return response()->json(['success' => true]);
+            return response()->json([
+                'success' => true,
+                'trade' => $this->formatTrade($trade->fresh()->load(['initiator', 'partner', 'items.item.template', 'items.resource.template'])),
+            ]);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 400);
         }
@@ -109,7 +114,10 @@ class TradeController extends Controller
                 (int) $request->quantity
             );
 
-            return response()->json(['success' => true]);
+            return response()->json([
+                'success' => true,
+                'trade' => $this->formatTrade($trade->fresh()->load(['initiator', 'partner', 'items.item.template', 'items.resource.template'])),
+            ]);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 400);
         }
@@ -143,7 +151,10 @@ class TradeController extends Controller
         try {
             $this->tradeService->cancelTrade($character, $trade);
 
-            return response()->json(['success' => true]);
+            return response()->json([
+                'success' => true,
+                'trade' => $this->formatTrade($trade->fresh()->load(['initiator', 'partner', 'items.item.template', 'items.resource.template'])),
+            ]);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 400);
         }
@@ -152,6 +163,14 @@ class TradeController extends Controller
     private function formatTrade(TradeOffer $trade): array
     {
         $trade->loadMissing(['initiator', 'partner', 'items.item.template', 'items.resource.template']);
+
+        $character = request()->attributes->get('character');
+        $partner = $trade->initiator_uuid === $character?->uuid ? $trade->partner : $trade->initiator;
+
+        $tradeSlots = ['my_trade_slots' => null, 'partner_trade_slots' => null];
+        if ($character) {
+            $tradeSlots = $this->layoutService->formatTradeSlotGrids($character, $partner);
+        }
 
         return [
             'uuid' => $trade->uuid,
@@ -169,7 +188,11 @@ class TradeController extends Controller
                 'uuid' => $trade->partner->uuid,
                 'name' => $trade->partner->name,
             ] : null,
+            'my_trade_slots' => $tradeSlots['my_trade_slots'],
+            'partner_trade_slots' => $tradeSlots['partner_trade_slots'],
             'items' => $trade->items->map(function ($item) {
+                $template = $item->resource?->template ?? $item->item?->template;
+
                 return [
                     'uuid' => $item->uuid,
                     'character_uuid' => $item->character_uuid,
@@ -178,7 +201,12 @@ class TradeController extends Controller
                     'template_slug' => $item->template_slug
                         ?? $item->item?->template_slug
                         ?? $item->resource?->template_slug,
+                    'name' => $item->item?->custom_name ?? $template?->name,
+                    'icon' => $template?->icon,
+                    'description' => $template?->description,
+                    'stage' => $item->item?->stage,
                     'quantity' => $item->quantity,
+                    'is_resource' => $item->resource_uuid !== null,
                 ];
             }),
         ];

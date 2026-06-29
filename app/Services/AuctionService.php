@@ -7,10 +7,11 @@ namespace App\Services;
 use App\Models\AuctionLot;
 use App\Models\Character;
 use App\Models\Item;
-use App\Models\Resource;
+use App\Models\Resources;
 use App\Models\Slot;
 use App\Models\Storage;
 use App\Models\TemporarySlot;
+use App\Services\StorageProvisioningService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -115,6 +116,21 @@ class AuctionService
     }
 
     /**
+     * Выставить лот одним действием (prepare + confirm)
+     */
+    public function listLot(
+        Character $seller,
+        string $itemUuid,
+        int $price
+    ): AuctionLot {
+        return DB::transaction(function () use ($seller, $itemUuid, $price) {
+            $this->prepareLot($seller, $itemUuid, $price);
+
+            return $this->confirmLot($seller, $itemUuid, $price);
+        });
+    }
+
+    /**
      * Шаг 2: Подтвердить выставление (предмет перемещается в аукцион)
      */
     public function confirmLot(
@@ -126,6 +142,8 @@ class AuctionService
             $item = Item::where('uuid', $itemUuid)
                 ->whereNotNull('temporary_slot_uuid')
                 ->firstOrFail();
+
+            $sourceSlotUuid = $item->slot_uuid;
 
             $temporarySlot = TemporarySlot::where('uuid', $item->temporary_slot_uuid)->firstOrFail();
             if ($temporarySlot->character_uuid !== $seller->uuid) {
@@ -186,7 +204,7 @@ class AuctionService
                     'seller_uuid' => $seller->uuid,
                     'template_slug' => $item->template_slug,
                     'price' => $price,
-                    'from_slot_uuid' => $slot->uuid ?? null,
+                    'from_slot_uuid' => $sourceSlotUuid,
                     'to_slot_uuid' => $auctionSlot->uuid,
                 ],
                 $seller->uuid,
@@ -202,10 +220,15 @@ class AuctionService
      */
     public function buyLot(
         Character $buyer,
-        string $lotUuid
+        string $lotUuid,
+        int $quantity = 1
     ): array {
-        return DB::transaction(function () use ($buyer, $lotUuid) {
-            $lot = AuctionLot::where('uuid', $lotUuid)
+        return DB::transaction(function () use ($buyer, $lotUuid, $quantity) {
+            $provisioning = app(StorageProvisioningService::class);
+            $provisioning->consolidateInventoryResources($buyer);
+
+            $lot = AuctionLot::with('template')
+                ->where('uuid', $lotUuid)
                 ->where('status', 'active')
                 ->firstOrFail();
 
@@ -213,29 +236,94 @@ class AuctionService
                 throw new \RuntimeException('Нельзя купить свой собственный лот');
             }
 
-            // Проверяем золото покупателя
-            $buyerGold = $this->inventoryService->getResourceQuantity($buyer, 'gold');
+            if ($quantity < 1) {
+                throw new \RuntimeException('Количество должно быть больше 0');
+            }
+
+            if ($lot->is_infinite) {
+                $maxPurchasable = $this->getMaxPurchasableQuantity($buyer, $lot);
+                if ($quantity > $maxPurchasable) {
+                    throw new \RuntimeException("Можно купить не более {$maxPurchasable} шт.");
+                }
+
+                $totalPrice = $lot->price * $quantity;
+                $buyerGold = $provisioning->getInventoryGoldQuantity($buyer);
+                if ($buyerGold < $totalPrice) {
+                    throw new \RuntimeException("Недостаточно золота: есть {$buyerGold}, нужно {$totalPrice}");
+                }
+
+                return $this->buyInfiniteLot($buyer, $lot, $quantity);
+            }
+
+            if ($quantity !== $lot->quantity) {
+                throw new \RuntimeException('Можно купить только весь лот целиком');
+            }
+
+            $buyerGold = $provisioning->getInventoryGoldQuantity($buyer);
             if ($buyerGold < $lot->price) {
                 throw new \RuntimeException("Недостаточно золота: есть {$buyerGold}, нужно {$lot->price}");
             }
 
-            if ($lot->is_infinite) {
-                return $this->buyInfiniteLot($buyer, $lot);
-            } else {
-                return $this->buyFiniteLot($buyer, $lot);
-            }
+            return $this->buyFiniteLot($buyer, $lot);
         });
+    }
+
+    /**
+     * Максимальное количество для покупки бесконечного лота
+     */
+    public function getMaxPurchasableQuantity(Character $buyer, AuctionLot $lot): int
+    {
+        return $this->getBuyLimits($buyer, $lot)['max_purchasable'];
+    }
+
+    /**
+     * @return array{max_by_gold: int, max_by_inventory: int, max_purchasable: int, gold_available: int}
+     */
+    public function getBuyLimits(Character $buyer, AuctionLot $lot): array
+    {
+        $provisioning = app(StorageProvisioningService::class);
+        $provisioning->consolidateInventoryResources($buyer);
+        $gold = $provisioning->getInventoryGoldQuantity($buyer);
+
+        if (!$lot->is_infinite) {
+            $canBuy = $gold >= $lot->price && $lot->quantity > 0;
+
+            return [
+                'max_by_gold' => $canBuy ? $lot->quantity : 0,
+                'max_by_inventory' => $lot->quantity,
+                'max_purchasable' => $canBuy ? $lot->quantity : 0,
+                'gold_available' => $gold,
+            ];
+        }
+
+        $maxByGold = $lot->price > 0 ? intdiv($gold, $lot->price) : 0;
+        $maxByInventory = $this->inventoryService->getMaxAddableQuantity($buyer, $lot->template_slug);
+        $maxPurchasable = min($maxByGold, $this->capUiLimit($maxByInventory));
+
+        return [
+            'max_by_gold' => $maxByGold,
+            'max_by_inventory' => $this->capUiLimit($maxByInventory),
+            'max_purchasable' => $maxPurchasable,
+            'gold_available' => $gold,
+        ];
+    }
+
+    private function capUiLimit(int $value): int
+    {
+        $cap = 99999;
+
+        return $value > $cap ? $cap : $value;
     }
 
     /**
      * Покупка бесконечного лота (NPC-торговец)
      */
-    private function buyInfiniteLot(Character $buyer, AuctionLot $lot): array
+    private function buyInfiniteLot(Character $buyer, AuctionLot $lot, int $quantity): array
     {
-        // Снимаем золото с покупателя
-        $this->inventoryService->removeResource($buyer, 'gold', $lot->price);
+        $totalPrice = $lot->price * $quantity;
 
-        // Создаём новый предмет/ресурс для покупателя (копию)
+        $this->inventoryService->removeResource($buyer, 'gold', $totalPrice);
+
         $template = $lot->template;
         $correlationUuid = Str::uuid()->toString();
 
@@ -243,64 +331,82 @@ class AuctionService
             $result = $this->inventoryService->addResource(
                 $buyer,
                 $lot->template_slug,
-                $lot->quantity
+                $quantity
             );
         } elseif ($template->type === 'blueprint') {
-            // Для blueprint-шаблонов используем recipe_slug из template
-            $result = $this->inventoryService->addItem(
-                $buyer,
-                $lot->template_slug,
-                'blueprint',
-                null,
-                $template->recipe_slug,
-                null,
-                null
-            );
+            $result = null;
+            for ($i = 0; $i < $quantity; $i++) {
+                $result = $this->inventoryService->addItem(
+                    $buyer,
+                    $lot->template_slug,
+                    'blueprint',
+                    null,
+                    $template->recipe_slug,
+                    null,
+                    null
+                );
+            }
         } else {
-            $result = $this->inventoryService->addItem(
-                $buyer,
-                $lot->template_slug,
-                'item',
-                null,
-                null,
-                null,
-                $template->base_stats
-            );
+            $result = null;
+            for ($i = 0; $i < $quantity; $i++) {
+                $result = $this->inventoryService->addItem(
+                    $buyer,
+                    $lot->template_slug,
+                    'item',
+                    null,
+                    null,
+                    null,
+                    $template->base_stats
+                );
+            }
         }
 
-        // Логируем в аукционную историю
         \App\Models\AuctionHistory::create([
             'lot_uuid' => $lot->uuid,
             'seller_uuid' => $lot->seller_uuid,
             'buyer_uuid' => $buyer->uuid,
             'template_slug' => $lot->template_slug,
-            'quantity' => $lot->quantity,
-            'price' => $lot->price,
+            'quantity' => $quantity,
+            'price' => $totalPrice,
             'commission' => 0,
-            'seller_received' => 0, // NPC не получает золото
+            'seller_received' => 0,
             'action' => 'sold',
             'occurred_at' => now(),
         ]);
+
+        $purchasePayload = [
+            'buyer_uuid' => $buyer->uuid,
+            'seller_uuid' => $lot->seller_uuid,
+            'template_slug' => $lot->template_slug,
+            'quantity' => $quantity,
+            'price' => $totalPrice,
+            'unit_price' => $lot->price,
+            'is_infinite' => true,
+            'role' => 'buyer',
+        ];
 
         $this->eventStore->record(
             'auction.purchased',
             'auction_lot',
             $lot->uuid,
-            [
-                'buyer_uuid' => $buyer->uuid,
-                'seller_uuid' => $lot->seller_uuid,
-                'template_slug' => $lot->template_slug,
-                'quantity' => $lot->quantity,
-                'price' => $lot->price,
-                'is_infinite' => true,
-            ],
+            $purchasePayload,
             $buyer->uuid,
+            $correlationUuid
+        );
+
+        $this->eventStore->record(
+            'auction.sold',
+            'auction_lot',
+            $lot->uuid,
+            array_merge($purchasePayload, ['role' => 'seller']),
+            $lot->seller_uuid,
             $correlationUuid
         );
 
         return [
             'lot' => $lot,
             'result' => $result,
+            'quantity' => $quantity,
             'is_infinite' => true,
         ];
     }
@@ -327,7 +433,7 @@ class AuctionService
             ->firstOrFail();
 
         // Ищем свободный слот в инвентаре покупателя
-        $occupiedSlotUuids = Item::pluck('slot_uuid')->merge(Resource::pluck('slot_uuid'));
+        $occupiedSlotUuids = Item::pluck('slot_uuid')->merge(Resources::pluck('slot_uuid'));
         $freeSlot = $buyerInventory->slots()
             ->whereNotIn('uuid', $occupiedSlotUuids)
             ->first();
@@ -377,22 +483,35 @@ class AuctionService
             'occurred_at' => now(),
         ]);
 
+        $purchasePayload = [
+            'buyer_uuid' => $buyer->uuid,
+            'seller_uuid' => $lot->seller_uuid,
+            'item_uuid' => $item->uuid,
+            'template_slug' => $lot->template_slug,
+            'price' => $lot->price,
+            'commission' => $commission,
+            'seller_received' => $sellerReceived,
+            'from_slot_uuid' => $oldSlotUuid,
+            'to_slot_uuid' => $freeSlot->uuid,
+            'quantity' => 1,
+            'role' => 'buyer',
+        ];
+
         $this->eventStore->record(
             'auction.purchased',
             'auction_lot',
             $lot->uuid,
-            [
-                'buyer_uuid' => $buyer->uuid,
-                'seller_uuid' => $lot->seller_uuid,
-                'item_uuid' => $item->uuid,
-                'template_slug' => $lot->template_slug,
-                'price' => $lot->price,
-                'commission' => $commission,
-                'seller_received' => $sellerReceived,
-                'from_slot_uuid' => $oldSlotUuid,
-                'to_slot_uuid' => $freeSlot->uuid,
-            ],
+            $purchasePayload,
             $buyer->uuid,
+            $correlationUuid
+        );
+
+        $this->eventStore->record(
+            'auction.sold',
+            'auction_lot',
+            $lot->uuid,
+            array_merge($purchasePayload, ['role' => 'seller']),
+            $lot->seller_uuid,
             $correlationUuid
         );
 
@@ -436,7 +555,7 @@ class AuctionService
                 ->firstOrFail();
 
             // Ищем свободный слот в инвентаре продавца
-            $occupiedSlotUuids = Item::pluck('slot_uuid')->merge(Resource::pluck('slot_uuid'));
+            $occupiedSlotUuids = Item::pluck('slot_uuid')->merge(Resources::pluck('slot_uuid'));
             $freeSlot = $sellerInventory->slots()
                 ->whereNotIn('uuid', $occupiedSlotUuids)
                 ->first();

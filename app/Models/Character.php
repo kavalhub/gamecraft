@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 class Character extends Model
@@ -31,6 +32,11 @@ class Character extends Model
     public function storages(): HasMany
     {
         return $this->hasMany(Storage::class, 'characters_uuid', 'uuid');
+    }
+
+    public function stats(): HasOne
+    {
+        return $this->hasOne(CharacterStat::class, 'character_uuid', 'uuid');
     }
 
     public function isPlayer(): bool { return $this->character_type === 'player'; }

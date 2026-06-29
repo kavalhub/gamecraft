@@ -1,24 +1,53 @@
-<!-- Trade Window -->
-<div id="tradeWindow" class="window" data-window="trade" style="width: 800px; height: 500px;">
-    <div class="window-header">
-        <span class="window-icon">🤝</span>
-        <span class="window-title">Обмен</span>
-        <button class="window-close" onclick="WindowManager.close('trade')">✕</button>
-    </div>
-    <div class="window-content" id="tradeContent">
-        <!-- Контент будет динамически загружаться -->
-    </div>
-</div>
+<div id="tradeContent"></div>
 
 <script>
 window.tradeState = {
     characterUuid: null,
     currentTrade: null,
-    view: 'online',
 };
+
+const SLOT_GAP = 5;
+
+function getTradeSlotSize() {
+    return (window.GameSettings && typeof window.GameSettings.getSlotSize === 'function')
+        ? window.GameSettings.getSlotSize() : 44;
+}
 
 function tradeApiUrl(path) {
     return `/api/trade/${tradeState.characterUuid}${path}`;
+}
+
+function mergeTradeSlots(trade) {
+    if (window.StorageManager) {
+        if (StorageManager.myTradeSlots) trade.my_trade_slots = StorageManager.myTradeSlots;
+        if (StorageManager.partnerTradeSlots) trade.partner_trade_slots = StorageManager.partnerTradeSlots;
+    }
+    return trade;
+}
+
+function resizeTradeWindow(cols, rows) {
+    const win = document.getElementById('window-trade');
+    if (!win) return;
+    const slotSize = getTradeSlotSize();
+    const headerH = win.querySelector('.window-header')?.offsetHeight || 32;
+    const barH = win.querySelector('.trade-participants-bar')?.offsetHeight || 40;
+    const footerH = win.querySelector('.trade-footer')?.offsetHeight || 52;
+    const gridW = cols * slotSize + (cols - 1) * SLOT_GAP;
+    const gridH = rows * slotSize + (rows - 1) * SLOT_GAP;
+    const bodyW = gridW * 2 + 24 + 32;
+    win.style.width = Math.max(360, bodyW) + 'px';
+    win.style.height = (headerH + barH + gridH + 16 + footerH) + 'px';
+
+    if (window.WindowResizer) {
+        WindowResizer.register('trade', function() {
+            if (tradeState.currentTrade) {
+                const slots = tradeState.currentTrade.my_trade_slots || { slots: [], cols: 4 };
+                const c = slots.cols || 4;
+                const r = Math.ceil((slots.slots || []).length / c) || 5;
+                resizeTradeWindow(c, r);
+            }
+        });
+    }
 }
 
 window.openTradeWindow = function() {
@@ -30,13 +59,11 @@ window.openTradeWindow = function() {
         .then(r => r.json())
         .then(data => {
             if (data.trade) {
-                tradeState.currentTrade = data.trade;
-                tradeState.view = 'trade';
-                renderTradeView();
-            } else {
-                tradeState.view = 'online';
-                renderOnlineView();
+                tradeState.currentTrade = mergeTradeSlots(data.trade);
+                return refreshTradeData().then(() => renderTradeView());
             }
+            tradeState.currentTrade = null;
+            renderTradeEmptyView();
         })
         .catch(err => console.error('Fetch error:', err));
 };
@@ -48,64 +75,34 @@ window.closeTradeWindow = function() {
             body: JSON.stringify({ trade_uuid: tradeState.currentTrade.uuid }),
         }).then(() => {
             tradeState.currentTrade = null;
-            tradeState.view = 'online';
         });
     }
 };
 
-function renderOnlineView() {
+function renderTradeEmptyView() {
     const content = document.getElementById('tradeContent');
-
-    GameApi.fetch('/api/online')
-        .then(r => r.json())
-        .then(data => {
-            const onlinePlayers = data.characters.filter(p => p.uuid !== tradeState.characterUuid);
-
-            let html = '<div style="padding: 20px;">';
-            html += '<h3 style="margin-bottom: 20px;">Игроки онлайн</h3>';
-
-            if (onlinePlayers.length === 0) {
-                html += '<p style="color: #888;">Нет других игроков онлайн</p>';
-            } else {
-                html += '<div style="display: flex; flex-direction: column; gap: 10px;">';
-                onlinePlayers.forEach(player => {
-                    html += `
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #2a2a2a; border-radius: 4px;">
-                            <span>${player.name}</span>
-                            <button onclick="startTrade('${player.uuid}')" class="btn btn-primary">
-                                🤝 Обмен
-                            </button>
-                        </div>
-                    `;
-                });
-                html += '</div>';
-            }
-
-            html += '</div>';
-            content.innerHTML = html;
-        });
+    if (!content) return;
+    const win = document.getElementById('window-trade');
+    if (win) { win.style.width = '360px'; win.style.height = '200px'; }
+    content.innerHTML = '<div style="padding:24px;text-align:center;color:#888;">Нет активного обмена</div>';
 }
 
-window.startTrade = function(partnerUuid) {
-    GameApi.fetch(tradeApiUrl('/create'), {
-        method: 'POST',
-        body: JSON.stringify({ partner_uuid: partnerUuid }),
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success && data.trade) {
-            tradeState.currentTrade = data.trade;
-            tradeState.view = 'trade';
-            renderTradeView();
-        } else {
-            showMsg(data.error || 'Ошибка создания обмена', 'error');
+window.refreshTradeData = function() {
+    if (!tradeState.characterUuid) return Promise.resolve();
+    return StorageManager.load(tradeState.characterUuid, 'inventory,trade').then(function() {
+        if (tradeState.currentTrade) {
+            mergeTradeSlots(tradeState.currentTrade);
         }
     });
 };
 
-function renderTradeView() {
+window.renderTradeView = function() {
     const content = document.getElementById('tradeContent');
     const trade = tradeState.currentTrade;
+    if (!trade) {
+        renderTradeEmptyView();
+        return;
+    }
 
     const isInitiator = trade.initiator.uuid === tradeState.characterUuid;
     const partner = isInitiator ? trade.partner : trade.initiator;
@@ -114,90 +111,107 @@ function renderTradeView() {
     const myAccepted = isInitiator ? trade.initiator_accepted : trade.partner_accepted;
     const partnerAccepted = isInitiator ? trade.partner_accepted : trade.initiator_accepted;
 
+    const partnerSlots = trade.partner_trade_slots || { slots: [], cols: 4 };
+    const mySlots = trade.my_trade_slots || { slots: [], cols: 4 };
+    const cols = mySlots.cols || 4;
+    const rows = Math.ceil((mySlots.slots || []).length / cols) || 5;
+
     let html = `
-        <div style="display: flex; flex-direction: column; height: 100%;">
-            <div style="padding: 15px; background: #2a2a2a; border-bottom: 1px solid #444;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <strong>${me.name}</strong>
-                        <span style="margin-left: 10px;">${myAccepted ? '✅' : '⏳'}</span>
-                    </div>
-                    <div style="font-size: 24px;">⇄</div>
-                    <div>
-                        <strong>${partner.name}</strong>
-                        <span style="margin-left: 10px;">${partnerAccepted ? '✅' : '⏳'}</span>
-                    </div>
+        <div class="trade-layout" style="display:flex;flex-direction:column;height:100%;">
+            <div class="trade-participants-bar" style="padding:8px 12px;background:#2a2a2a;border-bottom:1px solid #444;display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+                <div><strong>${partner.name}</strong> <span>${partnerAccepted ? '✅' : '⏳'}</span></div>
+                <div style="font-size:18px;opacity:0.7;">⇄</div>
+                <div><strong>${me.name}</strong> <span>${myAccepted ? '✅' : '⏳'}</span></div>
+            </div>
+
+            <div style="display:flex;flex:1;overflow:hidden;padding:8px 12px;gap:12px;align-items:flex-start;">
+                <div style="flex:1;display:flex;justify-content:center;min-width:0;">
+                    <div id="partnerTradeGrid"></div>
+                </div>
+                <div style="flex:1;display:flex;justify-content:center;min-width:0;">
+                    <div id="myTradeGrid"></div>
                 </div>
             </div>
 
-            <div style="display: flex; flex: 1; overflow: hidden;">
-                <div style="flex: 1; padding: 15px; border-right: 1px solid #444; overflow-y: auto;">
-                    <h4 style="margin-bottom: 10px;">Предметы ${partner.name}</h4>
-                    <div id="partnerItems" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;">
-                        ${renderTradeItems(trade.items.filter(i => i.character_uuid === partner.uuid))}
-                    </div>
-                </div>
-
-                <div style="flex: 1; padding: 15px; overflow-y: auto;">
-                    <h4 style="margin-bottom: 10px;">Мои предметы</h4>
-                    <div id="myItems" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;">
-                        ${renderTradeItems(trade.items.filter(i => i.character_uuid === me.uuid))}
-                    </div>
-                </div>
-            </div>
-
-            <div style="padding: 15px; background: #2a2a2a; border-top: 1px solid #444; display: flex; justify-content: space-between;">
-                <button onclick="cancelTrade()" class="btn btn-danger" style="padding: 10px 20px;">✕ Отменить</button>
-                <button onclick="confirmTrade()" class="btn btn-success" style="padding: 10px 30px;">✅ Принять</button>
+            <div class="trade-footer" style="padding:10px 12px;background:#2a2a2a;border-top:1px solid #444;display:flex;justify-content:space-between;">
+                <button onclick="cancelTrade()" class="btn btn-danger" style="padding:8px 16px;">✕ Отменить</button>
+                <button onclick="confirmTrade()" class="btn btn-success" style="padding:8px 20px;">✅ Принять</button>
             </div>
         </div>
     `;
 
     content.innerHTML = html;
-}
 
-function renderTradeItems(items) {
-    if (items.length === 0) {
-        return '<p style="color: #888; grid-column: 1/-1;">Пока пусто</p>';
+    if (window.StorageGrid) {
+        StorageGrid.mount(document.getElementById('partnerTradeGrid'), partnerSlots, {
+            readonly: true,
+            draggable: false,
+            gridId: 'partner-trade-grid',
+            compact: true,
+        });
+
+        StorageGrid.mount(document.getElementById('myTradeGrid'), mySlots, {
+            draggable: true,
+            gridId: 'my-trade-grid',
+            compact: true,
+        });
     }
 
-    return items.map(item => {
-        const icon = item.item_uuid ? '📦' : '📊';
-        const name = item.template_slug || 'Предмет';
-        const qty = item.quantity > 1 ? ` ×${item.quantity}` : '';
+    resizeTradeWindow(cols, rows);
+};
 
-        return `
-            <div class="trade-item" style="padding: 10px; background: #3a3a3a; border-radius: 4px; text-align: center;" title="${name}">
-                <div style="font-size: 24px;">${icon}</div>
-                <div style="font-size: 11px; margin-top: 5px;">${name}${qty}</div>
-            </div>
-        `;
-    }).join('');
+function isResourceItem(item) {
+    if (!item.template_slug) return false;
+    if (item.stage === 'blueprint' || item.stage === 'item') return false;
+    if (item.recipe_slug) return false;
+    return item.quantity != null && item.quantity > 0;
 }
 
-window.handleTradeDrop = function(item) {
+function addResourceToTrade(item, quantity) {
+    GameApi.fetch(tradeApiUrl('/add-resource'), {
+        method: 'POST',
+        body: JSON.stringify({
+            trade_uuid: tradeState.currentTrade.uuid,
+            template_slug: item.template_slug,
+            quantity: quantity,
+        }),
+    })
+    .then(async (r) => {
+        const data = await r.json();
+        if (r.ok && data.success) {
+            if (data.trade) tradeState.currentTrade = mergeTradeSlots(data.trade);
+            await refreshTradeData();
+            renderTradeView();
+            loadPlayerData();
+            showMsg(`Добавлено: ${item.name} ×${quantity}`, 'success');
+        } else {
+            showMsg(data.error || data.message || 'Ошибка добавления ресурса', 'error');
+        }
+    })
+    .catch(err => {
+        console.error('addResourceToTrade error:', err);
+        showMsg('Ошибка сети при добавлении ресурса', 'error');
+    });
+}
+
+window.handleTradeDrop = function(item, options) {
+    options = options || {};
     if (!tradeState.currentTrade) {
         showMsg('Сначала начните обмен с игроком', 'error');
         return;
     }
 
-    if (item.template_slug && item.quantity !== undefined && !item.stage) {
-        GameApi.fetch(tradeApiUrl('/add-resource'), {
-            method: 'POST',
-            body: JSON.stringify({
-                trade_uuid: tradeState.currentTrade.uuid,
-                template_slug: item.template_slug,
-                quantity: 1,
-            }),
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                refreshCurrentTrade();
-                showMsg('Ресурс добавлен в обмен', 'success');
-            } else {
-                showMsg(data.error || 'Ошибка', 'error');
-            }
+    if (isResourceItem(item)) {
+        if (options.fullStack) {
+            addResourceToTrade(item, item.quantity);
+            return;
+        }
+        ResourceQuantityModal.open({
+            name: item.name,
+            icon: item.icon,
+            available: item.quantity,
+            maxStack: item.max_stack,
+            onConfirm: (qty) => addResourceToTrade(item, qty),
         });
         return;
     }
@@ -210,9 +224,12 @@ window.handleTradeDrop = function(item) {
         }),
     })
     .then(r => r.json())
-    .then(data => {
+    .then(async data => {
         if (data.success) {
-            refreshCurrentTrade();
+            if (data.trade) tradeState.currentTrade = mergeTradeSlots(data.trade);
+            await refreshTradeData();
+            renderTradeView();
+            loadPlayerData();
             showMsg('Предмет добавлен в обмен', 'success');
         } else {
             showMsg(data.error || 'Ошибка', 'error');
@@ -221,14 +238,24 @@ window.handleTradeDrop = function(item) {
 };
 
 function refreshCurrentTrade() {
-    GameApi.fetch(tradeApiUrl('/current'))
-        .then(r => r.json())
-        .then(data => {
-            if (data.trade) {
-                tradeState.currentTrade = data.trade;
-                renderTradeView();
+    return Promise.all([
+        GameApi.fetch(tradeApiUrl('/current')).then(r => r.json()),
+        refreshTradeData(),
+    ]).then(([data]) => {
+        if (data.trade) {
+            tradeState.currentTrade = mergeTradeSlots(data.trade);
+            if (!WindowManager.isOpen('trade')) {
+                WindowManager.open('trade');
             }
-        });
+            renderTradeView();
+        } else if (tradeState.currentTrade) {
+            tradeState.currentTrade = null;
+            if (WindowManager.isOpen('trade')) {
+                renderTradeEmptyView();
+            }
+            loadPlayerData();
+        }
+    });
 }
 
 window.confirmTrade = function() {
@@ -247,7 +274,7 @@ window.confirmTrade = function() {
                 WindowManager.close('trade');
                 loadPlayerData();
             } else {
-                tradeState.currentTrade = data.trade;
+                tradeState.currentTrade = mergeTradeSlots(data.trade);
                 renderTradeView();
                 showMsg('Вы приняли обмен. Ожидание партнёра...', 'info');
             }
@@ -268,13 +295,22 @@ window.cancelTrade = function() {
     .then(data => {
         if (data.success) {
             tradeState.currentTrade = null;
-            tradeState.view = 'online';
-            renderOnlineView();
+            WindowManager.close('trade');
+            loadPlayerData();
             showMsg('Обмен отменён', 'info');
         } else {
             showMsg(data.error || 'Ошибка отмены', 'error');
         }
     });
+};
+
+window.onTradeCompleted = function() {
+    tradeState.currentTrade = null;
+    if (WindowManager.isOpen('trade')) {
+        WindowManager.close('trade');
+    }
+    loadPlayerData();
+    showMsg('🎉 Обмен завершён!', 'success');
 };
 
 window.loadTrades = function() {

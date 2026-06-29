@@ -8,11 +8,11 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\LoginRequest;
 use App\Http\Requests\Api\RegisterRequest;
 use App\Models\Character;
-use App\Models\Resource;
-use App\Models\Slot;
-use App\Models\Storage;
+use App\Models\Resources;
 use App\Models\User;
 use App\Services\EventStore;
+use App\Services\CharacterStatsService;
+use App\Services\StorageProvisioningService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -20,6 +20,10 @@ use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
+    public function __construct(
+        private StorageProvisioningService $storageProvisioning
+    ) {}
+
     public function register(RegisterRequest $request): JsonResponse
     {
         try {
@@ -39,65 +43,8 @@ class AuthController extends Controller
                     'active' => true,
                 ]);
 
-                $inventory = Storage::create([
-                    'uuid' => Str::uuid()->toString(),
-                    'characters_uuid' => $character->uuid,
-                    'storage_type' => 'inventory',
-                    'name' => 'Инвентарь',
-                    'active' => true,
-                ]);
-
-                $equipment = Storage::create([
-                    'uuid' => Str::uuid()->toString(),
-                    'characters_uuid' => $character->uuid,
-                    'storage_type' => 'equipment',
-                    'name' => 'Экипировка',
-                    'active' => true,
-                ]);
-
-                $bank = Storage::create([
-                    'uuid' => Str::uuid()->toString(),
-                    'characters_uuid' => $character->uuid,
-                    'storage_type' => 'bank',
-                    'name' => 'Банк',
-                    'active' => true,
-                ]);
-
-                for ($i = 0; $i < 50; $i++) {
-                    Slot::create([
-                        'uuid' => Str::uuid()->toString(),
-                        'storage_uuid' => $inventory->uuid,
-                        'slot_type' => null,
-                    ]);
-                }
-
-                $slotTypes = ['equipment_head', 'equipment_chest', 'equipment_legs', 'equipment_weapon', 'equipment_offhand', 'equipment_ring', 'equipment_ring', 'equipment_amulet'];
-                foreach ($slotTypes as $slotType) {
-                    Slot::create([
-                        'uuid' => Str::uuid()->toString(),
-                        'storage_uuid' => $equipment->uuid,
-                        'slot_type' => $slotType,
-                    ]);
-                }
-
-                for ($i = 0; $i < 100; $i++) {
-                    Slot::create([
-                        'uuid' => Str::uuid()->toString(),
-                        'storage_uuid' => $bank->uuid,
-                        'slot_type' => null,
-                    ]);
-                }
-
-                $goldSlot = $inventory->slots()->first();
-                Resource::create([
-                    'uuid' => Str::uuid()->toString(),
-                    'slot_uuid' => $goldSlot->uuid,
-                    'recipe_slug' => 'gold',
-                    'template_slug' => 'gold',
-                    'slot_type' => 'gold',
-                    'max_stack' => null,
-                    'quantity' => 1000,
-                ]);
+                $this->storageProvisioning->provisionDefaults($character);
+                app(CharacterStatsService::class)->ensureFor($character);
 
                 $correlationId = Str::uuid()->toString();
                 $eventStore = app(EventStore::class);
@@ -108,7 +55,7 @@ class AuthController extends Controller
                     $user->uuid,
                     [
                         'username' => $user->name,
-                        'starting_gold' => 100,
+                        'starting_gold' => 1000,
                     ],
                     $user->uuid,
                     $correlationId

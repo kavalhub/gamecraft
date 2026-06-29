@@ -7,7 +7,7 @@ namespace App\Services;
 use App\Models\Character;
 use App\Models\Item;
 use App\Models\ItemTemplate;
-use App\Models\Resource;
+use App\Models\Resources;
 use App\Models\Slot;
 use App\Models\Storage;
 use Illuminate\Support\Collection;
@@ -17,7 +17,8 @@ use Illuminate\Support\Str;
 class InventoryService
 {
     public function __construct(
-        private EventStore $eventStore
+        private EventStore $eventStore,
+        private SpecialSlotService $specialSlotService
     ) {}
 
     public function addResource(
@@ -25,66 +26,66 @@ class InventoryService
         string $templateSlug,
         int $quantity,
         ?string $storageType = 'inventory'
-    ): Resource {
+    ): Resources {
         return DB::transaction(function () use ($character, $templateSlug, $quantity, $storageType) {
-            $template = ItemTemplate::where('slug', $templateSlug)->firstOrFail();
-            $storage = $character->storages()->where('storage_type', $storageType)->firstOrFail();
-            
-            $storageSlotUuids = $storage->slots()->pluck('uuid');
-            
-            // Ищем существующий ресурс для стака
-            $existingResource = Resource::whereIn('slot_uuid', $storageSlotUuids)
-                ->where('template_slug', $templateSlug)
-                ->first();
-
-            if ($existingResource) {
-                $existingResource->quantity += $quantity;
-                $existingResource->save();
-                
-                $this->eventStore->recordResourceEvent(
-                    'resource.received',
-                    $existingResource->uuid,
-                    [
-                        'quantity' => $quantity,
-                        'new_quantity' => $existingResource->quantity,
-                        'template_slug' => $templateSlug,
-                    ],
-                    $character->uuid
-                );
-
-                return $existingResource;
-            }
-
-            // Находим свободный слот
-            $slot = $this->findFreeSlot($storage);
-
-            if (!$slot) {
-                throw new \RuntimeException("Нет свободных слотов в хранилище {$storageType}");
-            }
-
-            $resource = Resource::create([
-                'uuid' => Str::uuid()->toString(),
-                'slot_uuid' => $slot->uuid,
-                'recipe_slug' => $templateSlug,
-                'template_slug' => $templateSlug,
-                'slot_type' => $template->slot_type,
-                'max_stack' => $template->max_stack,
-                'quantity' => $quantity,
-            ]);
-
-            $this->eventStore->recordResourceEvent(
-                'resource.received',
-                $resource->uuid,
-                [
-                    'quantity' => $quantity,
-                    'new_quantity' => $quantity,
-                    'template_slug' => $templateSlug,
-                ],
-                $character->uuid
+            return $this->specialSlotService->depositResource(
+                $character,
+                $templateSlug,
+                $quantity,
+                $storageType ?? 'inventory'
             );
-
-            return $resource;
         });
+    }
+
+    public function getMaxAddableQuantity(
+        Character $character,
+        string $templateSlug,
+        ?string $storageType = 'inventory'
+    ): int {
+        $template = ItemTemplate::where('slug', $templateSlug)->firstOrFail();
+
+        if ($template->type === 'material') {
+            return $this->getMaxAddableResourceQuantity($character, $templateSlug, $storageType);
+        }
+
+        return $this->countFreeSlots($character, $storageType, $template->slot_type);
+    }
+
+    public function getMaxAddableResourceQuantity(
+        Character $character,
+        string $templateSlug,
+        ?string $storageType = 'inventory'
+    ): int {
+        $template = ItemTemplate::where('slug', $templateSlug)->firstOrFail();
+        $maxStack = $template->max_stack;
+        $storage = $character->storages()->where('storage_type', $storageType)->firstOrFail();
+        $storageSlotUuids = $storage->slots()->pluck('uuid');
+
+        if ($maxStack === null) {
+            $existing = Resources::whereIn('slot_uuid', $storageSlotUuids)
+                ->where('template_slug', $templateSlug)
+                ->exists();
+
+            if ($existing) {
+                return PHP_INT_MAX;
+            }
+
+            return $this->countFreeSlotsInStorage($storage) > 0 ? PHP_INT_MAX : 0;
+        }
+
+        $capacity = 0;
+
+        $resources = Resources::whereIn('slot_uuid', $storageSlotUuids)
+            ->where('template_slug', $templateSlug)
+            ->get();
+
+        foreach ($resources as $resource) {
+            $capacity += max(0, $maxStack - $resource->quantity);
+        }
+
+        $capacity += $this->countFreeSlotsInStorage($storage) * $maxStack;
+
+        return $capacity;
     }
 
     public function removeResource(
@@ -95,8 +96,8 @@ class InventoryService
         DB::transaction(function () use ($character, $templateSlug, $quantity) {
             $storageUuids = $character->storages()->pluck('uuid');
             $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
-            
-            $resources = Resource::whereIn('slot_uuid', $slotUuids)
+
+            $resources = Resources::whereIn('slot_uuid', $slotUuids)
                 ->where('template_slug', $templateSlug)
                 ->get();
 
@@ -107,7 +108,9 @@ class InventoryService
 
             $remaining = $quantity;
             foreach ($resources as $resource) {
-                if ($remaining <= 0) break;
+                if ($remaining <= 0) {
+                    break;
+                }
 
                 $toRemove = min($remaining, $resource->quantity);
                 $resource->quantity -= $toRemove;
@@ -122,7 +125,7 @@ class InventoryService
                 }
 
                 $this->eventStore->recordResourceEvent(
-                    'resource.spent',
+                    'resources.spent',
                     $resourceUuid,
                     [
                         'quantity' => $toRemove,
@@ -139,9 +142,10 @@ class InventoryService
     {
         $storageUuids = $character->storages()->pluck('uuid');
         $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
-        
-        return (int) Resource::whereIn('slot_uuid', $slotUuids)
+
+        return (int) Resources::whereIn('slot_uuid', $slotUuids)
             ->where('template_slug', $templateSlug)
+            ->whereNull('temporary_slot_uuid')
             ->sum('quantity');
     }
 
@@ -158,8 +162,7 @@ class InventoryService
         return DB::transaction(function () use ($character, $templateSlug, $stage, $customName, $recipeSlug, $materialsUsed, $stats, $storageType) {
             $template = ItemTemplate::where('slug', $templateSlug)->firstOrFail();
             $storage = $character->storages()->where('storage_type', $storageType)->firstOrFail();
-            
-            // Находим свободный слот подходящего типа
+
             $slot = $this->findFreeSlot($storage, $template->slot_type);
 
             if (!$slot) {
@@ -169,7 +172,7 @@ class InventoryService
             $item = Item::create([
                 'uuid' => Str::uuid()->toString(),
                 'slot_uuid' => $slot->uuid,
-                'recipe_slug' => $recipeSlug, // может быть null
+                'recipe_slug' => $recipeSlug,
                 'template_slug' => $templateSlug,
                 'custom_name' => $customName,
                 'stage' => $stage,
@@ -200,12 +203,12 @@ class InventoryService
     {
         DB::transaction(function () use ($character, $itemUuid) {
             $item = Item::where('uuid', $itemUuid)->firstOrFail();
-            
+
             $slot = Slot::where('uuid', $item->slot_uuid)->firstOrFail();
             $storage = Storage::where('uuid', $slot->storage_uuid)->firstOrFail();
-            
+
             if ($storage->characters_uuid !== $character->uuid) {
-                throw new \RuntimeException("Предмет не принадлежит персонажу");
+                throw new \RuntimeException('Предмет не принадлежит персонажу');
             }
 
             $item->delete();
@@ -243,7 +246,7 @@ class InventoryService
         $storageUuids = $storageQuery->pluck('uuid');
         $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
 
-        return Resource::whereIn('slot_uuid', $slotUuids)->with('template')->get();
+        return Resources::whereIn('slot_uuid', $slotUuids)->with('template')->get();
     }
 
     public function findFreeSlot(Storage $storage, ?string $slotType = null): ?Slot
@@ -252,7 +255,7 @@ class InventoryService
 
         $occupiedSlotUuids = Item::whereIn('slot_uuid', $slotUuids)
             ->pluck('slot_uuid')
-            ->merge(Resource::whereIn('slot_uuid', $slotUuids)->pluck('slot_uuid'));
+            ->merge(Resources::whereIn('slot_uuid', $slotUuids)->pluck('slot_uuid'));
 
         $query = $storage->slots()->whereNotIn('uuid', $occupiedSlotUuids);
 
@@ -260,8 +263,61 @@ class InventoryService
             $query->where(function ($q) use ($slotType) {
                 $q->whereNull('slot_type')->orWhere('slot_type', $slotType);
             });
+        } else {
+            $query->whereNull('slot_type');
         }
 
         return $query->first();
+    }
+
+    private function findPartialResourceStack(Storage $storage, string $templateSlug, ?int $maxStack): ?Resources
+    {
+        if ($maxStack !== null && $maxStack < 1) {
+            return null;
+        }
+
+        $storageSlotUuids = $storage->slots()->pluck('uuid');
+
+        $query = Resources::whereIn('slot_uuid', $storageSlotUuids)
+            ->where('template_slug', $templateSlug);
+
+        if ($maxStack !== null) {
+            $query->where('quantity', '<', $maxStack);
+        }
+
+        return $query->first();
+    }
+
+    private function countFreeSlots(Character $character, string $storageType, ?string $slotType = null): int
+    {
+        $storage = $character->storages()->where('storage_type', $storageType)->firstOrFail();
+        $slotUuids = $storage->slots()->pluck('uuid');
+
+        $occupiedSlotUuids = Item::whereIn('slot_uuid', $slotUuids)
+            ->pluck('slot_uuid')
+            ->merge(Resources::whereIn('slot_uuid', $slotUuids)->pluck('slot_uuid'));
+
+        $query = $storage->slots()->whereNotIn('uuid', $occupiedSlotUuids);
+
+        if ($slotType !== null) {
+            $query->where(function ($q) use ($slotType) {
+                $q->whereNull('slot_type')->orWhere('slot_type', $slotType);
+            });
+        } else {
+            $query->whereNull('slot_type');
+        }
+
+        return $query->count();
+    }
+
+    private function countFreeSlotsInStorage(Storage $storage): int
+    {
+        $slotUuids = $storage->slots()->pluck('uuid');
+
+        $occupiedSlotUuids = Item::whereIn('slot_uuid', $slotUuids)
+            ->pluck('slot_uuid')
+            ->merge(Resources::whereIn('slot_uuid', $slotUuids)->pluck('slot_uuid'));
+
+        return $storage->slots()->whereNotIn('uuid', $occupiedSlotUuids)->count();
     }
 }

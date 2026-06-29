@@ -9,6 +9,9 @@ use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\EventsController;
 use App\Http\Controllers\Api\EventsStreamController;
 use App\Http\Controllers\Api\HeartbeatController;
+use App\Http\Controllers\Api\PlayPanelController;
+use App\Http\Controllers\Api\StorageController;
+use App\Http\Controllers\Api\ItemTemplateController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/register', [AuthController::class, 'register']);
@@ -17,9 +20,12 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/online', [HeartbeatController::class, 'online']);
     Route::get('/auction/lots', [AuctionController::class, 'activeLots']);
+    Route::get('/templates', [ItemTemplateController::class, 'index']);
 
     Route::middleware('character.owner')->group(function () {
         Route::get('/inventory/{characterUuid}', [InventoryController::class, 'index']);
+        Route::get('/storage/{characterUuid}', [StorageController::class, 'show']);
+        Route::post('/storage/{characterUuid}/move', [StorageController::class, 'move']);
 
         Route::get('/crafting/{characterUuid}/recipes', [CraftingController::class, 'recipes']);
         Route::post('/crafting/{characterUuid}/craft-resource', [CraftingController::class, 'craftResource']);
@@ -28,8 +34,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/crafting/{characterUuid}/disassemble', [CraftingController::class, 'disassemble']);
 
         Route::get('/auction/{characterUuid}/my-lots', [AuctionController::class, 'myLots']);
+        Route::get('/auction/{characterUuid}/lot/{lotUuid}/buy-info', [AuctionController::class, 'buyInfo']);
         Route::post('/auction/{characterUuid}/prepare', [AuctionController::class, 'prepareLot']);
         Route::post('/auction/{characterUuid}/confirm', [AuctionController::class, 'confirmLot']);
+        Route::post('/auction/{characterUuid}/list', [AuctionController::class, 'listLot']);
         Route::post('/auction/{characterUuid}/buy', [AuctionController::class, 'buyLot']);
         Route::post('/auction/{characterUuid}/cancel', [AuctionController::class, 'cancelLot']);
 
@@ -45,6 +53,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/events/{characterUuid}/stream', [EventsStreamController::class, 'stream']);
         Route::get('/events/{characterUuid}/latest', [EventsController::class, 'latest']);
+
+        Route::get('/play-panel/{characterUuid}', [PlayPanelController::class, 'show']);
 
         Route::get('/settings/{characterUuid}', [SettingsController::class, 'get']);
         Route::post('/settings/{characterUuid}', [SettingsController::class, 'set']);

@@ -6,9 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
 
-class Resource extends Model
+class Resources extends Model
 {
-    protected $table = 'resource';
+    protected $table = 'resources';
     protected $fillable = ['uuid', 'slot_uuid', 'temporary_slot_uuid', 'recipe_slug', 'template_slug', 'slot_type', 'max_stack', 'quantity'];
     protected $casts = ['max_stack' => 'integer', 'quantity' => 'integer'];
 

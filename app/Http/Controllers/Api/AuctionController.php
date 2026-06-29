@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuctionLot;
 use App\Models\Character;
 use App\Services\AuctionService;
 use Illuminate\Http\JsonResponse;
@@ -21,18 +22,14 @@ class AuctionController extends Controller
         $templateSlug = $request->query('template_slug');
         $lots = $this->auctionService->getActiveLots($templateSlug);
 
+        $buyer = null;
+        $characterUuid = $request->query('character_uuid');
+        if ($characterUuid) {
+            $buyer = Character::where('uuid', $characterUuid)->first();
+        }
+
         return response()->json([
-            'lots' => $lots->map(fn($lot) => [
-                'uuid' => $lot->uuid,
-                'template_slug' => $lot->template_slug,
-                'template_name' => $lot->template->name,
-                'template_icon' => $lot->template->icon,
-                'quantity' => $lot->quantity,
-                'price' => $lot->price,
-                'seller_name' => $lot->seller->name,
-                'is_infinite' => $lot->is_infinite,
-                'status' => $lot->status,
-            ]),
+            'lots' => $lots->map(fn ($lot) => $this->formatLot($lot, $buyer)),
         ]);
     }
 
@@ -42,15 +39,35 @@ class AuctionController extends Controller
         $lots = $this->auctionService->getMyLots($character);
 
         return response()->json([
-            'lots' => $lots->map(fn($lot) => [
-                'uuid' => $lot->uuid,
-                'template_slug' => $lot->template_slug,
-                'template_name' => $lot->template->name,
-                'quantity' => $lot->quantity,
-                'price' => $lot->price,
-                'status' => $lot->status,
-                'is_infinite' => $lot->is_infinite,
-            ]),
+            'lots' => $lots->map(fn ($lot) => $this->formatLot($lot, $character)),
+        ]);
+    }
+
+    public function buyInfo(string $characterUuid, string $lotUuid): JsonResponse
+    {
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+        $lot = AuctionLot::with('template')
+            ->where('uuid', $lotUuid)
+            ->where('status', 'active')
+            ->firstOrFail();
+
+        $limits = $this->auctionService->getBuyLimits($character, $lot);
+
+        return response()->json([
+            'lot_uuid' => $lot->uuid,
+            'is_infinite' => $lot->is_infinite,
+            'quantity' => $lot->quantity,
+            'price' => $lot->price,
+            'max_purchasable' => $limits['max_purchasable'],
+            'max_by_gold' => $limits['max_by_gold'],
+            'max_by_inventory' => $limits['max_by_inventory'],
+            'gold_available' => $limits['gold_available'],
+            'template_name' => $lot->template->name,
+            'template_icon' => $lot->template->icon,
+            'template_description' => $lot->template->description,
+            'max_stack' => $lot->template->max_stack,
+            'template_type' => $lot->template->type,
+            'template_slug' => $lot->template_slug,
         ]);
     }
 
@@ -110,10 +127,41 @@ class AuctionController extends Controller
         }
     }
 
+    public function listLot(Request $request, string $characterUuid): JsonResponse
+    {
+        $request->validate([
+            'item_uuid' => 'required|string',
+            'price' => 'required|integer|min:1',
+        ]);
+
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+
+        try {
+            $lot = $this->auctionService->listLot(
+                $character,
+                $request->item_uuid,
+                $request->price
+            );
+
+            return response()->json([
+                'success' => true,
+                'lot' => [
+                    'uuid' => $lot->uuid,
+                    'template_slug' => $lot->template_slug,
+                    'price' => $lot->price,
+                    'status' => $lot->status,
+                ],
+            ]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 400);
+        }
+    }
+
     public function buyLot(Request $request, string $characterUuid): JsonResponse
     {
         $request->validate([
             'lot_uuid' => 'required|string',
+            'quantity' => 'sometimes|integer|min:1',
         ]);
 
         $character = Character::where('uuid', $characterUuid)->firstOrFail();
@@ -121,7 +169,8 @@ class AuctionController extends Controller
         try {
             $result = $this->auctionService->buyLot(
                 $character,
-                $request->lot_uuid
+                $request->lot_uuid,
+                (int) ($request->quantity ?? 1)
             );
 
             return response()->json([
@@ -129,6 +178,7 @@ class AuctionController extends Controller
                 'is_infinite' => $result['is_infinite'],
                 'lot_uuid' => $result['lot']->uuid,
                 'template_slug' => $result['lot']->template_slug,
+                'quantity' => $result['quantity'] ?? 1,
             ]);
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 400);
@@ -157,5 +207,34 @@ class AuctionController extends Controller
         } catch (\RuntimeException $e) {
             return response()->json(['error' => $e->getMessage()], 400);
         }
+    }
+
+    private function formatLot(AuctionLot $lot, ?Character $buyer = null): array
+    {
+        $data = [
+            'uuid' => $lot->uuid,
+            'template_slug' => $lot->template_slug,
+            'template_name' => $lot->template->name,
+            'template_icon' => $lot->template->icon,
+            'template_description' => $lot->template->description,
+            'template_type' => $lot->template->type,
+            'max_stack' => $lot->template->max_stack,
+            'quantity' => $lot->quantity,
+            'price' => $lot->price,
+            'seller_uuid' => $lot->seller_uuid,
+            'seller_name' => $lot->seller->name,
+            'is_infinite' => $lot->is_infinite,
+            'status' => $lot->status,
+        ];
+
+        if ($buyer) {
+            $limits = $this->auctionService->getBuyLimits($buyer, $lot);
+            $data['max_purchasable'] = $limits['max_purchasable'];
+            $data['max_by_gold'] = $limits['max_by_gold'];
+            $data['max_by_inventory'] = $limits['max_by_inventory'];
+            $data['gold_available'] = $limits['gold_available'];
+        }
+
+        return $data;
     }
 }

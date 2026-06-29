@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use App\Models\Character;
-use App\Models\Resource;
+use App\Models\Resources;
 use App\Models\User;
 use App\Services\InventoryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -21,9 +21,9 @@ class InventoryServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        
+
         $this->seed(\Database\Seeders\DatabaseSeeder::class);
-        
+
         $this->service = app(InventoryService::class);
         $user = User::where('email', 'test@example.com')->first();
         $this->character = $user->characters()->where('character_type', 'player')->first();
@@ -72,6 +72,25 @@ class InventoryServiceTest extends TestCase
         $this->assertEquals(5, $this->service->getResourceQuantity($this->character, 'iron_ore'));
         // Стартовое золото тоже учитывается
         $this->assertEquals(1000, $this->service->getResourceQuantity($this->character, 'gold'));
+    }
+
+    public function test_add_resource_splits_by_max_stack(): void
+    {
+        $this->service->addResource($this->character, 'wood', 25);
+
+        $this->assertEquals(25, $this->service->getResourceQuantity($this->character, 'wood'));
+
+        $resources = $this->service->getCharacterResources($this->character)
+            ->where('template_slug', 'wood');
+
+        $this->assertCount(2, $resources);
+        $this->assertEquals([5, 20], $resources->pluck('quantity')->sort()->values()->all());
+    }
+
+    public function test_get_max_addable_resource_quantity(): void
+    {
+        $max = $this->service->getMaxAddableResourceQuantity($this->character, 'wood');
+        $this->assertGreaterThan(0, $max);
     }
 
     public function test_add_item_creates_new_item(): void
@@ -124,7 +143,7 @@ class InventoryServiceTest extends TestCase
         $resources = $this->service->getCharacterResources($this->character);
         // 3: золото (стартовое) + wood + iron_ore
         $this->assertCount(3, $resources);
-        
+
         // Проверяем конкретные ресурсы
         $this->assertEquals(10, $resources->where('template_slug', 'wood')->first()->quantity);
         $this->assertEquals(5, $resources->where('template_slug', 'iron_ore')->first()->quantity);
@@ -134,10 +153,10 @@ class InventoryServiceTest extends TestCase
     public function test_get_character_items_by_storage_type(): void
     {
         $this->service->addItem($this->character, 'wooden_sword', 'item', storageType: 'inventory');
-        
+
         $inventoryItems = $this->service->getCharacterItems($this->character, 'inventory');
         $this->assertCount(1, $inventoryItems);
-        
+
         $equipmentItems = $this->service->getCharacterItems($this->character, 'equipment');
         $this->assertCount(0, $equipmentItems);
     }

@@ -111,7 +111,7 @@ class CraftingController extends Controller
                     'materials_used' => $item->materials_used,
                 ],
             ]);
-        } catch (\RuntimeException $e) {
+        } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 400);
         }
     }
@@ -140,7 +140,7 @@ class CraftingController extends Controller
                 'returned_resources' => $result['returned_resources'],
                 'formula_description' => $result['formula']->description,
             ]);
-        } catch (\RuntimeException $e) {
+        } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 400);
         }
     }

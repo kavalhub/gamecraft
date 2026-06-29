@@ -19,6 +19,9 @@ use Illuminate\Support\Str;
 
 class ContentImportService
 {
+    public function __construct(
+        private StorageProvisioningService $storageProvisioning
+    ) {}
     public function import(array $data): array
     {
         $report = [
@@ -187,21 +190,7 @@ class ContentImportService
 
     private function createDefaultStorages(Character $character): void
     {
-        // Создаём инвентарь
-        $inventory = Storage::create([
-            'characters_uuid' => $character->uuid,
-            'storage_type' => 'inventory',
-            'name' => 'Инвентарь',
-            'active' => true,
-        ]);
-
-        // Создаём слоты для инвентаря (50 обычных слотов)
-        for ($i = 0; $i < 50; $i++) {
-            Slot::create([
-                'storage_uuid' => $inventory->uuid,
-                'slot_type' => null, // принимает любой тип
-            ]);
-        }
+        $this->storageProvisioning->grantStorage($character, 'inventory');
     }
 
     private function importShopLot(array $data, array &$report): void
