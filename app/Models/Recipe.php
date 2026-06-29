@@ -1,38 +1,29 @@
 <?php
-
 declare(strict_types=1);
-
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Recipe extends Model
 {
     use HasFactory;
 
-    protected $fillable = [
-        'slug',
-        'name',
-        'description',
-        'result_template_id',
-        'result_quantity',
-    ];
+    protected $fillable = ['slug', 'type', 'name', 'description'];
 
-    protected $casts = [
-        'result_template_id' => 'integer',
-        'result_quantity' => 'integer',
-    ];
-
-    public function resultTemplate(): BelongsTo
+    public function formulas(): HasMany
     {
-        return $this->belongsTo(ItemTemplate::class, 'result_template_id');
+        return $this->hasMany(Formula::class, 'recipe_slug', 'slug');
     }
 
-    public function components(): HasMany
+    public function craftFormulas(): HasMany
     {
-        return $this->hasMany(RecipeComponent::class, 'recipe_id');
+        return $this->formulas()->where('type', 'craft')->where('is_active', true)->orderBy('priority');
+    }
+
+    public function disassembleFormulas(): HasMany
+    {
+        return $this->formulas()->where('type', 'disassemble')->where('is_active', true)->orderBy('priority');
     }
 }

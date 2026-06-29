@@ -1,55 +1,53 @@
 <?php
 
-declare(strict_types=1);
-
-use App\Http\Controllers\Api\AuctionController;
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\ContentImportController;
-use App\Http\Controllers\Api\CraftingController;
-use App\Http\Controllers\Api\EventController;
 use App\Http\Controllers\Api\InventoryController;
-use App\Http\Controllers\Api\PlayerController;
+use App\Http\Controllers\Api\CraftingController;
+use App\Http\Controllers\Api\AuctionController;
 use App\Http\Controllers\Api\TradeController;
+use App\Http\Controllers\Api\SettingsController;
+use App\Http\Controllers\Api\EventsController;
+use App\Http\Controllers\Api\EventsStreamController;
+use App\Http\Controllers\Api\HeartbeatController;
 use Illuminate\Support\Facades\Route;
 
-// Аутентификация
 Route::post('/register', [AuthController::class, 'register']);
-Route::get('/login', [AuthController::class, 'login']);
+Route::post('/login', [AuthController::class, 'login']);
 
-// Инвентарь (API — используется в layout)
-Route::get('/inventory', [InventoryController::class, 'index']);
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/online', [HeartbeatController::class, 'online']);
+    Route::get('/auction/lots', [AuctionController::class, 'activeLots']);
 
-// Крафт
-Route::get('/recipes', [CraftingController::class, 'recipes']);
-Route::post('/craft', [CraftingController::class, 'craft']);
-Route::post('/disassemble', [CraftingController::class, 'disassemble']);
+    Route::middleware('character.owner')->group(function () {
+        Route::get('/inventory/{characterUuid}', [InventoryController::class, 'index']);
 
-// Аукцион
-Route::get('/auction', [AuctionController::class, 'index']);
-Route::get('/auction/my', [AuctionController::class, 'my']);
-Route::post('/auction', [AuctionController::class, 'store']);
-Route::post('/auction/{id}/buy', [AuctionController::class, 'buy']);
-Route::post('/auction/{id}/cancel', [AuctionController::class, 'cancel']);
+        Route::get('/crafting/{characterUuid}/recipes', [CraftingController::class, 'recipes']);
+        Route::post('/crafting/{characterUuid}/craft-resource', [CraftingController::class, 'craftResource']);
+        Route::post('/crafting/{characterUuid}/create-blueprint', [CraftingController::class, 'createBlueprint']);
+        Route::post('/crafting/{characterUuid}/craft-item', [CraftingController::class, 'craftItem']);
+        Route::post('/crafting/{characterUuid}/disassemble', [CraftingController::class, 'disassemble']);
 
-// События
-Route::get('/events/latest', [EventController::class, 'latest']);
-Route::get('/events/user', [EventController::class, 'userHistory']);
-Route::get('/events/operation/{correlationId}', [EventController::class, 'operationDetails']);
+        Route::get('/auction/{characterUuid}/my-lots', [AuctionController::class, 'myLots']);
+        Route::post('/auction/{characterUuid}/prepare', [AuctionController::class, 'prepareLot']);
+        Route::post('/auction/{characterUuid}/confirm', [AuctionController::class, 'confirmLot']);
+        Route::post('/auction/{characterUuid}/buy', [AuctionController::class, 'buyLot']);
+        Route::post('/auction/{characterUuid}/cancel', [AuctionController::class, 'cancelLot']);
 
-// Обмен
-Route::get('/trade/active', [TradeController::class, 'active']);
-Route::get('/trade/{id}', [TradeController::class, 'show']);
-Route::post('/trade', [TradeController::class, 'store']);
-Route::post('/trade/{id}/item', [TradeController::class, 'addItem']);
-Route::delete('/trade/{id}/item/{itemId}', [TradeController::class, 'removeItem']);
-Route::post('/trade/{id}/gold', [TradeController::class, 'addGold']);
-Route::post('/trade/{id}/accept', [TradeController::class, 'accept']);
-Route::post('/trade/{id}/cancel', [TradeController::class, 'cancel']);
-Route::post('/trade/{id}/item/{itemId}/reduce', [TradeController::class, 'reduceItem']);
+        Route::get('/trade/{characterUuid}/current', [TradeController::class, 'getCurrentTrade']);
+        Route::get('/trade/{characterUuid}', [TradeController::class, 'index']);
+        Route::post('/trade/{characterUuid}/create', [TradeController::class, 'create']);
+        Route::post('/trade/{characterUuid}/add-item', [TradeController::class, 'addItem']);
+        Route::post('/trade/{characterUuid}/add-resource', [TradeController::class, 'addResource']);
+        Route::post('/trade/{characterUuid}/confirm', [TradeController::class, 'confirm']);
+        Route::post('/trade/{characterUuid}/cancel', [TradeController::class, 'cancel']);
 
-// Игроки
-Route::post('/heartbeat', [PlayerController::class, 'heartbeat']);
-Route::get('/players/online', [PlayerController::class, 'online']);
+        Route::post('/heartbeat/{characterUuid}', [HeartbeatController::class, 'ping']);
 
-// Импорт игровых ресурсов
-Route::post('/admin/content/import', [ContentImportController::class, 'import']);
+        Route::get('/events/{characterUuid}/stream', [EventsStreamController::class, 'stream']);
+        Route::get('/events/{characterUuid}/latest', [EventsController::class, 'latest']);
+
+        Route::get('/settings/{characterUuid}', [SettingsController::class, 'get']);
+        Route::post('/settings/{characterUuid}', [SettingsController::class, 'set']);
+        Route::post('/settings/{characterUuid}/multiple', [SettingsController::class, 'setMultiple']);
+    });
+});

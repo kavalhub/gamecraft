@@ -4,75 +4,23 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 class TradeOffer extends Model
 {
-    use HasFactory;
+    protected $fillable = ['uuid', 'initiator_uuid', 'partner_uuid', 'status', 'initiator_accepted', 'partner_accepted'];
+    protected $casts = ['initiator_accepted' => 'boolean', 'partner_accepted' => 'boolean'];
 
-    protected $fillable = [
-        'initiator_id',
-        'partner_id',
-        'initiator_gold',
-        'partner_gold',
-        'initiator_accepted',
-        'partner_accepted',
-        'status',
-    ];
-
-    protected $casts = [
-        'initiator_id' => 'integer',
-        'partner_id' => 'integer',
-        'initiator_gold' => 'integer',
-        'partner_gold' => 'integer',
-        'initiator_accepted' => 'boolean',
-        'partner_accepted' => 'boolean',
-    ];
-
-    public function initiator(): BelongsTo
+    protected static function boot(): void
     {
-        return $this->belongsTo(User::class, 'initiator_id');
+        parent::boot();
+        static::creating(fn($m) => $m->uuid = $m->uuid ?? Str::uuid()->toString());
     }
 
-    public function partner(): BelongsTo
-    {
-        return $this->belongsTo(User::class, 'partner_id');
-    }
-
-    public function items(): HasMany
-    {
-        return $this->hasMany(TradeItem::class, 'trade_id');
-    }
-
-    public function initiatorItems(): HasMany
-    {
-        return $this->hasMany(TradeItem::class, 'trade_id')->where('side', 'initiator');
-    }
-
-    public function partnerItems(): HasMany
-    {
-        return $this->hasMany(TradeItem::class, 'trade_id')->where('side', 'partner');
-    }
-
-    public function isParticipant(int $userId): bool
-    {
-        return $this->initiator_id === $userId || $this->partner_id === $userId;
-    }
-
-    public function getSide(int $userId): ?string
-    {
-        if ($this->initiator_id === $userId) return 'initiator';
-        if ($this->partner_id === $userId) return 'partner';
-        return null;
-    }
-
-    public function getOpponentId(int $userId): ?int
-    {
-        if ($this->initiator_id === $userId) return $this->partner_id;
-        if ($this->partner_id === $userId) return $this->initiator_id;
-        return null;
-    }
+    public function initiator(): BelongsTo { return $this->belongsTo(Character::class, 'initiator_uuid', 'uuid'); }
+    public function partner(): BelongsTo { return $this->belongsTo(Character::class, 'partner_uuid', 'uuid'); }
+    public function items(): HasMany { return $this->hasMany(TradeItem::class, 'trade_uuid', 'uuid'); }
 }

@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Models\AuctionHistory;
 use App\Models\AuctionLot;
-use App\Models\GameEvent;
-use App\Models\ItemInstance;
-use App\Models\User;
+use App\Models\Character;
+use App\Models\Item;
+use App\Models\Resource;
+use App\Models\Slot;
+use App\Models\Storage;
+use App\Models\TemporarySlot;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -19,321 +22,444 @@ class AuctionService
         private EventStore $eventStore
     ) {}
 
-    public function getActiveLots(?string $type = null, ?int $templateId = null): array
+    /**
+     * Получить список активных лотов
+     */
+    public function getActiveLots(?string $templateSlug = null): Collection
     {
-        $query = AuctionLot::with(['template', 'seller'])
+        $query = AuctionLot::with(['seller', 'template'])
             ->where('status', 'active');
 
-        if ($type) {
-            $query->whereHas('template', function ($q) use ($type) {
-                $q->where('type', $type);
-            });
+        if ($templateSlug) {
+            $query->where('template_slug', $templateSlug);
         }
 
-        if ($templateId) {
-            $query->where('template_id', $templateId);
-        }
-
-        return $query->orderBy('created_at', 'desc')
-            ->get()
-            ->map(fn(AuctionLot $lot) => [
-                'id' => $lot->id,
-                'seller_id' => $lot->seller_id,
-                'seller_name' => $lot->seller?->name ?? 'Неизвестный',
-                'template_id' => $lot->template_id,
-                'template_name' => $lot->template->name,
-                'template_type' => $lot->template->type,
-                'template_icon' => $lot->template->icon,
-                'description' => $lot->template->description ?? '',
-                'quantity' => $lot->quantity,
-                'price' => $lot->price,
-                'item_stats' => $lot->item_stats ?? [],
-                'is_infinite' => $lot->is_infinite,
-                'created_at' => $lot->created_at->toDateTimeString(),
-            ])
-            ->toArray();
+        return $query->orderBy('created_at', 'desc')->get();
     }
 
-    public function getMyLots(int $userId): array
+    /**
+     * Получить лоты продавца
+     */
+    public function getMyLots(Character $seller): Collection
     {
-        return AuctionLot::with(['template', 'buyer'])
-            ->where('seller_id', $userId)
+        return AuctionLot::with('template')
+            ->where('seller_uuid', $seller->uuid)
             ->orderBy('created_at', 'desc')
-            ->get()
-            ->map(fn(AuctionLot $lot) => [
-                'id' => $lot->id,
-                'template_id' => $lot->template_id,
-                'template_name' => $lot->template->name,
-                'template_type' => $lot->template->type,
-                'template_icon' => $lot->template->icon,
-                'description' => $lot->template->description ?? '',
-                'quantity' => $lot->quantity,
-                'price' => $lot->price,
-                'status' => $lot->status,
-                'buyer_name' => $lot->buyer?->name,
-                'is_infinite' => $lot->is_infinite,
-            ])
-            ->toArray();
+            ->get();
     }
 
-    public function listLot(int $userId, int $templateId, int $quantity, int $price): AuctionLot
-    {
-        return DB::transaction(function () use ($userId, $templateId, $quantity, $price) {
-            if ($price <= 0) {
-                throw new \RuntimeException('Цена должна быть больше нуля');
+    /**
+     * Шаг 1: Поместить предмет во временный слот аукциона (предпросмотр)
+     */
+    public function prepareLot(
+        Character $seller,
+        string $itemUuid,
+        int $price
+    ): TemporarySlot {
+        return DB::transaction(function () use ($seller, $itemUuid, $price) {
+            if ($price < 1) {
+                throw new \RuntimeException('Цена должна быть больше 0');
             }
 
-            if ($quantity <= 0) {
-                throw new \RuntimeException('Количество должно быть больше нуля');
+            $item = Item::where('uuid', $itemUuid)
+                ->whereIn('stage', ['item', 'blueprint'])
+                ->whereNull('temporary_slot_uuid')
+                ->firstOrFail();
+
+            // Проверяем, что предмет принадлежит продавцу
+            $slot = Slot::where('uuid', $item->slot_uuid)->firstOrFail();
+            $storage = Storage::where('uuid', $slot->storage_uuid)->firstOrFail();
+            if ($storage->characters_uuid !== $seller->uuid) {
+                throw new \RuntimeException('Предмет не принадлежит продавцу');
             }
 
-            $available = ItemInstance::where('owner_id', $userId)
-                ->where('template_id', $templateId)
-                ->sum('quantity');
+            // Находим или создаём хранилище аукциона
+            $auctionCharacter = Character::where('character_type', 'auction')->firstOrFail();
+            $auctionStorage = Storage::firstOrCreate(
+                [
+                    'characters_uuid' => $auctionCharacter->uuid,
+                    'storage_type' => 'auction',
+                ],
+                ['name' => 'Аукцион', 'active' => true]
+            );
 
-            if ($available < $quantity) {
-                throw new \RuntimeException("В инвентаре только {$available} предметов, нужно {$quantity}");
+            // Создаём временный слот
+            $temporarySlot = TemporarySlot::create([
+                'uuid' => Str::uuid()->toString(),
+                'storage_uuid' => $auctionStorage->uuid,
+                'character_uuid' => $seller->uuid,
+                'active' => true,
+                'timestamps_end' => now()->addMinutes(5), // 5 минут на подтверждение
+            ]);
+
+            // Привязываем предмет к временному слоту (но slot_uuid остаётся у продавца!)
+            $item->update(['temporary_slot_uuid' => $temporarySlot->uuid]);
+
+            $this->eventStore->record(
+                'auction.prepared',
+                'item',
+                $item->uuid,
+                [
+                    'price' => $price,
+                    'temporary_slot_uuid' => $temporarySlot->uuid,
+                    'expires_at' => $temporarySlot->timestamps_end->toDateTimeString(),
+                ],
+                $seller->uuid
+            );
+
+            // Сохраняем цену во временных метаданных (можно расширить TemporarySlot)
+            // В данном случае цена запоминается в сессии/кэше или передаётся дальше
+
+            return $temporarySlot;
+        });
+    }
+
+    /**
+     * Шаг 2: Подтвердить выставление (предмет перемещается в аукцион)
+     */
+    public function confirmLot(
+        Character $seller,
+        string $itemUuid,
+        int $price
+    ): AuctionLot {
+        return DB::transaction(function () use ($seller, $itemUuid, $price) {
+            $item = Item::where('uuid', $itemUuid)
+                ->whereNotNull('temporary_slot_uuid')
+                ->firstOrFail();
+
+            $temporarySlot = TemporarySlot::where('uuid', $item->temporary_slot_uuid)->firstOrFail();
+            if ($temporarySlot->character_uuid !== $seller->uuid) {
+                throw new \RuntimeException('Временный слот не принадлежит продавцу');
             }
 
-            $remaining = $quantity;
-            $stacks = ItemInstance::where('owner_id', $userId)
-                ->where('template_id', $templateId)
-                ->orderBy('quantity', 'asc')
-                ->get();
-
-            foreach ($stacks as $stack) {
-                if ($remaining <= 0) break;
-                $toRemove = min($remaining, $stack->quantity);
-                $this->inventoryService->removeItem(
-                    $userId,
-                    $stack->id,
-                    $toRemove,
-                    null,
-                    'auction_list',
-                    false
-                );
-                $remaining -= $toRemove;
+            if (!$temporarySlot->active || ($temporarySlot->timestamps_end && $temporarySlot->timestamps_end->isPast())) {
+                throw new \RuntimeException('Временный слот истёк или неактивен');
             }
 
+            // Находим или создаём аукционный слот для предмета
+            $auctionCharacter = Character::where('character_type', 'auction')->firstOrFail();
+            $auctionStorage = Storage::firstOrCreate(
+                [
+                    'characters_uuid' => $auctionCharacter->uuid,
+                    'storage_type' => 'auction',
+                ],
+                ['name' => 'Аукцион', 'active' => true]
+            );
+
+            // Создаём постоянный слот на аукционе
+            $auctionSlot = Slot::create([
+                'uuid' => Str::uuid()->toString(),
+                'storage_uuid' => $auctionStorage->uuid,
+                'slot_type' => null,
+            ]);
+
+            // Перемещаем предмет в аукционный слот
+            $item->update([
+                'slot_uuid' => $auctionSlot->uuid,
+                'temporary_slot_uuid' => null,
+            ]);
+
+            // Создаём лот
             $lot = AuctionLot::create([
-                'seller_id' => $userId,
-                'template_id' => $templateId,
-                'quantity' => $quantity,
+                'uuid' => Str::uuid()->toString(),
+                'storage_uuid' => $auctionStorage->uuid,
+                'seller_uuid' => $seller->uuid,
+                'template_slug' => $item->template_slug,
+                'quantity' => 1,
                 'price' => $price,
+                'commission_percent' => 5,
                 'status' => 'active',
                 'is_infinite' => false,
             ]);
 
+            // Деактивируем временный слот
+            $temporarySlot->update(['active' => false]);
+
+            $correlationUuid = Str::uuid()->toString();
+
             $this->eventStore->record(
-                GameEvent::AUCTION_LISTED,
-                'auction',
-                $lot->id,
+                'auction.listed',
+                'auction_lot',
+                $lot->uuid,
                 [
-                    'seller_id' => $userId,
-                    'template_id' => $templateId,
-                    'template_name' => $lot->template->name ?? '',
-                    'template_type' => $lot->template->type ?? '',
-                    'template_icon' => $lot->template->icon ?? '',
-                    'quantity' => $quantity,
+                    'item_uuid' => $item->uuid,
+                    'seller_uuid' => $seller->uuid,
+                    'template_slug' => $item->template_slug,
                     'price' => $price,
+                    'from_slot_uuid' => $slot->uuid ?? null,
+                    'to_slot_uuid' => $auctionSlot->uuid,
                 ],
-                $userId
+                $seller->uuid,
+                $correlationUuid
             );
 
             return $lot;
         });
     }
 
-    public function buyLot(int $buyerId, int $lotId): array
-    {
-        return DB::transaction(function () use ($buyerId, $lotId) {
-            $lot = AuctionLot::with(['template', 'seller'])->findOrFail($lotId);
+    /**
+     * Шаг 3: Купить предмет с аукциона
+     */
+    public function buyLot(
+        Character $buyer,
+        string $lotUuid
+    ): array {
+        return DB::transaction(function () use ($buyer, $lotUuid) {
+            $lot = AuctionLot::where('uuid', $lotUuid)
+                ->where('status', 'active')
+                ->firstOrFail();
 
-            if ($lot->status !== 'active') {
-                throw new \RuntimeException('Лот не активен');
-            }
-
-            if ($lot->seller_id === $buyerId) {
+            if ($lot->seller_uuid === $buyer->uuid) {
                 throw new \RuntimeException('Нельзя купить свой собственный лот');
             }
 
-            $buyer = User::findOrFail($buyerId);
-            $totalPrice = $lot->price * $lot->quantity;
-
-            if ($buyer->gold < $totalPrice) {
-                throw new \RuntimeException('Недостаточно золота');
+            // Проверяем золото покупателя
+            $buyerGold = $this->inventoryService->getResourceQuantity($buyer, 'gold');
+            if ($buyerGold < $lot->price) {
+                throw new \RuntimeException("Недостаточно золота: есть {$buyerGold}, нужно {$lot->price}");
             }
 
-            $correlationId = Str::uuid()->toString();
-
-            // Снимаем золото с покупателя
-            $buyer->decrement('gold', $totalPrice);
-
             if ($lot->is_infinite) {
-                // Бесконечный лот - создаём предмет заново, лот остаётся активным
-                $this->inventoryService->addItem($buyerId, $lot->template_id, $lot->quantity, $correlationId);
-                
-                $newBalance = $buyer->fresh()->gold;
-
-                // Золото сжигается (не идёт продавцу)
-                $this->eventStore->record(
-                    GameEvent::USER_GOLD_CHANGED,
-                    'user',
-                    $buyerId,
-                    [
-                        'delta' => -$totalPrice,
-                        'new_balance' => $newBalance,
-                        'reason' => 'shop_purchase',
-                    ],
-                    $buyerId,
-                    $correlationId
-                );
-
-                // Записываем в историю, но лот остаётся active
-                AuctionHistory::create([
-                    'lot_id' => $lot->id,
-                    'seller_id' => $lot->seller_id,
-                    'buyer_id' => $buyerId,
-                    'template_id' => $lot->template_id,
-                    'quantity' => $lot->quantity,
-                    'price' => $lot->price,
-                    'commission' => 0,
-                    'seller_received' => 0,
-                    'action' => 'sold',
-                    'occurred_at' => now(),
-                ]);
-
-                $this->eventStore->record(
-                    GameEvent::AUCTION_PURCHASE,
-                    'auction',
-                    $lot->id,
-                    [
-                        'buyer_id' => $buyerId,
-                        'seller_id' => $lot->seller_id,
-                        'seller_name' => $lot->seller?->name ?? 'Неизвестный',
-                        'template_id' => $lot->template_id,
-                        'template_name' => $lot->template->name,
-                        'template_type' => $lot->template->type,
-                        'template_icon' => $lot->template->icon,
-                        'description' => $lot->template->description ?? '',
-                        'quantity' => $lot->quantity,
-                        'payment_amount' => $totalPrice,
-                        'new_gold_balance' => $newBalance,
-                        'is_infinite' => true,
-                    ],
-                    $buyerId,
-                    $correlationId
-                );
-
-                return [
-                    'lot' => $lot,
-                    'buyer' => $buyer->fresh(),
-                ];
+                return $this->buyInfiniteLot($buyer, $lot);
             } else {
-                // Обычный лот - создаём предметы для покупателя
-                $this->inventoryService->addItem($buyerId, $lot->template_id, $lot->quantity, $correlationId);
-
-                $seller = User::findOrFail($lot->seller_id);
-
-                // Выплачиваем продавцу с комиссией
-                $commission = (int)($totalPrice * $lot->commission_percent / 100);
-                $sellerReceived = $totalPrice - $commission;
-                $seller->increment('gold', $sellerReceived);
-
-                $this->eventStore->record(
-                    GameEvent::USER_GOLD_CHANGED,
-                    'user',
-                    $seller->id,
-                    [
-                        'delta' => $sellerReceived,
-                        'new_balance' => $seller->fresh()->gold,
-                        'reason' => 'auction_sale',
-                    ],
-                    $seller->id,
-                    $correlationId
-                );
-
-                // Обновляем статус лота
-                $lot->update([
-                    'status' => 'sold',
-                    'buyer_id' => $buyerId,
-                    'sold_at' => now(),
-                ]);
-
-                // Записываем в историю
-                AuctionHistory::create([
-                    'lot_id' => $lot->id,
-                    'seller_id' => $lot->seller_id,
-                    'buyer_id' => $buyerId,
-                    'template_id' => $lot->template_id,
-                    'quantity' => $lot->quantity,
-                    'price' => $lot->price,
-                    'commission' => $commission,
-                    'seller_received' => $sellerReceived,
-                    'action' => 'sold',
-                    'occurred_at' => now(),
-                ]);
-
-                $this->eventStore->record(
-                    GameEvent::AUCTION_PURCHASE,
-                    'auction',
-                    $lot->id,
-                    [
-                        'buyer_id' => $buyerId,
-                        'buyer_name' => $buyer->name,
-                        'seller_id' => $lot->seller_id,
-                        'seller_name' => $lot->seller?->name ?? 'Неизвестный',
-                        'template_id' => $lot->template_id,
-                        'template_name' => $lot->template->name,
-                        'template_type' => $lot->template->type,
-                        'template_icon' => $lot->template->icon,
-                        'description' => $lot->template->description ?? '',
-                        'quantity' => $lot->quantity,
-                        'payment_amount' => $totalPrice,
-                        'commission' => $commission,
-                        'new_gold_balance' => $buyer->fresh()->gold,
-                        'is_infinite' => false,
-                    ],
-                    $buyerId,
-                    $correlationId
-                );
-
-                return [
-                    'lot' => $lot,
-                    'buyer' => $buyer->fresh(),
-                ];
+                return $this->buyFiniteLot($buyer, $lot);
             }
         });
     }
 
-    public function cancelLot(int $userId, int $lotId): AuctionLot
+    /**
+     * Покупка бесконечного лота (NPC-торговец)
+     */
+    private function buyInfiniteLot(Character $buyer, AuctionLot $lot): array
     {
-        return DB::transaction(function () use ($userId, $lotId) {
-            $lot = AuctionLot::findOrFail($lotId);
+        // Снимаем золото с покупателя
+        $this->inventoryService->removeResource($buyer, 'gold', $lot->price);
 
-            if ($lot->seller_id !== $userId) {
-                throw new \RuntimeException('Вы не можете отменить чужой лот');
-            }
+        // Создаём новый предмет/ресурс для покупателя (копию)
+        $template = $lot->template;
+        $correlationUuid = Str::uuid()->toString();
 
-            if ($lot->status !== 'active') {
-                throw new \RuntimeException('Можно отменить только активный лот');
-            }
+        if ($template->type === 'material') {
+            $result = $this->inventoryService->addResource(
+                $buyer,
+                $lot->template_slug,
+                $lot->quantity
+            );
+        } elseif ($template->type === 'blueprint') {
+            // Для blueprint-шаблонов используем recipe_slug из template
+            $result = $this->inventoryService->addItem(
+                $buyer,
+                $lot->template_slug,
+                'blueprint',
+                null,
+                $template->recipe_slug,
+                null,
+                null
+            );
+        } else {
+            $result = $this->inventoryService->addItem(
+                $buyer,
+                $lot->template_slug,
+                'item',
+                null,
+                null,
+                null,
+                $template->base_stats
+            );
+        }
+
+        // Логируем в аукционную историю
+        \App\Models\AuctionHistory::create([
+            'lot_uuid' => $lot->uuid,
+            'seller_uuid' => $lot->seller_uuid,
+            'buyer_uuid' => $buyer->uuid,
+            'template_slug' => $lot->template_slug,
+            'quantity' => $lot->quantity,
+            'price' => $lot->price,
+            'commission' => 0,
+            'seller_received' => 0, // NPC не получает золото
+            'action' => 'sold',
+            'occurred_at' => now(),
+        ]);
+
+        $this->eventStore->record(
+            'auction.purchased',
+            'auction_lot',
+            $lot->uuid,
+            [
+                'buyer_uuid' => $buyer->uuid,
+                'seller_uuid' => $lot->seller_uuid,
+                'template_slug' => $lot->template_slug,
+                'quantity' => $lot->quantity,
+                'price' => $lot->price,
+                'is_infinite' => true,
+            ],
+            $buyer->uuid,
+            $correlationUuid
+        );
+
+        return [
+            'lot' => $lot,
+            'result' => $result,
+            'is_infinite' => true,
+        ];
+    }
+
+    /**
+     * Покупка обычного лота (от игрока)
+     */
+    private function buyFiniteLot(Character $buyer, AuctionLot $lot): array
+    {
+        $item = Item::whereIn('slot_uuid', function ($q) use ($lot) {
+            $q->select('uuid')->from('slots')->where('storage_uuid', $lot->storage_uuid);
+        })->first();
+
+        if (!$item) {
+            throw new \RuntimeException('Предмет лота не найден');
+        }
+
+        // Снимаем золото с покупателя
+        $this->inventoryService->removeResource($buyer, 'gold', $lot->price);
+
+        // Находим инвентарь покупателя
+        $buyerInventory = Storage::where('characters_uuid', $buyer->uuid)
+            ->where('storage_type', 'inventory')
+            ->firstOrFail();
+
+        // Ищем свободный слот в инвентаре покупателя
+        $occupiedSlotUuids = Item::pluck('slot_uuid')->merge(Resource::pluck('slot_uuid'));
+        $freeSlot = $buyerInventory->slots()
+            ->whereNotIn('uuid', $occupiedSlotUuids)
+            ->first();
+
+        if (!$freeSlot) {
+            // Возвращаем золото обратно
+            $this->inventoryService->addResource($buyer, 'gold', $lot->price);
+            throw new \RuntimeException('У покупателя нет свободных слотов в инвентаре');
+        }
+
+        // Перемещаем предмет покупателю
+        $oldSlotUuid = $item->slot_uuid;
+        $item->update(['slot_uuid' => $freeSlot->uuid]);
+
+        // Вычисляем комиссию
+        $commission = (int) round($lot->price * $lot->commission_percent / 100);
+        $sellerReceived = $lot->price - $commission;
+
+        // Начисляем золото продавцу (если есть продавец)
+        if ($lot->seller) {
+            $this->inventoryService->addResource($lot->seller, 'gold', $sellerReceived);
+        }
+
+        // Обновляем лот
+        $lot->update([
+            'status' => 'sold',
+            'buyer_uuid' => $buyer->uuid,
+            'sold_at' => now(),
+        ]);
+
+        // Удаляем аукционный слот (он больше не нужен)
+        Slot::where('uuid', $oldSlotUuid)->delete();
+
+        $correlationUuid = Str::uuid()->toString();
+
+        // Логируем в аукционную историю
+        \App\Models\AuctionHistory::create([
+            'lot_uuid' => $lot->uuid,
+            'seller_uuid' => $lot->seller_uuid,
+            'buyer_uuid' => $buyer->uuid,
+            'template_slug' => $lot->template_slug,
+            'quantity' => 1,
+            'price' => $lot->price,
+            'commission' => $commission,
+            'seller_received' => $sellerReceived,
+            'action' => 'sold',
+            'occurred_at' => now(),
+        ]);
+
+        $this->eventStore->record(
+            'auction.purchased',
+            'auction_lot',
+            $lot->uuid,
+            [
+                'buyer_uuid' => $buyer->uuid,
+                'seller_uuid' => $lot->seller_uuid,
+                'item_uuid' => $item->uuid,
+                'template_slug' => $lot->template_slug,
+                'price' => $lot->price,
+                'commission' => $commission,
+                'seller_received' => $sellerReceived,
+                'from_slot_uuid' => $oldSlotUuid,
+                'to_slot_uuid' => $freeSlot->uuid,
+            ],
+            $buyer->uuid,
+            $correlationUuid
+        );
+
+        return [
+            'lot' => $lot->fresh(),
+            'item' => $item->fresh(),
+            'seller_received' => $sellerReceived,
+            'commission' => $commission,
+            'is_infinite' => false,
+        ];
+    }
+
+    /**
+     * Отмена лота
+     */
+    public function cancelLot(
+        Character $seller,
+        string $lotUuid
+    ): AuctionLot {
+        return DB::transaction(function () use ($seller, $lotUuid) {
+            $lot = AuctionLot::where('uuid', $lotUuid)
+                ->where('seller_uuid', $seller->uuid)
+                ->where('status', 'active')
+                ->firstOrFail();
 
             if ($lot->is_infinite) {
-                throw new \RuntimeException('Нельзя отменить магазинный лот');
+                throw new \RuntimeException('Нельзя отменить бесконечный лот');
             }
 
-            // Возвращаем предметы продавцу
-            $this->inventoryService->addItem($userId, $lot->template_id, $lot->quantity, null);
+            $item = Item::whereIn('slot_uuid', function ($q) use ($lot) {
+                $q->select('uuid')->from('slots')->where('storage_uuid', $lot->storage_uuid);
+            })->first();
+
+            if (!$item) {
+                throw new \RuntimeException('Предмет лота не найден');
+            }
+
+            // Находим инвентарь продавца
+            $sellerInventory = Storage::where('characters_uuid', $seller->uuid)
+                ->where('storage_type', 'inventory')
+                ->firstOrFail();
+
+            // Ищем свободный слот в инвентаре продавца
+            $occupiedSlotUuids = Item::pluck('slot_uuid')->merge(Resource::pluck('slot_uuid'));
+            $freeSlot = $sellerInventory->slots()
+                ->whereNotIn('uuid', $occupiedSlotUuids)
+                ->first();
+
+            if (!$freeSlot) {
+                throw new \RuntimeException('У продавца нет свободных слотов для возврата предмета');
+            }
+
+            $oldSlotUuid = $item->slot_uuid;
+            $item->update(['slot_uuid' => $freeSlot->uuid]);
 
             $lot->update(['status' => 'cancelled']);
 
-            AuctionHistory::create([
-                'lot_id' => $lot->id,
-                'seller_id' => $userId,
-                'buyer_id' => null,
-                'template_id' => $lot->template_id,
-                'quantity' => $lot->quantity,
+            Slot::where('uuid', $oldSlotUuid)->delete();
+
+            $correlationUuid = Str::uuid()->toString();
+
+            \App\Models\AuctionHistory::create([
+                'lot_uuid' => $lot->uuid,
+                'seller_uuid' => $seller->uuid,
+                'buyer_uuid' => null,
+                'template_slug' => $lot->template_slug,
+                'quantity' => 1,
                 'price' => $lot->price,
                 'commission' => 0,
                 'seller_received' => 0,
@@ -342,21 +468,21 @@ class AuctionService
             ]);
 
             $this->eventStore->record(
-                GameEvent::AUCTION_CANCELLED,
-                'auction',
-                $lot->id,
+                'auction.cancelled',
+                'auction_lot',
+                $lot->uuid,
                 [
-                    'seller_id' => $userId,
-                    'template_id' => $lot->template_id,
-                    'template_name' => $lot->template->name ?? '',
-                    'template_type' => $lot->template->type ?? '',
-                    'template_icon' => $lot->template->icon ?? '',
-                    'quantity' => $lot->quantity,
+                    'seller_uuid' => $seller->uuid,
+                    'item_uuid' => $item->uuid,
+                    'template_slug' => $lot->template_slug,
+                    'from_slot_uuid' => $oldSlotUuid,
+                    'to_slot_uuid' => $freeSlot->uuid,
                 ],
-                $userId
+                $seller->uuid,
+                $correlationUuid
             );
 
-            return $lot;
+            return $lot->fresh();
         });
     }
 }

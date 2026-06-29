@@ -9,28 +9,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class TradeItem extends Model
 {
-    protected $table = 'trade_items';
+    protected $fillable = ['trade_uuid', 'character_uuid', 'item_uuid', 'resource_uuid', 'template_slug', 'quantity'];
+    protected $casts = ['quantity' => 'integer'];
 
-    protected $fillable = [
-        'trade_id',
-        'side',
-        'template_id',
-        'item_instance_id',
-        'quantity',
-    ];
-
-    public function trade(): BelongsTo
-    {
-        return $this->belongsTo(TradeOffer::class, 'trade_id');
-    }
-
-    public function template(): BelongsTo
-    {
-        return $this->belongsTo(ItemTemplate::class, 'template_id');
-    }
-
-    public function instance(): BelongsTo
-    {
-        return $this->belongsTo(ItemInstance::class, 'item_instance_id');
-    }
+    public function trade(): BelongsTo { return $this->belongsTo(TradeOffer::class, 'trade_uuid', 'uuid'); }
+    public function character(): BelongsTo { return $this->belongsTo(Character::class, 'character_uuid', 'uuid'); }
+    public function item(): BelongsTo { return $this->belongsTo(Item::class, 'item_uuid', 'uuid'); }
+    public function resource(): BelongsTo { return $this->belongsTo(Resource::class, 'resource_uuid', 'uuid'); }
 }

@@ -1,239 +1,184 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Tests\Unit;
 
-use App\Models\ItemInstance;
-use App\Models\ItemTemplate;
-use App\Models\TradeOffer;
+use App\Models\Character;
 use App\Models\User;
+use App\Services\CraftingService;
+use App\Services\InventoryService;
 use App\Services\TradeService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class TradeServiceTest extends TestCase
 {
-    private TradeService $service;
-    private User $user1;
-    private User $user2;
+    use RefreshDatabase;
+
+    private TradeService $tradeService;
+    private InventoryService $inventoryService;
+    private CraftingService $craftingService;
+    private Character $player1;
+    private Character $player2;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = app(TradeService::class);
-        $this->user1 = User::factory()->create(['gold' => 1000, 'name' => 'Игрок1']);
-        $this->user2 = User::factory()->create(['gold' => 1000, 'name' => 'Игрок2']);
+        $this->seed(\Database\Seeders\DatabaseSeeder::class);
+
+        $this->tradeService = app(TradeService::class);
+        $this->inventoryService = app(InventoryService::class);
+        $this->craftingService = app(CraftingService::class);
+
+        $user1 = User::where('email', 'test@example.com')->first();
+        $this->player1 = $user1->characters()->where('character_type', 'player')->first();
+
+        $user2 = User::create([
+            'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+            'name' => 'Player 2',
+            'email' => 'player2@example.com',
+            'password' => bcrypt('password'),
+        ]);
+        $this->player2 = Character::create([
+            'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+            'user_uuid' => $user2->uuid,
+            'character_type' => 'player',
+            'name' => 'Player 2 Character',
+            'active' => true,
+        ]);
+
+        // Создаём хранилища для player2
+        $inventory = \App\Models\Storage::create([
+            'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+            'characters_uuid' => $this->player2->uuid,
+            'storage_type' => 'inventory',
+            'name' => 'Инвентарь',
+            'active' => true,
+        ]);
+        for ($i = 0; $i < 50; $i++) {
+            \App\Models\Slot::create([
+                'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+                'storage_uuid' => $inventory->uuid,
+                'slot_type' => null,
+            ]);
+        }
+
+        // Player2 начинает с 0 золота, добавим 1000
+        $this->inventoryService->addResource($this->player2, 'gold', 1000);
     }
 
     public function test_create_trade(): void
     {
-        $trade = $this->service->createTrade($this->user1->id, $this->user2->id);
+        $trade = $this->tradeService->createTrade($this->player1, $this->player2);
 
-        $this->assertDatabaseHas('trade_offers', [
-            'initiator_id' => $this->user1->id,
-            'partner_id' => $this->user2->id,
-            'status' => 'active',
-        ]);
-        $this->assertEquals($this->user1->id, $trade->initiator_id);
+        $this->assertNotNull($trade);
+        $this->assertEquals('pending', $trade->status);
+        $this->assertEquals($this->player1->uuid, $trade->initiator_uuid);
+        $this->assertEquals($this->player2->uuid, $trade->partner_uuid);
     }
 
     public function test_cannot_trade_with_self(): void
     {
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Нельзя торговать с самим собой');
-        $this->service->createTrade($this->user1->id, $this->user1->id);
+        $this->expectExceptionMessage('Нельзя обмениваться с самим собой');
+        $this->tradeService->createTrade($this->player1, $this->player1);
     }
 
-    public function test_cannot_create_duplicate_trade(): void
+    public function test_add_item_to_trade(): void
     {
-        $this->service->createTrade($this->user1->id, $this->user2->id);
+        $this->inventoryService->addResource($this->player1, 'wood', 10);
+        $blueprint = $this->craftingService->createBlueprint($this->player1, 'craft_wooden_sword');
+        $item = $this->craftingService->craftItem($this->player1, 'craft_wooden_sword', $blueprint->uuid);
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('уже есть активный обмен');
-        $this->service->createTrade($this->user1->id, $this->user2->id);
+        $trade = $this->tradeService->createTrade($this->player1, $this->player2);
+        $tradeItem = $this->tradeService->addItemToTrade($this->player1, $trade, $item->uuid);
+
+        $this->assertNotNull($tradeItem);
+        $this->assertEquals($item->uuid, $tradeItem->item_uuid);
+        $this->assertEquals($this->player1->uuid, $tradeItem->character_uuid);
+
+        $item->refresh();
+        $this->assertNotNull($item->temporary_slot_uuid);
     }
 
-    public function test_add_item_to_trade_aggregates_by_template(): void
+    public function test_add_resource_to_trade(): void
     {
-        $template = ItemTemplate::factory()->material()->create(['max_stack' => 100]);
+        $this->inventoryService->addResource($this->player1, 'wood', 10);
 
-        ItemInstance::factory()->create([
-            'owner_id' => $this->user1->id,
-            'template_id' => $template->id,
-            'quantity' => 100,
-        ]);
-        ItemInstance::factory()->create([
-            'owner_id' => $this->user1->id,
-            'template_id' => $template->id,
-            'quantity' => 100,
-        ]);
-        ItemInstance::factory()->create([
-            'owner_id' => $this->user1->id,
-            'template_id' => $template->id,
-            'quantity' => 50,
-        ]);
+        $trade = $this->tradeService->createTrade($this->player1, $this->player2);
+        $tradeItem = $this->tradeService->addResourceToTrade($this->player1, $trade, 'wood', 5);
 
-        $trade = $this->service->createTrade($this->user1->id, $this->user2->id);
-        $trade = $this->service->addItem($this->user1->id, $trade->id, $template->id, 150);
-
-        $this->assertDatabaseHas('trade_items', [
-            'trade_id' => $trade->id,
-            'template_id' => $template->id,
-            'quantity' => 150,
-        ]);
+        $this->assertNotNull($tradeItem);
+        $this->assertEquals(5, $tradeItem->quantity);
+        $this->assertEquals($this->player1->uuid, $tradeItem->character_uuid);
     }
 
-    public function test_add_item_fails_if_not_enough(): void
+    public function test_confirm_trade(): void
     {
-        $template = ItemTemplate::factory()->material()->create();
-        ItemInstance::factory()->create([
-            'owner_id' => $this->user1->id,
-            'template_id' => $template->id,
-            'quantity' => 10,
-        ]);
+        $trade = $this->tradeService->createTrade($this->player1, $this->player2);
+        $trade = $this->tradeService->confirmTrade($this->player1, $trade);
 
-        $trade = $this->service->createTrade($this->user1->id, $this->user2->id);
-
-        $this->expectException(\RuntimeException::class);
-        $this->service->addItem($this->user1->id, $trade->id, $template->id, 50);
+        $this->assertTrue($trade->initiator_accepted);
+        $this->assertFalse($trade->partner_accepted);
     }
 
-    public function test_reduce_item(): void
+    public function test_full_trade_execution(): void
     {
-        $template = ItemTemplate::factory()->material()->create();
-        ItemInstance::factory()->create([
-            'owner_id' => $this->user1->id,
-            'template_id' => $template->id,
-            'quantity' => 100,
-        ]);
+        // Player 1 даёт предмет
+        $this->inventoryService->addResource($this->player1, 'wood', 10);
+        $blueprint = $this->craftingService->createBlueprint($this->player1, 'craft_wooden_sword');
+        $item = $this->craftingService->craftItem($this->player1, 'craft_wooden_sword', $blueprint->uuid);
 
-        $trade = $this->service->createTrade($this->user1->id, $this->user2->id);
-        $trade = $this->service->addItem($this->user1->id, $trade->id, $template->id, 50);
+        // Player 2 имеет 1000 золота (уже добавлено в setUp)
 
-        $tradeItem = $trade->initiatorItems->first();
-        $trade = $this->service->reduceItem($this->user1->id, $trade->id, $tradeItem->id, 20);
+        // Создаём обмен
+        $trade = $this->tradeService->createTrade($this->player1, $this->player2);
+        $this->tradeService->addItemToTrade($this->player1, $trade, $item->uuid);
+        $this->tradeService->addResourceToTrade($this->player2, $trade, 'gold', 100);
 
-        $this->assertDatabaseHas('trade_items', ['id' => $tradeItem->id, 'quantity' => 30]);
-    }
+        // Подтверждаем
+        $trade = $this->tradeService->confirmTrade($this->player1, $trade);
+        $trade = $this->tradeService->confirmTrade($this->player2, $trade);
 
-    public function test_add_gold(): void
-    {
-        $trade = $this->service->createTrade($this->user1->id, $this->user2->id);
-        $trade = $this->service->addGold($this->user1->id, $trade->id, 500);
+        // Проверяем результат
+        $this->assertEquals('completed', $trade->status);
 
-        $this->assertDatabaseHas('trade_offers', [
-            'id' => $trade->id,
-            'initiator_gold' => 500,
-        ]);
-    }
+        $item->refresh();
+        $player2Inventory = $this->player2->storages()->where('storage_type', 'inventory')->first();
+        $this->assertEquals($player2Inventory->uuid, $item->slot->storage_uuid);
 
-    public function test_add_gold_fails_if_not_enough(): void
-    {
-        $trade = $this->service->createTrade($this->user1->id, $this->user2->id);
+        $player1Gold = $this->inventoryService->getResourceQuantity($this->player1, 'gold');
+        $this->assertEquals(1100, $player1Gold); // 1000 + 100
 
-        $this->expectException(\RuntimeException::class);
-        $this->service->addGold($this->user1->id, $trade->id, 9999);
-    }
-
-    public function test_full_trade_execution_with_gold(): void
-    {
-        $wood = ItemTemplate::factory()->material()->create(['name' => 'Дерево']);
-        $sword = ItemTemplate::factory()->equipment()->create(['name' => 'Меч']);
-
-        ItemInstance::factory()->create([
-            'owner_id' => $this->user1->id,
-            'template_id' => $wood->id,
-            'quantity' => 100,
-        ]);
-        ItemInstance::factory()->create([
-            'owner_id' => $this->user2->id,
-            'template_id' => $sword->id,
-            'quantity' => 1,
-        ]);
-
-        $trade = $this->service->createTrade($this->user1->id, $this->user2->id);
-        $this->service->addItem($this->user1->id, $trade->id, $wood->id, 50);
-        $this->service->addGold($this->user1->id, $trade->id, 100);
-
-        $this->service->addItem($this->user2->id, $trade->id, $sword->id, 1);
-        $this->service->addGold($this->user2->id, $trade->id, 50);
-
-        $this->service->accept($this->user1->id, $trade->id);
-        $this->service->accept($this->user2->id, $trade->id);
-
-        $this->assertDatabaseHas('item_instances', [
-            'owner_id' => $this->user2->id,
-            'template_id' => $wood->id,
-            'quantity' => 50,
-        ]);
-        $this->assertDatabaseHas('item_instances', [
-            'owner_id' => $this->user1->id,
-            'template_id' => $sword->id,
-            'quantity' => 1,
-        ]);
-
-        $this->assertEquals(950, User::find($this->user1->id)->gold);
-        $this->assertEquals(1050, User::find($this->user2->id)->gold);
-
-        $this->assertDatabaseHas('trade_offers', [
-            'id' => $trade->id,
-            'status' => 'completed',
-        ]);
-
-        $this->assertDatabaseHas('item_instances', [
-            'owner_id' => $this->user1->id,
-            'template_id' => $wood->id,
-            'quantity' => 50,
-        ]);
-    }
-
-    public function test_trade_execution_with_multiple_stacks(): void
-    {
-        $template = ItemTemplate::factory()->material()->create(['max_stack' => 100, 'name' => 'Руда']);
-
-        ItemInstance::factory()->create([
-            'owner_id' => $this->user1->id,
-            'template_id' => $template->id,
-            'quantity' => 100,
-        ]);
-        ItemInstance::factory()->create([
-            'owner_id' => $this->user1->id,
-            'template_id' => $template->id,
-            'quantity' => 100,
-        ]);
-        ItemInstance::factory()->create([
-            'owner_id' => $this->user1->id,
-            'template_id' => $template->id,
-            'quantity' => 50,
-        ]);
-
-        $this->user2->update(['gold' => 1000]);
-
-        $trade = $this->service->createTrade($this->user1->id, $this->user2->id);
-
-        $this->service->addItem($this->user1->id, $trade->id, $template->id, 150);
-        $this->service->addGold($this->user2->id, $trade->id, 500);
-
-        $this->service->accept($this->user1->id, $trade->id);
-        $this->service->accept($this->user2->id, $trade->id);
-
-        $totalOre = \App\Models\ItemInstance::where('owner_id', $this->user2->id)
-            ->where('template_id', $template->id)
-            ->sum('quantity');
-        $this->assertEquals(150, $totalOre);
-
-        $remainingOre = \App\Models\ItemInstance::where('owner_id', $this->user1->id)
-            ->where('template_id', $template->id)
-            ->sum('quantity');
-        $this->assertEquals(100, $remainingOre);
+        $player2Gold = $this->inventoryService->getResourceQuantity($this->player2, 'gold');
+        $this->assertEquals(900, $player2Gold); // 1000 - 100
     }
 
     public function test_cancel_trade(): void
     {
-        $trade = $this->service->createTrade($this->user1->id, $this->user2->id);
-        $this->service->cancel($this->user1->id, $trade->id);
+        $this->inventoryService->addResource($this->player1, 'wood', 10);
+        $blueprint = $this->craftingService->createBlueprint($this->player1, 'craft_wooden_sword');
+        $item = $this->craftingService->craftItem($this->player1, 'craft_wooden_sword', $blueprint->uuid);
 
-        $this->assertDatabaseHas('trade_offers', [
-            'id' => $trade->id,
-            'status' => 'cancelled',
-        ]);
+        $trade = $this->tradeService->createTrade($this->player1, $this->player2);
+        $this->tradeService->addItemToTrade($this->player1, $trade, $item->uuid);
+
+        $trade = $this->tradeService->cancelTrade($this->player1, $trade);
+
+        $this->assertEquals('cancelled', $trade->status);
+
+        $item->refresh();
+        $this->assertNull($item->temporary_slot_uuid);
+    }
+
+    public function test_get_character_trades(): void
+    {
+        $trade1 = $this->tradeService->createTrade($this->player1, $this->player2);
+        $trade2 = $this->tradeService->createTrade($this->player2, $this->player1);
+
+        $trades = $this->tradeService->getCharacterTrades($this->player1);
+
+        $this->assertGreaterThanOrEqual(2, $trades->count());
     }
 }

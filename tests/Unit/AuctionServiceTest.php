@@ -4,339 +4,207 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
-use App\Models\AuctionLot;
-use App\Models\ItemInstance;
-use App\Models\ItemTemplate;
+use App\Models\Character;
 use App\Models\User;
 use App\Services\AuctionService;
-use Illuminate\Foundation\Testing\DatabaseTransactions;
+use App\Services\CraftingService;
+use App\Services\InventoryService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class AuctionServiceTest extends TestCase
 {
-    use \Illuminate\Foundation\Testing\RefreshDatabase;
+    use RefreshDatabase;
 
-    private AuctionService $service;
-    private User $seller;
-    private User $buyer;
+    private AuctionService $auctionService;
+    private InventoryService $inventoryService;
+    private CraftingService $craftingService;
+    private Character $seller;
+    private Character $buyer;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = app(AuctionService::class);
-        $this->seller = User::factory()->create(['gold' => 1000, 'name' => 'Продавец']);
-        $this->buyer = User::factory()->create(['gold' => 1000, 'name' => 'Покупатель']);
+        $this->seed(\Database\Seeders\DatabaseSeeder::class);
+
+        $this->auctionService = app(AuctionService::class);
+        $this->inventoryService = app(InventoryService::class);
+        $this->craftingService = app(CraftingService::class);
+
+        $sellerUser = User::where('email', 'test@example.com')->first();
+        $this->seller = $sellerUser->characters()->where('character_type', 'player')->first();
+
+        $buyerUser = User::create([
+            'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+            'name' => 'Buyer',
+            'email' => 'buyer@example.com',
+            'password' => bcrypt('password'),
+        ]);
+        $this->buyer = Character::create([
+            'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+            'user_uuid' => $buyerUser->uuid,
+            'character_type' => 'player',
+            'name' => 'Buyer Character',
+            'active' => true,
+        ]);
+
+        // Создаём хранилища для покупателя
+        $inventory = \App\Models\Storage::create([
+            'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+            'characters_uuid' => $this->buyer->uuid,
+            'storage_type' => 'inventory',
+            'name' => 'Инвентарь',
+            'active' => true,
+        ]);
+        for ($i = 0; $i < 50; $i++) {
+            \App\Models\Slot::create([
+                'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+                'storage_uuid' => $inventory->uuid,
+                'slot_type' => null,
+            ]);
+        }
+
+        // Даём покупателю 1000 золота
+        $this->inventoryService->addResource($this->buyer, 'gold', 1000);
     }
 
-    public function test_get_active_lots_returns_empty_array_when_no_lots(): void
+    public function test_prepare_lot_creates_temporary_slot(): void
     {
-        $lots = $this->service->getActiveLots();
-        $this->assertIsArray($lots);
-        $this->assertEmpty($lots);
+        $this->inventoryService->addResource($this->seller, 'wood', 10);
+        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
+        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
+
+        $temporarySlot = $this->auctionService->prepareLot($this->seller, $item->uuid, 100);
+
+        $this->assertNotNull($temporarySlot);
+        $this->assertTrue($temporarySlot->active);
+        $this->assertEquals($this->seller->uuid, $temporarySlot->character_uuid);
+
+        $item->refresh();
+        $this->assertEquals($temporarySlot->uuid, $item->temporary_slot_uuid);
     }
 
-    public function test_get_active_lots_returns_only_active(): void
+    public function test_confirm_lot_moves_item_to_auction(): void
     {
-        $template = ItemTemplate::factory()->material()->create(['name' => 'Дерево']);
+        $this->inventoryService->addResource($this->seller, 'wood', 10);
+        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
+        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
 
-        AuctionLot::factory()->create([
-            'seller_id' => $this->seller->id,
-            'template_id' => $template->id,
-            'status' => 'active',
-            'price' => 100,
-            'quantity' => 5,
-        ]);
+        $temporarySlot = $this->auctionService->prepareLot($this->seller, $item->uuid, 100);
+        $lot = $this->auctionService->confirmLot($this->seller, $item->uuid, 100);
 
-        AuctionLot::factory()->create([
-            'seller_id' => $this->seller->id,
-            'template_id' => $template->id,
-            'status' => 'sold',
-            'price' => 200,
-        ]);
-
-        $lots = $this->service->getActiveLots();
-
-        $this->assertCount(1, $lots);
-        $this->assertEquals(100, $lots[0]['price']);
-        $this->assertEquals('Дерево', $lots[0]['template_name']);
-    }
-
-    public function test_get_active_lots_filters_by_type(): void
-    {
-        $wood = ItemTemplate::factory()->material()->create(['name' => 'Дерево', 'type' => 'material']);
-        $sword = ItemTemplate::factory()->equipment()->create(['name' => 'Меч', 'type' => 'equipment']);
-
-        AuctionLot::factory()->create([
-            'seller_id' => $this->seller->id,
-            'template_id' => $wood->id,
-            'status' => 'active',
-        ]);
-
-        AuctionLot::factory()->create([
-            'seller_id' => $this->seller->id,
-            'template_id' => $sword->id,
-            'status' => 'active',
-        ]);
-
-        $materialLots = $this->service->getActiveLots('material');
-        $this->assertCount(1, $materialLots);
-        $this->assertEquals('Дерево', $materialLots[0]['template_name']);
-
-        $equipmentLots = $this->service->getActiveLots('equipment');
-        $this->assertCount(1, $equipmentLots);
-        $this->assertEquals('Меч', $equipmentLots[0]['template_name']);
-    }
-
-    public function test_get_active_lots_filters_by_template_id(): void
-    {
-        $wood = ItemTemplate::factory()->material()->create(['name' => 'Дерево']);
-        $stone = ItemTemplate::factory()->material()->create(['name' => 'Камень']);
-
-        AuctionLot::factory()->create([
-            'seller_id' => $this->seller->id,
-            'template_id' => $wood->id,
-            'status' => 'active',
-        ]);
-
-        AuctionLot::factory()->create([
-            'seller_id' => $this->seller->id,
-            'template_id' => $stone->id,
-            'status' => 'active',
-        ]);
-
-        $lots = $this->service->getActiveLots(null, $wood->id);
-        $this->assertCount(1, $lots);
-        $this->assertEquals('Дерево', $lots[0]['template_name']);
-    }
-
-    public function test_get_my_lots_returns_user_lots(): void
-    {
-        $template = ItemTemplate::factory()->material()->create(['name' => 'Дерево']);
-
-        AuctionLot::factory()->create([
-            'seller_id' => $this->seller->id,
-            'template_id' => $template->id,
-            'status' => 'active',
-            'price' => 100,
-        ]);
-
-        AuctionLot::factory()->create([
-            'seller_id' => $this->seller->id,
-            'template_id' => $template->id,
-            'status' => 'sold',
-            'price' => 200,
-        ]);
-
-        // Лот другого продавца
-        AuctionLot::factory()->create([
-            'seller_id' => $this->buyer->id,
-            'template_id' => $template->id,
-            'status' => 'active',
-        ]);
-
-        $lots = $this->service->getMyLots($this->seller->id);
-
-        $this->assertCount(2, $lots);
-        $this->assertEquals(100, $lots[0]['price']);
-        $this->assertEquals(200, $lots[1]['price']);
-    }
-
-    public function test_get_my_lots_returns_empty_for_user_without_lots(): void
-    {
-        $lots = $this->service->getMyLots($this->seller->id);
-        $this->assertIsArray($lots);
-        $this->assertEmpty($lots);
-    }
-
-    public function test_list_lot_creates_lot_and_removes_items(): void
-    {
-        $template = ItemTemplate::factory()->material()->create([
-            'name' => 'Дерево',
-            'is_stackable' => true,
-            'max_stack' => 200,
-        ]);
-
-        ItemInstance::factory()->create([
-            'owner_id' => $this->seller->id,
-            'template_id' => $template->id,
-            'quantity' => 10,
-        ]);
-
-        // listLot($userId, $templateId, $quantity, $price)
-        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
-
-        $this->assertNotNull($lot->id);
-        $this->assertEquals($this->seller->id, $lot->seller_id);
-        $this->assertEquals($template->id, $lot->template_id);
-        $this->assertEquals(5, $lot->quantity);
-        $this->assertEquals(100, $lot->price);
         $this->assertEquals('active', $lot->status);
+        $this->assertEquals(100, $lot->price);
+        $this->assertEquals($this->seller->uuid, $lot->seller_uuid);
 
-        // Проверка, что предметы списались
-        $remaining = ItemInstance::where('owner_id', $this->seller->id)
-            ->where('template_id', $template->id)
-            ->sum('quantity');
-        $this->assertEquals(5, $remaining);
+        $item->refresh();
+        $this->assertNull($item->temporary_slot_uuid);
+        $temporarySlot->refresh();
+        $this->assertFalse($temporarySlot->active);
     }
 
-    public function test_list_lot_fails_if_not_enough_items(): void
+    public function test_cancel_lot_returns_item_to_seller(): void
     {
-        $template = ItemTemplate::factory()->material()->create();
+        $this->inventoryService->addResource($this->seller, 'wood', 10);
+        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
+        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
 
-        ItemInstance::factory()->create([
-            'owner_id' => $this->seller->id,
-            'template_id' => $template->id,
-            'quantity' => 3,
-        ]);
+        $this->auctionService->prepareLot($this->seller, $item->uuid, 100);
+        $lot = $this->auctionService->confirmLot($this->seller, $item->uuid, 100);
+        $cancelledLot = $this->auctionService->cancelLot($this->seller, $lot->uuid);
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('В инвентаре только');
-        $this->service->listLot($this->seller->id, $template->id, 5, 100);
+        $this->assertEquals('cancelled', $cancelledLot->status);
+
+        $item->refresh();
+        $sellerInventory = $this->seller->storages()->where('storage_type', 'inventory')->first();
+        $this->assertEquals($sellerInventory->uuid, $item->slot->storage_uuid);
     }
 
-    public function test_list_lot_fails_with_zero_price(): void
+    public function test_buy_lot_transfers_item_and_gold(): void
     {
-        $template = ItemTemplate::factory()->material()->create();
+        $this->inventoryService->addResource($this->seller, 'wood', 10);
+        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
+        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Цена должна быть больше нуля');
-        $this->service->listLot($this->seller->id, $template->id, 5, 0);
+        $this->auctionService->prepareLot($this->seller, $item->uuid, 100);
+        $lot = $this->auctionService->confirmLot($this->seller, $item->uuid, 100);
+
+        $sellerGoldBefore = $this->inventoryService->getResourceQuantity($this->seller, 'gold');
+        $buyerGoldBefore = $this->inventoryService->getResourceQuantity($this->buyer, 'gold');
+
+        $result = $this->auctionService->buyLot($this->buyer, $lot->uuid);
+
+        $this->assertEquals('sold', $result['lot']->status);
+        $this->assertEquals($this->buyer->uuid, $result['lot']->buyer_uuid);
+
+        $item->refresh();
+        $buyerInventory = $this->buyer->storages()->where('storage_type', 'inventory')->first();
+        $this->assertEquals($buyerInventory->uuid, $item->slot->storage_uuid);
+
+        $this->assertEquals($buyerGoldBefore - 100, $this->inventoryService->getResourceQuantity($this->buyer, 'gold'));
+        $commission = (int) round(100 * 5 / 100);
+        $this->assertEquals($sellerGoldBefore + (100 - $commission), $this->inventoryService->getResourceQuantity($this->seller, 'gold'));
     }
 
-    public function test_buy_lot_transfers_gold_and_items(): void
+    public function test_buy_lot_fails_without_enough_gold(): void
     {
-        $template = ItemTemplate::factory()->material()->create([
-            'name' => 'Дерево',
-            'is_stackable' => true,
-            'max_stack' => 200,
-        ]);
+        $this->inventoryService->addResource($this->seller, 'wood', 10);
+        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
+        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
 
-        // Продавец выставляет 5 дерева за 100 золота (итого 500)
-        ItemInstance::factory()->create([
-            'owner_id' => $this->seller->id,
-            'template_id' => $template->id,
-            'quantity' => 5,
-        ]);
-
-        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
-
-        // Покупатель покупает (5 × 100 = 500)
-        $this->service->buyLot($this->buyer->id, $lot->id);
-
-        // Проверяем золото (комиссия 5% = 25, продавец получает 475)
-        $this->assertEquals(500, $this->buyer->fresh()->gold); // 1000 - 500
-        $this->assertEquals(1475, $this->seller->fresh()->gold); // 1000 + 475
-
-        // Проверяем предметы
-        $buyerWood = ItemInstance::where('owner_id', $this->buyer->id)
-            ->where('template_id', $template->id)
-            ->sum('quantity');
-        $this->assertEquals(5, $buyerWood);
-
-        // Лот продан
-        $this->assertEquals('sold', $lot->fresh()->status);
-        $this->assertEquals($this->buyer->id, $lot->fresh()->buyer_id);
-    }
-
-    public function test_buy_lot_fails_if_not_enough_gold(): void
-    {
-        $template = ItemTemplate::factory()->material()->create();
-
-        ItemInstance::factory()->create([
-            'owner_id' => $this->seller->id,
-            'template_id' => $template->id,
-            'quantity' => 5,
-        ]);
-
-        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 9999);
+        $this->auctionService->prepareLot($this->seller, $item->uuid, 20000);
+        $lot = $this->auctionService->confirmLot($this->seller, $item->uuid, 20000);
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Недостаточно золота');
-        $this->service->buyLot($this->buyer->id, $lot->id);
+        $this->auctionService->buyLot($this->buyer, $lot->uuid);
     }
 
     public function test_buy_lot_fails_for_own_lot(): void
     {
-        $template = ItemTemplate::factory()->material()->create();
+        $this->inventoryService->addResource($this->seller, 'wood', 10);
+        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
+        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
 
-        ItemInstance::factory()->create([
-            'owner_id' => $this->seller->id,
-            'template_id' => $template->id,
-            'quantity' => 5,
-        ]);
-
-        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
+        $this->auctionService->prepareLot($this->seller, $item->uuid, 100);
+        $lot = $this->auctionService->confirmLot($this->seller, $item->uuid, 100);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Нельзя купить свой');
-        $this->service->buyLot($this->seller->id, $lot->id);
+        $this->expectExceptionMessage('Нельзя купить свой собственный лот');
+        $this->auctionService->buyLot($this->seller, $lot->uuid);
     }
 
-    public function test_cancel_lot_returns_items(): void
+    public function test_get_active_lots(): void
     {
-        $template = ItemTemplate::factory()->material()->create([
-            'name' => 'Дерево',
-            'is_stackable' => true,
-            'max_stack' => 200,
-        ]);
+        $this->inventoryService->addResource($this->seller, 'wood', 20);
+        
+        $blueprint1 = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
+        $item1 = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint1->uuid);
+        $this->auctionService->prepareLot($this->seller, $item1->uuid, 100);
+        $lot1 = $this->auctionService->confirmLot($this->seller, $item1->uuid, 100);
 
-        ItemInstance::factory()->create([
-            'owner_id' => $this->seller->id,
-            'template_id' => $template->id,
-            'quantity' => 10,
-        ]);
+        $blueprint2 = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
+        $item2 = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint2->uuid);
+        $this->auctionService->prepareLot($this->seller, $item2->uuid, 200);
+        $lot2 = $this->auctionService->confirmLot($this->seller, $item2->uuid, 200);
 
-        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
+        $activeLots = $this->auctionService->getActiveLots();
 
-        // После выставления осталось 5
-        $this->assertEquals(5, ItemInstance::where('owner_id', $this->seller->id)
-            ->where('template_id', $template->id)
-            ->sum('quantity'));
-
-        // Отменяем лот
-        $this->service->cancelLot($this->seller->id, $lot->id);
-
-        // Предметы вернулись
-        $this->assertEquals(10, ItemInstance::where('owner_id', $this->seller->id)
-            ->where('template_id', $template->id)
-            ->sum('quantity'));
-
-        // Лот отменён
-        $this->assertEquals('cancelled', $lot->fresh()->status);
+        $this->assertGreaterThanOrEqual(2, $activeLots->count());
+        $this->assertTrue($activeLots->contains('uuid', $lot1->uuid));
+        $this->assertTrue($activeLots->contains('uuid', $lot2->uuid));
     }
 
-    public function test_cancel_lot_fails_for_other_user(): void
+    public function test_buy_infinite_lot_creates_new_item(): void
     {
-        $template = ItemTemplate::factory()->material()->create();
+        $infiniteLot = \App\Models\AuctionLot::where('is_infinite', true)->first();
+        
+        $buyerGoldBefore = $this->inventoryService->getResourceQuantity($this->buyer, 'gold');
 
-        ItemInstance::factory()->create([
-            'owner_id' => $this->seller->id,
-            'template_id' => $template->id,
-            'quantity' => 5,
-        ]);
+        $result = $this->auctionService->buyLot($this->buyer, $infiniteLot->uuid);
 
-        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
-
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('не можете отменить');
-        $this->service->cancelLot($this->buyer->id, $lot->id);
-    }
-
-    public function test_cancel_lot_fails_if_already_sold(): void
-    {
-        $template = ItemTemplate::factory()->material()->create();
-
-        ItemInstance::factory()->create([
-            'owner_id' => $this->seller->id,
-            'template_id' => $template->id,
-            'quantity' => 5,
-        ]);
-
-        $lot = $this->service->listLot($this->seller->id, $template->id, 5, 100);
-        $this->service->buyLot($this->buyer->id, $lot->id);
-
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Можно отменить только активный лот');
-        $this->service->cancelLot($this->seller->id, $lot->id);
+        $this->assertTrue($result['is_infinite']);
+        $this->assertEquals($infiniteLot->template_slug, $result['result']->template_slug);
+        $this->assertEquals($buyerGoldBefore - $infiniteLot->price, $this->inventoryService->getResourceQuantity($this->buyer, 'gold'));
     }
 }

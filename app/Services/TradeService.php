@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Models\GameEvent;
-use App\Models\ItemInstance;
-use App\Models\ItemTemplate;
-use App\Models\TradeItem;
+use App\Models\Character;
+use App\Models\Item;
+use App\Models\Resource;
+use App\Models\Slot;
+use App\Models\Storage;
+use App\Models\TemporarySlot;
 use App\Models\TradeOffer;
-use App\Models\User;
+use App\Models\TradeItem;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -20,517 +22,527 @@ class TradeService
         private EventStore $eventStore
     ) {}
 
-    public function getActiveTrades(int $userId): array
+    public function createTrade(Character $initiator, Character $partner): TradeOffer
     {
-        return TradeOffer::with(['initiator', 'partner', 'items.template'])
-            ->where(function ($q) use ($userId) {
-                $q->where('initiator_id', $userId)
-                    ->orWhere('partner_id', $userId);
+        if ($initiator->uuid === $partner->uuid) {
+            throw new \RuntimeException('Нельзя обмениваться с самим собой');
+        }
+
+        // Проверяем что инициатор не участвует в других активных обменах
+        $initiatorHasActiveTrade = TradeOffer::where('status', 'pending')
+            ->where(function ($q) use ($initiator) {
+                $q->where('initiator_uuid', $initiator->uuid)
+                  ->orWhere('partner_uuid', $initiator->uuid);
             })
-            ->whereIn('status', ['pending', 'active'])
-            ->orderBy('created_at', 'desc')
-            ->get()
-            ->map(fn(TradeOffer $t) => $this->formatTrade($t, $userId))
-            ->toArray();
+            ->exists();
+
+        if ($initiatorHasActiveTrade) {
+            throw new \RuntimeException('Вы уже участвуете в другом обмене');
+        }
+
+        // Проверяем что партнёр не участвует в других активных обменах
+        $partnerHasActiveTrade = TradeOffer::where('status', 'pending')
+            ->where(function ($q) use ($partner) {
+                $q->where('initiator_uuid', $partner->uuid)
+                  ->orWhere('partner_uuid', $partner->uuid);
+            })
+            ->exists();
+
+        if ($partnerHasActiveTrade) {
+            throw new \RuntimeException('Этот игрок уже участвует в другом обмене');
+        }
+
+        return DB::transaction(function () use ($initiator, $partner) {
+            $trade = TradeOffer::create([
+                'initiator_uuid' => $initiator->uuid,
+                'partner_uuid' => $partner->uuid,
+                'status' => 'pending',
+                'initiator_accepted' => false,
+                'partner_accepted' => false,
+            ]);
+
+            $this->eventStore->record(
+                'trade.created',
+                'trade',
+                $trade->uuid,
+                [
+                    'initiator_uuid' => $initiator->uuid,
+                    'partner_uuid' => $partner->uuid,
+                ],
+                $initiator->uuid
+            );
+
+            return $trade;
+        });
     }
 
-    public function getTrade(int $tradeId, int $userId): array
+    public function addItemToTrade(Character $character, TradeOffer $trade, string $itemUuid): TradeItem
     {
-        $trade = TradeOffer::with(['initiator', 'partner', 'items.template', 'items.instance'])
-            ->findOrFail($tradeId);
-
-        if (!$trade->isParticipant($userId)) {
-            throw new \RuntimeException('Вы не участвуете в этом обмене');
-        }
-
-        return $this->formatTrade($trade, $userId);
-    }
-
-    public function createTrade(int $initiatorId, int $partnerId): TradeOffer
-    {
-        if ($initiatorId === $partnerId) {
-            throw new \RuntimeException('Нельзя торговать с самим собой');
-        }
-
-        $initiator = User::find($initiatorId);
-        $partner = User::find($partnerId);
-
-        if (!$initiator || !$partner) {
-            throw new \RuntimeException('Игрок не найден');
-        }
-
-        $existing = TradeOffer::where(function ($q) use ($initiatorId, $partnerId) {
-            $q->where(function ($sub) use ($initiatorId, $partnerId) {
-                $sub->where('initiator_id', $initiatorId)->where('partner_id', $partnerId);
-            })->orWhere(function ($sub) use ($initiatorId, $partnerId) {
-                $sub->where('initiator_id', $partnerId)->where('partner_id', $initiatorId);
-            });
-        })->whereIn('status', ['pending', 'active'])->first();
-
-        if ($existing) {
-            throw new \RuntimeException('У вас уже есть активный обмен с этим игроком');
-        }
-
-        $trade = TradeOffer::create([
-            'initiator_id' => $initiatorId,
-            'partner_id' => $partnerId,
-            'status' => 'active',
-        ]);
-
-        $correlationId = Str::uuid()->toString();
-        $payload = [
-            'trade_id' => $trade->id,
-            'initiator_id' => $initiatorId,
-            'initiator_name' => $initiator->name,
-            'partner_id' => $partnerId,
-            'partner_name' => $partner->name,
-        ];
-
-        $this->eventStore->record(
-            GameEvent::TRADE_CREATED, 'trade', $trade->id,
-            $payload, $initiatorId, $correlationId
-        );
-
-        $this->eventStore->record(
-            GameEvent::TRADE_CREATED, 'trade', $trade->id,
-            $payload, $partnerId, $correlationId
-        );
-
-        return $trade;
-    }
-
-    public function addItem(int $userId, int $tradeId, int $templateId, int $quantity): TradeOffer
-    {
-        return DB::transaction(function () use ($userId, $tradeId, $templateId, $quantity) {
-            $trade = TradeOffer::findOrFail($tradeId);
-            $side = $trade->getSide($userId);
-
-            if (!$side) throw new \RuntimeException('Вы не участвуете в этом обмене');
-            if ($trade->status !== 'active') throw new \RuntimeException('Обмен не активен');
-            if ($quantity <= 0) throw new \RuntimeException('Количество должно быть больше 0');
-
-            $template = ItemTemplate::findOrFail($templateId);
-
-            if ($template->type === 'recipe') {
-                throw new \RuntimeException('Чертежи нельзя обменивать');
+        return DB::transaction(function () use ($character, $trade, $itemUuid) {
+            if (!$this->isParticipant($character, $trade)) {
+                throw new \RuntimeException('Вы не участвуете в этом обмене');
             }
 
-            $items = ItemInstance::where('owner_id', $userId)
-                ->where('template_id', $templateId)
-                ->orderBy('quantity', 'desc')
-                ->get();
-
-            $totalAvailable = $items->sum('quantity');
-
-            if ($totalAvailable < $quantity) {
-                throw new \RuntimeException("В инвентаре только {$totalAvailable} шт., нельзя передать {$quantity}");
+            if ($trade->status !== 'pending') {
+                throw new \RuntimeException('Обмен не в статусе ожидания');
             }
 
-            $existingTradeItem = TradeItem::where('trade_id', $tradeId)
-                ->where('side', $side)
-                ->where('template_id', $templateId)
+            $item = Item::where('uuid', $itemUuid)->first();
+            
+            if (!$item) {
+                throw new \RuntimeException('Предмет не найден');
+            }
+            
+            if (!in_array($item->stage, ['item', 'blueprint'])) {
+                throw new \RuntimeException('Этот предмет нельзя обменять');
+            }
+            
+            if ($item->temporary_slot_uuid) {
+                throw new \RuntimeException('Предмет уже участвует в другом обмене или аукционе');
+            }
+
+            $slot = Slot::where('uuid', $item->slot_uuid)->first();
+            if (!$slot) {
+                throw new \RuntimeException('Слот предмета не найден');
+            }
+            
+            $storage = Storage::where('uuid', $slot->storage_uuid)->first();
+            if (!$storage || $storage->characters_uuid !== $character->uuid) {
+                throw new \RuntimeException('Предмет не принадлежит вам');
+            }
+
+            $existingTradeItem = TradeItem::where('trade_uuid', $trade->uuid)
+                ->where('item_uuid', $itemUuid)
                 ->first();
 
             if ($existingTradeItem) {
-                $existingTradeItem->quantity += $quantity;
-                $existingTradeItem->save();
-            } else {
-                $firstInstance = $items->first();
-                TradeItem::create([
-                    'trade_id' => $tradeId,
-                    'side' => $side,
-                    'template_id' => $templateId,
-                    'item_instance_id' => $firstInstance->id,
-                    'quantity' => $quantity,
-                ]);
+                throw new \RuntimeException('Предмет уже в обмене');
             }
 
-            $this->resetAcceptances($trade);
-            $this->emitTradeUpdated($trade, $userId);
+            $tradeStorage = $this->getTradeStorage();
+            $temporarySlot = TemporarySlot::create([
+                'storage_uuid' => $tradeStorage->uuid,
+                'character_uuid' => $character->uuid,
+                'active' => true,
+                'timestamps_end' => now()->addMinutes(10),
+            ]);
 
-            return $trade->fresh();
-        });
-    }
+            $item->update(['temporary_slot_uuid' => $temporarySlot->uuid]);
 
-    public function reduceItem(int $userId, int $tradeId, int $tradeItemId, int $quantity): TradeOffer
-    {
-        return DB::transaction(function () use ($userId, $tradeId, $tradeItemId, $quantity) {
-            $trade = TradeOffer::findOrFail($tradeId);
-            $side = $trade->getSide($userId);
+            $tradeItem = TradeItem::create([
+                'trade_uuid' => $trade->uuid,
+                'character_uuid' => $character->uuid,
+                'item_uuid' => $itemUuid,
+                'resource_uuid' => null,
+                'quantity' => 1,
+            ]);
 
-            if (!$side) throw new \RuntimeException('Вы не участвуете в этом обмене');
-            if ($quantity <= 0) throw new \RuntimeException('Количество должно быть больше 0');
-
-            $tradeItem = TradeItem::where('id', $tradeItemId)
-                ->where('trade_id', $tradeId)
-                ->where('side', $side)
-                ->firstOrFail();
-
-            if ($tradeItem->quantity > $quantity) {
-                $tradeItem->quantity -= $quantity;
-                $tradeItem->save();
-            } else {
-                $tradeItem->delete();
-            }
-
-            $this->resetAcceptances($trade);
-            $this->emitTradeUpdated($trade, $userId);
-
-            return $trade->fresh();
-        });
-    }
-
-    public function removeItem(int $userId, int $tradeId, int $tradeItemId): TradeOffer
-    {
-        return DB::transaction(function () use ($userId, $tradeId, $tradeItemId) {
-            $trade = TradeOffer::findOrFail($tradeId);
-            $side = $trade->getSide($userId);
-
-            if (!$side) throw new \RuntimeException('Вы не участвуете в этом обмене');
-
-            $tradeItem = TradeItem::where('id', $tradeItemId)
-                ->where('trade_id', $tradeId)
-                ->where('side', $side)
-                ->firstOrFail();
-
-            $tradeItem->delete();
-
-            $this->resetAcceptances($trade);
-            $this->emitTradeUpdated($trade, $userId);
-
-            return $trade->fresh();
-        });
-    }
-
-    public function addGold(int $userId, int $tradeId, int $amount): TradeOffer
-    {
-        return DB::transaction(function () use ($userId, $tradeId, $amount) {
-            $trade = TradeOffer::findOrFail($tradeId);
-            $side = $trade->getSide($userId);
-
-            if (!$side) throw new \RuntimeException('Вы не участвуете в этом обмене');
-            if ($trade->status !== 'active') throw new \RuntimeException('Обмен не активен');
-            if ($amount < 0) throw new \RuntimeException('Сумма должна быть положительной');
-
-            $user = User::findOrFail($userId);
-            if ($user->gold < $amount) {
-                throw new \RuntimeException('Недостаточно золота');
-            }
-
-            $field = $side === 'initiator' ? 'initiator_gold' : 'partner_gold';
-            $trade->update([$field => $amount]);
-
-            $this->resetAcceptances($trade);
-            $this->emitTradeUpdated($trade, $userId);
-
-            return $trade->fresh();
-        });
-    }
-
-    public function accept(int $userId, int $tradeId): TradeOffer
-    {
-        return DB::transaction(function () use ($userId, $tradeId) {
-            $trade = TradeOffer::findOrFail($tradeId);
-            $side = $trade->getSide($userId);
-
-            if (!$side) throw new \RuntimeException('Вы не участвуете в этом обмене');
-            if ($trade->status !== 'active') throw new \RuntimeException('Обмен не активен');
-
-            $field = $side === 'initiator' ? 'initiator_accepted' : 'partner_accepted';
-            $trade->update([$field => true]);
-
-            $correlationId = Str::uuid()->toString();
-            $payload = [
-                'trade_id' => $trade->id,
-                'user_id' => $userId,
-                'side' => $side,
-            ];
-
-            $this->eventStore->record(
-                GameEvent::TRADE_ACCEPTED, 'trade', $trade->id,
-                $payload, $trade->initiator_id, $correlationId
-            );
-            $this->eventStore->record(
-                GameEvent::TRADE_ACCEPTED, 'trade', $trade->id,
-                $payload, $trade->partner_id, $correlationId
-            );
-
-            $trade = $trade->fresh();
-
-            if ($trade->initiator_accepted && $trade->partner_accepted) {
-                $this->executeTrade($trade);
-            } else {
-                $this->emitTradeUpdated($trade, $userId);
-            }
-
-            return $trade->fresh();
-        });
-    }
-
-    public function cancel(int $userId, int $tradeId): TradeOffer
-    {
-        $trade = TradeOffer::findOrFail($tradeId);
-        $side = $trade->getSide($userId);
-
-        if (!$side) throw new \RuntimeException('Вы не участвуете в этом обмене');
-        if (!in_array($trade->status, ['pending', 'active'])) {
-            throw new \RuntimeException('Обмен уже завершён');
-        }
-
-        $trade->update(['status' => 'cancelled']);
-
-        $correlationId = Str::uuid()->toString();
-        $payload = ['trade_id' => $trade->id, 'cancelled_by' => $userId];
-
-        $this->eventStore->record(
-            GameEvent::TRADE_CANCELLED, 'trade', $trade->id,
-            $payload, $trade->initiator_id, $correlationId
-        );
-        $this->eventStore->record(
-            GameEvent::TRADE_CANCELLED, 'trade', $trade->id,
-            $payload, $trade->partner_id, $correlationId
-        );
-
-        return $trade;
-    }
-
-    private function executeTrade(TradeOffer $trade): void
-    {
-        DB::transaction(function () use ($trade) {
-            $correlationId = Str::uuid()->toString();
-
-            $initiator = User::findOrFail($trade->initiator_id);
-            $partner = User::findOrFail($trade->partner_id);
-
-            $initiatorItems = $trade->initiatorItems;
-            $partnerItems = $trade->partnerItems;
-
-            // Проверка наличия предметов по template_id
-            foreach ($initiatorItems as $ti) {
-                $available = ItemInstance::where('owner_id', $trade->initiator_id)
-                    ->where('template_id', $ti->template_id)
-                    ->sum('quantity');
-                if ($available < $ti->quantity) {
-                    throw new \RuntimeException("Предметы инициатора больше недоступны ({$ti->template->name})");
-                }
-            }
-            foreach ($partnerItems as $ti) {
-                $available = ItemInstance::where('owner_id', $trade->partner_id)
-                    ->where('template_id', $ti->template_id)
-                    ->sum('quantity');
-                if ($available < $ti->quantity) {
-                    throw new \RuntimeException("Предметы партнёра больше недоступны ({$ti->template->name})");
-                }
-            }
-
-            if ($initiator->gold < $trade->initiator_gold) {
-                throw new \RuntimeException('У инициатора недостаточно золота');
-            }
-            if ($partner->gold < $trade->partner_gold) {
-                throw new \RuntimeException('У партнёра недостаточно золота');
-            }
-
-            $initiatorDelta = $trade->partner_gold - $trade->initiator_gold;
-            $partnerDelta = $trade->initiator_gold - $trade->partner_gold;
-
-            if ($initiatorDelta !== 0) $initiator->increment('gold', $initiatorDelta);
-            if ($partnerDelta !== 0) $partner->increment('gold', $partnerDelta);
-
-            // Обмен предметами: инициатор → партнёру
-            foreach ($initiatorItems as $ti) {
-                $remaining = $ti->quantity;
-                $stacks = ItemInstance::where('owner_id', $trade->initiator_id)
-                    ->where('template_id', $ti->template_id)
-                    ->orderBy('quantity', 'desc')
-                    ->get();
-
-                foreach ($stacks as $stack) {
-                    if ($remaining <= 0) break;
-                    $toRemove = min($remaining, $stack->quantity);
-                    $this->inventoryService->removeItem(
-                        $trade->initiator_id, $stack->id, $toRemove,
-                        $correlationId, 'trade', false
-                    );
-                    $remaining -= $toRemove;
-                }
-
-                $this->inventoryService->addItem(
-                    $trade->partner_id, $ti->template_id, $ti->quantity,
-                    $correlationId, false
-                );
-            }
-
-            // Обмен предметами: партнёр → инициатору
-            foreach ($partnerItems as $ti) {
-                $remaining = $ti->quantity;
-                $stacks = ItemInstance::where('owner_id', $trade->partner_id)
-                    ->where('template_id', $ti->template_id)
-                    ->orderBy('quantity', 'desc')
-                    ->get();
-
-                foreach ($stacks as $stack) {
-                    if ($remaining <= 0) break;
-                    $toRemove = min($remaining, $stack->quantity);
-                    $this->inventoryService->removeItem(
-                        $trade->partner_id, $stack->id, $toRemove,
-                        $correlationId, 'trade', false
-                    );
-                    $remaining -= $toRemove;
-                }
-
-                $this->inventoryService->addItem(
-                    $trade->initiator_id, $ti->template_id, $ti->quantity,
-                    $correlationId, false
-                );
-            }
-
-            $trade->update(['status' => 'completed']);
-
-            // Формируем received_items с золотом
-            $initiatorReceived = $partnerItems->map(fn($i) => [
-                'template_id' => $i->template_id,
-                'template_name' => $i->template->name,
-                'template_type' => $i->template->type,
-                'template_icon' => $i->template->icon,
-                'description' => $i->template->description ?? '',
-                'quantity' => $i->quantity,
-            ])->toArray();
-            if ($initiatorDelta > 0) {
-                $initiatorReceived[] = ['template_name' => '💰 Золото', 'quantity' => $initiatorDelta];
-            }
-
-            $partnerReceived = $initiatorItems->map(fn($i) => [
-                'template_id' => $i->template_id,
-                'template_name' => $i->template->name,
-                'template_type' => $i->template->type,
-                'template_icon' => $i->template->icon,
-                'description' => $i->template->description ?? '',
-                'quantity' => $i->quantity,
-            ])->toArray();
-            if ($partnerDelta > 0) {
-                $partnerReceived[] = ['template_name' => '💰 Золото', 'quantity' => $partnerDelta];
-            }
-
-            $initiatorGiven = $initiatorItems->map(fn($i) => [
-                'template_id' => $i->template_id,
-                'template_name' => $i->template->name,
-                'template_type' => $i->template->type,
-                'template_icon' => $i->template->icon,
-                'description' => $i->template->description ?? '',
-                'quantity' => $i->quantity,
-            ])->toArray();
-            if ($trade->initiator_gold > 0) {
-                $initiatorGiven[] = ['template_name' => '💰 Золото', 'quantity' => $trade->initiator_gold];
-            }
-
-            $partnerGiven = $partnerItems->map(fn($i) => [
-                'template_id' => $i->template_id,
-                'template_name' => $i->template->name,
-                'template_type' => $i->template->type,
-                'template_icon' => $i->template->icon,
-                'description' => $i->template->description ?? '',
-                'quantity' => $i->quantity,
-            ])->toArray();
-            if ($trade->partner_gold > 0) {
-                $partnerGiven[] = ['template_name' => '💰 Золото', 'quantity' => $trade->partner_gold];
-            }
-
-            $this->eventStore->record(
-                GameEvent::TRADE_COMPLETED, 'trade', $trade->id,
-                [
-                    'trade_id' => $trade->id,
-                    'side' => 'initiator',
-                    'opponent_name' => $partner->name,
-                    'received_items' => $initiatorReceived,
-                    'given_items' => $initiatorGiven,
-                ],
-                $trade->initiator_id,
-                $correlationId
-            );
-
-            $this->eventStore->record(
-                GameEvent::TRADE_COMPLETED, 'trade', $trade->id,
-                [
-                    'trade_id' => $trade->id,
-                    'side' => 'partner',
-                    'opponent_name' => $initiator->name,
-                    'received_items' => $partnerReceived,
-                    'given_items' => $partnerGiven,
-                ],
-                $trade->partner_id,
-                $correlationId
-            );
-        });
-    }
-
-    private function resetAcceptances(TradeOffer $trade): void
-    {
-        if ($trade->initiator_accepted || $trade->partner_accepted) {
             $trade->update([
                 'initiator_accepted' => false,
                 'partner_accepted' => false,
             ]);
+
+            $this->eventStore->record(
+                'trade.item_added',
+                'trade',
+                $trade->uuid,
+                [
+                    'character_uuid' => $character->uuid,
+                    'item_uuid' => $itemUuid,
+                    'temporary_slot_uuid' => $temporarySlot->uuid,
+                ],
+                $character->uuid
+            );
+
+            return $tradeItem;
+        });
+    }
+
+    public function addResourceToTrade(Character $character, TradeOffer $trade, string $templateSlug, int $quantity): TradeItem
+    {
+        return DB::transaction(function () use ($character, $trade, $templateSlug, $quantity) {
+            if (!$this->isParticipant($character, $trade)) {
+                throw new \RuntimeException('Вы не участвуете в этом обмене');
+            }
+
+            if ($trade->status !== 'pending') {
+                throw new \RuntimeException('Обмен не в статусе ожидания');
+            }
+
+            $available = $this->inventoryService->getResourceQuantity($character, $templateSlug);
+            if ($available < $quantity) {
+                throw new \RuntimeException("Недостаточно ресурса {$templateSlug}: есть {$available}, нужно {$quantity}");
+            }
+
+            $storageUuids = $character->storages()->pluck('uuid');
+            $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
+            $resource = Resource::whereIn('slot_uuid', $slotUuids)
+                ->where('template_slug', $templateSlug)
+                ->whereNull('temporary_slot_uuid')
+                ->firstOrFail();
+
+            $existingTradeItem = TradeItem::where('trade_uuid', $trade->uuid)
+                ->where('template_slug', $templateSlug)
+                ->where('character_uuid', $character->uuid)
+                ->first();
+
+            if ($existingTradeItem) {
+                // Обновляем количество
+                $existingTradeItem->update(['quantity' => $existingTradeItem->quantity + $quantity]);
+                
+                // Создаём temporary slot для нового количества
+                $tempSlot = TemporarySlot::create([
+                    'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                    'storage_uuid' => $resource->slot->storage_uuid,
+                    'character_uuid' => $character->uuid,
+                    'timestamps_end' => now()->addHours(24),
+                    'active' => true,
+                ]);
+                $resource->update(['temporary_slot_uuid' => $tempSlot->uuid]);
+                
+                // Обновляем количество в TradeItem
+                $existingTradeItem->update(['quantity' => $existingTradeItem->quantity + $quantity]);
+                
+                return $existingTradeItem;
+            }
+            
+            // Создаём temporary slot
+            $tempSlot = TemporarySlot::create([
+                'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                'storage_uuid' => $resource->slot->storage_uuid,
+                'character_uuid' => $character->uuid,
+                'timestamps_end' => now()->addHours(24),
+                'active' => true,
+            ]);
+            
+            // Привязываем ресурс к temporary slot
+            $resource->update(['temporary_slot_uuid' => $tempSlot->uuid]);
+
+            $tradeStorage = $this->getTradeStorage();
+            $temporarySlot = TemporarySlot::create([
+                'storage_uuid' => $tradeStorage->uuid,
+                'character_uuid' => $character->uuid,
+                'active' => true,
+                'timestamps_end' => now()->addMinutes(10),
+            ]);
+
+            $resource->update(['temporary_slot_uuid' => $temporarySlot->uuid]);
+
+            $tradeItem = TradeItem::create([
+                'trade_uuid' => $trade->uuid,
+                'character_uuid' => $character->uuid,
+                'item_uuid' => null,
+                'resource_uuid' => $resource->uuid,
+                'template_slug' => $templateSlug,
+                'quantity' => $quantity,
+            ]);
+
+            $trade->update([
+                'initiator_accepted' => false,
+                'partner_accepted' => false,
+            ]);
+
+            $this->eventStore->record(
+                'trade.resource_added',
+                'trade',
+                $trade->uuid,
+                [
+                    'character_uuid' => $character->uuid,
+                    'resource_uuid' => $resource->uuid,
+                    'template_slug' => $templateSlug,
+                    'quantity' => $quantity,
+                    'temporary_slot_uuid' => $temporarySlot->uuid,
+                ],
+                $character->uuid
+            );
+
+            return $tradeItem;
+        });
+    }
+
+    public function confirmTrade(Character $character, TradeOffer $trade): TradeOffer
+    {
+        return DB::transaction(function () use ($character, $trade) {
+            if (!$this->isParticipant($character, $trade)) {
+                throw new \RuntimeException('Вы не участвуете в этом обмене');
+            }
+
+            if ($trade->status !== 'pending') {
+                throw new \RuntimeException('Обмен не в статусе ожидания');
+            }
+
+            if ($character->uuid === $trade->initiator_uuid) {
+                $trade->update(['initiator_accepted' => true]);
+            } else {
+                $trade->update(['partner_accepted' => true]);
+            }
+
+            $trade->refresh();
+
+            if ($trade->initiator_accepted && $trade->partner_accepted) {
+                $this->executeTrade($trade);
+            }
+
+            $this->eventStore->record(
+                'trade.confirmed',
+                'trade',
+                $trade->uuid,
+                [
+                    'character_uuid' => $character->uuid,
+                    'initiator_accepted' => $trade->initiator_accepted,
+                    'partner_accepted' => $trade->partner_accepted,
+                ],
+                $character->uuid
+            );
+
+            return $trade;
+        });
+    }
+
+    private function executeTrade(TradeOffer $trade): void
+    {
+        $tradeItems = TradeItem::where('trade_uuid', $trade->uuid)->get();
+
+        foreach ($tradeItems as $tradeItem) {
+            $fromCharacter = Character::where('uuid', $tradeItem->character_uuid)->firstOrFail();
+            $toCharacter = $this->getPartner($fromCharacter, $trade);
+
+            if ($tradeItem->item_uuid) {
+                $item = Item::where('uuid', $tradeItem->item_uuid)->firstOrFail();
+                $this->transferItem($item, $fromCharacter, $toCharacter);
+            } elseif ($tradeItem->resource_uuid) {
+                $resource = Resource::where('uuid', $tradeItem->resource_uuid)->firstOrFail();
+                $this->transferResource($resource, $tradeItem->quantity, $fromCharacter, $toCharacter);
+            }
         }
-    }
 
-    private function emitTradeUpdated(TradeOffer $trade, int $triggerUserId): void
-    {
-        $payload = [
-            'trade_id' => $trade->id,
-            'trigger_user_id' => $triggerUserId,
-        ];
-        $correlationId = Str::uuid()->toString();
+        $trade->update(['status' => 'completed']);
+
+        // Деактивируем все временные слоты
+        $temporarySlotUuids = [];
+        foreach ($tradeItems as $tradeItem) {
+            if ($tradeItem->item_uuid) {
+                $item = Item::where('uuid', $tradeItem->item_uuid)->first();
+                if ($item && $item->temporary_slot_uuid) {
+                    $temporarySlotUuids[] = $item->temporary_slot_uuid;
+                }
+            } elseif ($tradeItem->resource_uuid) {
+                $resource = Resource::where('uuid', $tradeItem->resource_uuid)->first();
+                if ($resource && $resource->temporary_slot_uuid) {
+                    $temporarySlotUuids[] = $resource->temporary_slot_uuid;
+                }
+            }
+        }
+
+        if (!empty($temporarySlotUuids)) {
+            TemporarySlot::whereIn('uuid', $temporarySlotUuids)->update(['active' => false]);
+        }
 
         $this->eventStore->record(
-            GameEvent::TRADE_UPDATED, 'trade', $trade->id,
-            $payload, $trade->initiator_id, $correlationId
-        );
-        $this->eventStore->record(
-            GameEvent::TRADE_UPDATED, 'trade', $trade->id,
-            $payload, $trade->partner_id, $correlationId
+            'trade.completed',
+            'trade',
+            $trade->uuid,
+            [
+                'items_count' => $tradeItems->whereNotNull('item_uuid')->count(),
+                'resources_count' => $tradeItems->whereNotNull('resource_uuid')->count(),
+            ],
+            null
         );
     }
 
-    private function formatTrade(TradeOffer $trade, int $userId): array
+    private function transferItem(Item $item, Character $from, Character $to): void
     {
-        $mySide = $trade->getSide($userId);
-        $opponentId = $trade->getOpponentId($userId);
-        $opponent = $opponentId ? User::find($opponentId) : null;
+        $toInventory = Storage::where('characters_uuid', $to->uuid)
+            ->where('storage_type', 'inventory')
+            ->firstOrFail();
 
-        return [
-            'id' => $trade->id,
-            'status' => $trade->status,
-            'my_side' => $mySide,
-            'opponent_id' => $opponentId,
-            'opponent_name' => $opponent?->name ?? '???',
-            'initiator' => [
-                'id' => $trade->initiator_id,
-                'name' => $trade->initiator->name,
-                'accepted' => $trade->initiator_accepted,
-                'gold' => $trade->initiator_gold,
-                'items' => $trade->initiatorItems->map(fn($i) => [
-                    'id' => $i->id,
-                    'instance_id' => $i->item_instance_id,
-                    'template_id' => $i->template_id,
-                    'name' => $i->template->name,
-                    'type' => $i->template->type,
-                    'quantity' => $i->quantity,
-                ])->values()->toArray(),
+        $freeSlot = $this->inventoryService->findFreeSlot($toInventory);
+
+        if (!$freeSlot) {
+            throw new \RuntimeException('У получателя нет свободных слотов');
+        }
+
+        $oldSlotUuid = $item->slot_uuid;
+        $item->update([
+            'slot_uuid' => $freeSlot->uuid,
+            'temporary_slot_uuid' => null,
+        ]);
+
+        $this->eventStore->record(
+            'item.transferred',
+            'item',
+            $item->uuid,
+            [
+                'from_character_uuid' => $from->uuid,
+                'to_character_uuid' => $to->uuid,
+                'from_slot_uuid' => $oldSlotUuid,
+                'to_slot_uuid' => $freeSlot->uuid,
+                'reason' => 'trade',
             ],
-            'partner' => [
-                'id' => $trade->partner_id,
-                'name' => $trade->partner->name,
-                'accepted' => $trade->partner_accepted,
-                'gold' => $trade->partner_gold,
-                'items' => $trade->partnerItems->map(fn($i) => [
-                    'id' => $i->id,
-                    'instance_id' => $i->item_instance_id,
-                    'template_id' => $i->template_id,
-                    'name' => $i->template->name,
-                    'type' => $i->template->type,
-                    'quantity' => $i->quantity,
-                ])->values()->toArray(),
+            null
+        );
+    }
+
+    private function transferResource(Resource $resource, int $quantity, Character $from, Character $to): void
+    {
+        // Если передаём всё количество ресурса
+        if ($quantity >= $resource->quantity) {
+            $toInventory = Storage::where('characters_uuid', $to->uuid)
+                ->where('storage_type', 'inventory')
+                ->firstOrFail();
+
+            $freeSlot = $this->inventoryService->findFreeSlot($toInventory);
+
+            if (!$freeSlot) {
+                throw new \RuntimeException('У получателя нет свободных слотов');
+            }
+
+            // Перемещаем весь ресурс
+            $resource->update([
+                'slot_uuid' => $freeSlot->uuid,
+                'temporary_slot_uuid' => null,
+            ]);
+        } else {
+            // Передаём часть количества
+            $resource->quantity -= $quantity;
+            $resource->save();
+
+            // Добавляем часть получателю
+            $this->inventoryService->addResource($to, $resource->template_slug, $quantity);
+        }
+
+        $this->eventStore->record(
+            'resource.transferred',
+            'resource',
+            $resource->uuid,
+            [
+                'from_character_uuid' => $from->uuid,
+                'to_character_uuid' => $to->uuid,
+                'template_slug' => $resource->template_slug,
+                'quantity' => $quantity,
+                'reason' => 'trade',
             ],
-        ];
+            null
+        );
+    }
+
+    public function cancelTrade(Character $character, TradeOffer $trade): TradeOffer
+    {
+        return DB::transaction(function () use ($character, $trade) {
+            if (!$this->isParticipant($character, $trade)) {
+                throw new \RuntimeException('Вы не участвуете в этом обмене');
+            }
+
+            if ($trade->status !== 'pending') {
+                throw new \RuntimeException('Можно отменить только ожидающий обмен');
+            }
+
+            $tradeItems = TradeItem::where('trade_uuid', $trade->uuid)->get();
+            $temporarySlotUuids = [];
+
+            foreach ($tradeItems as $tradeItem) {
+                if ($tradeItem->item_uuid) {
+                    $item = Item::where('uuid', $tradeItem->item_uuid)->first();
+                    if ($item) {
+                        if ($item->temporary_slot_uuid) {
+                            $temporarySlotUuids[] = $item->temporary_slot_uuid;
+                        }
+                        $item->update(['temporary_slot_uuid' => null]);
+                    }
+                } elseif ($tradeItem->resource_uuid) {
+                    $resource = Resource::where('uuid', $tradeItem->resource_uuid)->first();
+                    if ($resource) {
+                        if ($resource->temporary_slot_uuid) {
+                            $temporarySlotUuids[] = $resource->temporary_slot_uuid;
+                        }
+                        $resource->update(['temporary_slot_uuid' => null]);
+                    }
+                }
+            }
+
+            if (!empty($temporarySlotUuids)) {
+                TemporarySlot::whereIn('uuid', $temporarySlotUuids)->update(['active' => false]);
+            }
+
+            $trade->update(['status' => 'cancelled']);
+            
+            // Сбрасываем temporary_slot_uuid у всех предметов и ресурсов
+            $tradeItems = TradeItem::where('trade_uuid', $trade->uuid)->get();
+            foreach ($tradeItems as $tradeItem) {
+                if ($tradeItem->item_uuid) {
+                    Item::where('uuid', $tradeItem->item_uuid)->update(['temporary_slot_uuid' => null]);
+                } elseif ($tradeItem->resource_uuid) {
+                    Resource::where('uuid', $tradeItem->resource_uuid)->update(['temporary_slot_uuid' => null]);
+                }
+            }
+            
+            // Деактивируем temporary slots
+            $tempSlotUuids = TemporarySlot::where('active', true)
+                ->whereIn('uuid', function($q) use ($trade) {
+                    $q->select('temporary_slot_uuid')
+                      ->from('items')
+                      ->join('trade_items', 'items.uuid', '=', 'trade_items.item_uuid')
+                      ->where('trade_items.trade_uuid', $trade->uuid)
+                      ->whereNotNull('items.temporary_slot_uuid');
+                })->orWhereIn('uuid', function($q) use ($trade) {
+                    $q->select('temporary_slot_uuid')
+                      ->from('resources')
+                      ->join('trade_items', 'resources.uuid', '=', 'trade_items.resource_uuid')
+                      ->where('trade_items.trade_uuid', $trade->uuid)
+                      ->whereNotNull('resources.temporary_slot_uuid');
+                })->pluck('uuid');
+            
+            if ($tempSlotUuids->isNotEmpty()) {
+                TemporarySlot::whereIn('uuid', $tempSlotUuids)->update(['active' => false]);
+            }
+
+            $this->eventStore->record(
+                'trade.cancelled',
+                'trade',
+                $trade->uuid,
+                [
+                    'cancelled_by' => $character->uuid,
+                ],
+                $character->uuid
+            );
+
+            return $trade;
+        });
+    }
+
+    public function getCharacterTrades(Character $character): \Illuminate\Support\Collection
+    {
+        return TradeOffer::where('initiator_uuid', $character->uuid)
+            ->orWhere('partner_uuid', $character->uuid)
+            ->with(['initiator', 'partner', 'items'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+    }
+
+    private function isParticipant(Character $character, TradeOffer $trade): bool
+    {
+        return $character->uuid === $trade->initiator_uuid || $character->uuid === $trade->partner_uuid;
+    }
+
+    private function getPartner(Character $character, TradeOffer $trade): Character
+    {
+        $partnerUuid = $character->uuid === $trade->initiator_uuid
+            ? $trade->partner_uuid
+            : $trade->initiator_uuid;
+
+        return Character::where('uuid', $partnerUuid)->firstOrFail();
+    }
+
+    private function getTradeStorage(): Storage
+    {
+        $systemCharacter = Character::firstOrCreate(
+            ['character_type' => 'system', 'name' => 'System'],
+            ['active' => true]
+        );
+
+        return Storage::firstOrCreate(
+            ['characters_uuid' => $systemCharacter->uuid, 'storage_type' => 'trade'],
+            ['name' => 'Обмен', 'active' => true]
+        );
     }
 }
