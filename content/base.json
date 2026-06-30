@@ -96,6 +96,12 @@
       "parent_type": null,
       "name": "Сумка",
       "description": "Сумка для хранения"
+    },
+    {
+      "type": "quest_item",
+      "parent_type": null,
+      "name": "Квестовый предмет",
+      "description": "Предмет, открывающий квест"
     }
   ],
   "templates": [
@@ -108,6 +114,16 @@
       "max_stack": null,
       "description": "Золотые монеты — универсальная валюта",
       "slot_type": "gold"
+    },
+    {
+      "slug": "experience",
+      "name": "Опыт",
+      "type": "material",
+      "icon": "⭐",
+      "is_stackable": true,
+      "max_stack": null,
+      "description": "Очки опыта персонажа",
+      "slot_type": "experience"
     },
     {
       "slug": "wood",
@@ -215,6 +231,18 @@
       "description": "Обучает крафту деревянного меча",
       "slot_type": "blueprint",
       "recipe_slug": "craft_wooden_sword"
+    },
+    {
+      "slug": "quest_first_wooden_sword",
+      "name": "Поручение: первый меч",
+      "type": "quest_item",
+      "icon": "❗",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Квестовое поручение от кузнеца — создай свой первый деревянный меч",
+      "slot_type": "quest_item",
+      "recipe_slug": "quest_item_stub",
+      "quest_slug": "first_wooden_sword"
     },
     {
       "slug": "recipe_wooden_plank",
@@ -485,6 +513,12 @@
       "template_slug": "recipe_iron_sword",
       "quantity": 1,
       "price": 10
+    },
+    {
+      "character_name": "Wulfric Goldsmyth",
+      "template_slug": "quest_first_wooden_sword",
+      "quantity": 1,
+      "price": 1
     }
   ]
 }

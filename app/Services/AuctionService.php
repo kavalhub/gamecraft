@@ -20,7 +20,9 @@ class AuctionService
 {
     public function __construct(
         private InventoryService $inventoryService,
-        private EventStore $eventStore
+        private EventStore $eventStore,
+        private WorldStorageService $worldStorageService,
+        private CurrencyService $currencyService,
     ) {}
 
     /**
@@ -47,6 +49,20 @@ class AuctionService
             ->where('seller_uuid', $seller->uuid)
             ->orderBy('created_at', 'desc')
             ->get();
+    }
+
+    public function isLotVisibleToBuyer(Character $buyer, AuctionLot $lot): bool
+    {
+        if ($lot->template->type !== 'quest_item') {
+            return true;
+        }
+
+        return !$this->buyerOwnsQuestItem($buyer, $lot->template_slug);
+    }
+
+    public function buyerOwnsQuestItem(Character $buyer, string $templateSlug): bool
+    {
+        return $this->inventoryService->countItemsInStorage($buyer, $templateSlug, 'quest_item') > 0;
     }
 
     /**
@@ -296,9 +312,22 @@ class AuctionService
             ];
         }
 
+        if ($lot->template->type === 'quest_item' && $this->buyerOwnsQuestItem($buyer, $lot->template_slug)) {
+            return [
+                'max_by_gold' => 0,
+                'max_by_inventory' => 0,
+                'max_purchasable' => 0,
+                'gold_available' => $gold,
+            ];
+        }
+
         $maxByGold = $lot->price > 0 ? intdiv($gold, $lot->price) : 0;
-        $maxByInventory = $this->inventoryService->getMaxAddableQuantity($buyer, $lot->template_slug);
-        $maxPurchasable = min($maxByGold, $this->capUiLimit($maxByInventory));
+        $maxByInventory = $lot->template->type === 'material'
+            ? $this->inventoryService->getMaxAddableQuantity($buyer, $lot->template_slug)
+            : ($this->inventoryService->getMaxAddableQuantity($buyer, $lot->template_slug) > 0 ? 1 : 0);
+        $maxPurchasable = $lot->template->type === 'material'
+            ? min($maxByGold, $this->capUiLimit($maxByInventory))
+            : min($maxByGold, $maxByInventory > 0 ? 1 : 0, 1);
 
         return [
             'max_by_gold' => $maxByGold,
@@ -320,11 +349,28 @@ class AuctionService
      */
     private function buyInfiniteLot(Character $buyer, AuctionLot $lot, int $quantity): array
     {
-        $totalPrice = $lot->price * $quantity;
-
-        $this->inventoryService->removeResource($buyer, 'gold', $totalPrice);
+        if ($lot->price < 1) {
+            throw new \RuntimeException('Цена лота должна быть не менее 1 золота');
+        }
 
         $template = $lot->template;
+
+        if ($template->type === 'quest_item' && $this->buyerOwnsQuestItem($buyer, $lot->template_slug)) {
+            throw new \RuntimeException('У вас уже есть этот квестовый предмет');
+        }
+
+        if ($template->type !== 'material' && $quantity !== 1) {
+            throw new \RuntimeException('Этот предмет можно купить только по одному');
+        }
+
+        $totalPrice = $lot->price * $quantity;
+
+        $this->currencyService->debit($buyer, $totalPrice, 'auction.buy', [
+            'lot_uuid' => $lot->uuid,
+            'template_slug' => $lot->template_slug,
+            'quantity' => $quantity,
+        ]);
+
         $correlationUuid = Str::uuid()->toString();
 
         if ($template->type === 'material') {
@@ -333,17 +379,19 @@ class AuctionService
                 $lot->template_slug,
                 $quantity
             );
-        } elseif ($template->type === 'blueprint') {
+        } elseif ($this->worldStorageService->isInstanceTemplate($template)) {
             $result = null;
+            $stage = $this->worldStorageService->stageForTemplate($template);
             for ($i = 0; $i < $quantity; $i++) {
-                $result = $this->inventoryService->addItem(
+                $claimed = $this->worldStorageService->claimItem($buyer, $lot->template_slug, $stage);
+                $result = $claimed ?? $this->inventoryService->addItem(
                     $buyer,
                     $lot->template_slug,
-                    'blueprint',
+                    $stage,
                     null,
-                    $template->recipe_slug,
+                    $template->recipe_slug ?? ($stage === 'quest_item' ? 'quest_item_stub' : null),
                     null,
-                    null
+                    $stage === 'item' ? $template->base_stats : null,
                 );
             }
         } else {
@@ -424,8 +472,10 @@ class AuctionService
             throw new \RuntimeException('Предмет лота не найден');
         }
 
-        // Снимаем золото с покупателя
-        $this->inventoryService->removeResource($buyer, 'gold', $lot->price);
+        $this->currencyService->debit($buyer, $lot->price, 'auction.buy', [
+            'lot_uuid' => $lot->uuid,
+            'template_slug' => $lot->template_slug,
+        ]);
 
         // Находим инвентарь покупателя
         $buyerInventory = Storage::where('characters_uuid', $buyer->uuid)
@@ -439,8 +489,10 @@ class AuctionService
             ->first();
 
         if (!$freeSlot) {
-            // Возвращаем золото обратно
-            $this->inventoryService->addResource($buyer, 'gold', $lot->price);
+            $this->currencyService->credit($buyer, $lot->price, 'auction.refund', [
+                'lot_uuid' => $lot->uuid,
+                'reason' => 'no_inventory_space',
+            ]);
             throw new \RuntimeException('У покупателя нет свободных слотов в инвентаре');
         }
 
@@ -452,9 +504,12 @@ class AuctionService
         $commission = (int) round($lot->price * $lot->commission_percent / 100);
         $sellerReceived = $lot->price - $commission;
 
-        // Начисляем золото продавцу (если есть продавец)
         if ($lot->seller) {
-            $this->inventoryService->addResource($lot->seller, 'gold', $sellerReceived);
+            $this->currencyService->credit($lot->seller, $sellerReceived, 'auction.sale', [
+                'lot_uuid' => $lot->uuid,
+                'buyer_uuid' => $buyer->uuid,
+                'commission' => $commission,
+            ]);
         }
 
         // Обновляем лот

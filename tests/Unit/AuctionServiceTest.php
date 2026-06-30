@@ -11,6 +11,7 @@ use App\Services\AuctionService;
 use App\Services\CraftingService;
 use App\Services\InventoryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\WorkbenchHelper;
 use Tests\TestCase;
 
 class AuctionServiceTest extends TestCase
@@ -66,14 +67,13 @@ class AuctionServiceTest extends TestCase
         }
 
         // Даём покупателю 1000 золота
-        $this->inventoryService->addResource($this->buyer, 'gold', 1000);
+        app(\App\Services\CurrencyService::class)->credit($this->buyer, 1000, 'test', []);
     }
 
     public function test_list_lot_lists_item_in_one_step(): void
     {
         $this->inventoryService->addResource($this->seller, 'wood', 10);
-        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
-        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->seller);
 
         $lot = $this->auctionService->listLot($this->seller, $item->uuid, 150);
 
@@ -87,8 +87,7 @@ class AuctionServiceTest extends TestCase
     public function test_prepare_lot_creates_temporary_slot(): void
     {
         $this->inventoryService->addResource($this->seller, 'wood', 10);
-        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
-        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->seller);
 
         $temporarySlot = $this->auctionService->prepareLot($this->seller, $item->uuid, 100);
 
@@ -103,8 +102,7 @@ class AuctionServiceTest extends TestCase
     public function test_confirm_lot_moves_item_to_auction(): void
     {
         $this->inventoryService->addResource($this->seller, 'wood', 10);
-        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
-        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->seller);
 
         $temporarySlot = $this->auctionService->prepareLot($this->seller, $item->uuid, 100);
         $lot = $this->auctionService->confirmLot($this->seller, $item->uuid, 100);
@@ -122,8 +120,7 @@ class AuctionServiceTest extends TestCase
     public function test_cancel_lot_returns_item_to_seller(): void
     {
         $this->inventoryService->addResource($this->seller, 'wood', 10);
-        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
-        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->seller);
 
         $this->auctionService->prepareLot($this->seller, $item->uuid, 100);
         $lot = $this->auctionService->confirmLot($this->seller, $item->uuid, 100);
@@ -139,8 +136,7 @@ class AuctionServiceTest extends TestCase
     public function test_buy_lot_transfers_item_and_gold(): void
     {
         $this->inventoryService->addResource($this->seller, 'wood', 10);
-        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
-        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->seller);
 
         $this->auctionService->prepareLot($this->seller, $item->uuid, 100);
         $lot = $this->auctionService->confirmLot($this->seller, $item->uuid, 100);
@@ -165,8 +161,7 @@ class AuctionServiceTest extends TestCase
     public function test_buy_lot_fails_without_enough_gold(): void
     {
         $this->inventoryService->addResource($this->seller, 'wood', 10);
-        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
-        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->seller);
 
         $this->auctionService->prepareLot($this->seller, $item->uuid, 20000);
         $lot = $this->auctionService->confirmLot($this->seller, $item->uuid, 20000);
@@ -179,8 +174,7 @@ class AuctionServiceTest extends TestCase
     public function test_buy_lot_fails_for_own_lot(): void
     {
         $this->inventoryService->addResource($this->seller, 'wood', 10);
-        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
-        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->seller);
 
         $this->auctionService->prepareLot($this->seller, $item->uuid, 100);
         $lot = $this->auctionService->confirmLot($this->seller, $item->uuid, 100);
@@ -195,12 +189,12 @@ class AuctionServiceTest extends TestCase
         $this->inventoryService->addResource($this->seller, 'wood', 20);
         
         $blueprint1 = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
-        $item1 = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint1->uuid);
+        $item1 = WorkbenchHelper::craftWoodenSwordFromInventory($this->seller, $blueprint1);
         $this->auctionService->prepareLot($this->seller, $item1->uuid, 100);
         $lot1 = $this->auctionService->confirmLot($this->seller, $item1->uuid, 100);
 
         $blueprint2 = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
-        $item2 = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint2->uuid);
+        $item2 = WorkbenchHelper::craftWoodenSwordFromInventory($this->seller, $blueprint2);
         $this->auctionService->prepareLot($this->seller, $item2->uuid, 200);
         $lot2 = $this->auctionService->confirmLot($this->seller, $item2->uuid, 200);
 
@@ -268,8 +262,7 @@ class AuctionServiceTest extends TestCase
     public function test_finite_lot_requires_exact_quantity(): void
     {
         $this->inventoryService->addResource($this->seller, 'wood', 10);
-        $blueprint = $this->craftingService->createBlueprint($this->seller, 'craft_wooden_sword');
-        $item = $this->craftingService->craftItem($this->seller, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->seller);
 
         $this->auctionService->prepareLot($this->seller, $item->uuid, 100);
         $lot = $this->auctionService->confirmLot($this->seller, $item->uuid, 100);

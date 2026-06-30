@@ -9,6 +9,7 @@ use App\Models\Resources;
 use App\Models\Slot;
 use App\Models\Storage;
 use App\Models\User;
+use App\Services\StorageMoveService;
 use App\Services\StorageProvisioningService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -74,7 +75,7 @@ class StorageGoldConsolidationTest extends TestCase
         $this->assertEquals(1500, app(StorageProvisioningService::class)->getInventoryGoldQuantity($character));
     }
 
-    public function test_ensure_starting_gold_does_not_duplicate(): void
+    public function test_grant_starting_gold_does_not_duplicate(): void
     {
         $user = User::create([
             'name' => 'GoldUser',
@@ -89,8 +90,10 @@ class StorageGoldConsolidationTest extends TestCase
         ]);
 
         $provisioning = app(StorageProvisioningService::class);
+        $currency = app(\App\Services\CurrencyService::class);
         $provisioning->provisionDefaults($character);
-        $provisioning->ensureStartingGold($character);
+        $currency->grantStartingGold($character);
+        $currency->grantStartingGold($character);
 
         $this->assertEquals(1000, $provisioning->getInventoryGoldQuantity($character));
         $this->assertEquals(
@@ -99,5 +102,79 @@ class StorageGoldConsolidationTest extends TestCase
                 ->whereIn('slot_uuid', $character->storages()->where('storage_type', 'inventory')->first()->slots()->pluck('uuid'))
                 ->count()
         );
+    }
+
+    public function test_grant_starting_gold_does_not_restore_after_spending(): void
+    {
+        $user = User::create([
+            'name' => 'SpentGold',
+            'email' => 'spentgold@example.com',
+            'password' => bcrypt('password'),
+        ]);
+        $character = Character::create([
+            'user_uuid' => $user->uuid,
+            'character_type' => 'player',
+            'name' => 'SpentGold',
+            'active' => true,
+        ]);
+
+        $provisioning = app(StorageProvisioningService::class);
+        $currency = app(\App\Services\CurrencyService::class);
+        $provisioning->provisionDefaults($character);
+        $currency->grantStartingGold($character);
+        $character->refresh();
+
+        $this->assertEquals(1000, $provisioning->getInventoryGoldQuantity($character));
+
+        $currency->debit($character, 800, 'test', ['reason' => 'spend']);
+
+        $currency->grantStartingGold($character);
+        $character->refresh();
+
+        $this->assertEquals(200, $provisioning->getInventoryGoldQuantity($character));
+    }
+
+    public function test_cannot_drag_gold_from_special_slot_to_grid(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $user = User::where('email', 'test@example.com')->first();
+        $character = $user->characters()->where('character_type', 'player')->first();
+        $inventory = $character->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $special = app(\App\Services\SpecialSlotService::class);
+        $goldSlot = $special->getGoldSlot($inventory);
+        $gridSlot = $special->getGridSlots($inventory)->first();
+
+        $moveService = app(StorageMoveService::class);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Валюту нельзя перемещать вручную');
+        $moveService->move($character, $goldSlot->uuid, $gridSlot->uuid);
+    }
+
+    public function test_cannot_duplicate_gold_by_moving_from_special_slot_to_same_slot_via_grid(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $user = User::where('email', 'test@example.com')->first();
+        $character = $user->characters()->where('character_type', 'player')->first();
+        $inventory = $character->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $special = app(\App\Services\SpecialSlotService::class);
+        $goldSlot = $special->getGoldSlot($inventory);
+        $gridSlot = $special->getGridSlots($inventory)->first();
+
+        $before = app(StorageProvisioningService::class)->getInventoryGoldQuantity($character);
+
+        $moveService = app(StorageMoveService::class);
+
+        try {
+            $moveService->move($character, $goldSlot->uuid, $gridSlot->uuid);
+            $this->fail('Expected gold move to be blocked');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Валюту нельзя перемещать', $e->getMessage());
+        }
+
+        $after = app(StorageProvisioningService::class)->getInventoryGoldQuantity($character);
+        $this->assertEquals($before, $after);
     }
 }

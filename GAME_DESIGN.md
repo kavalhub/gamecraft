@@ -971,12 +971,37 @@ POST /api/storage/{characterUuid}/move
 
 ### StorageLayoutService + API
 
-- `GET /api/storage/{uuid}?include=inventory,trade` — сетки слотов с occupants
+- `GET /api/storage/{uuid}?include=inventory,trade,workbench` — сетки слотов с occupants
 - `formatTradeSlotGrids()` — `my_trade_slots[20]` + `partner_trade_slots[20]` для TradeController
+- `formatWorkbenchSlotGrid()` — 9 overlay-слотов верстака (1 центр + 8 материалов)
+- **`locked` в layout**: в инвентаре `true` при overlay; на overlay-назначении (верстак/обмен) — `false` (см. [`docs/STORAGE_UI.md`](docs/STORAGE_UI.md))
+
+### Верстак: overlay-модель
+
+- Аналогично обмену: `slot_uuid` остаётся в инвентаре, `temporary_slot_uuid` → пул верстака
+- 9 `temporary_slots`: index 0 = чертёж/предмет, 1–8 = материалы
+- Закрытие окна → `POST /api/storage/{uuid}/clear-workbench`
+- Крафт читает материалы с overlay (`WorkbenchService`)
+
+### UI: ItemDispatcher (клиент)
+
+Подробно: [`docs/STORAGE_UI.md`](docs/STORAGE_UI.md)
+
+- **Dblclick** из инвентаря: экипировка → открыть `character` + equip; иначе — только если открыто ровно одно sink-окно (`workbench` / `trade` / `auction`)
+- **ПКМ** «Создать/Разобрать/Преобразовать» → открыть верстак + placement
+- **Drag** — всегда `POST /storage/.../move`, без dispatch
 
 ---
 
 ## 📝 История изменений
+
+### v3.3 (30 июня 2026) — Верстак overlay + ItemDispatcher
+- Верстак на `temporary_slot_uuid` (как обмен), `WorkbenchService`, `clear-workbench` при закрытии окна
+- `materials_used` с блоком `crafter`; тултип «Создал: …»
+- Backend квестов: `quests`, `QuestService`, API accept/turn-in, `content/quests.json`
+- **`locked` по контексту**: заблокирован в инвентаре, активен на overlay верстака/обмена
+- **`ItemDispatcher`**: dblclick → equip ИЛИ единственное sink-окно; ПКМ → верстак
+- Документация: [`docs/STORAGE_UI.md`](docs/STORAGE_UI.md)
 
 ### v3.2 (28 июня 2026) — Спец-слоты
 - `SpecialSlotService`: priority_fill, auto_reclaim, hidden

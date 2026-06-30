@@ -16,6 +16,7 @@ use App\Services\StorageMoveService;
 use App\Services\StorageProvisioningService;
 use App\Services\TradeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\WorkbenchHelper;
 use Tests\TestCase;
 
 class StorageMoveServiceTest extends TestCase
@@ -43,11 +44,10 @@ class StorageMoveServiceTest extends TestCase
     public function test_move_item_between_empty_inventory_slots(): void
     {
         $this->inventoryService->addResource($this->player, 'wood', 10);
-        $blueprint = app(CraftingService::class)->createBlueprint($this->player, 'craft_wooden_sword');
-        $item = app(CraftingService::class)->craftItem($this->player, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->player);
 
         $inventory = $this->player->storages()->where('storage_type', 'inventory')->firstOrFail();
-        $slots = $inventory->slots()->orderBy('id')->get();
+        $slots = $inventory->slots()->whereNull('slot_type')->orderBy('id')->get();
         $occupied = Item::whereIn('slot_uuid', $slots->pluck('uuid'))->pluck('slot_uuid')
             ->merge(Resources::whereIn('slot_uuid', $slots->pluck('uuid'))->pluck('slot_uuid'));
         $toSlot = $slots->first(fn ($s) => $s->uuid !== $item->slot_uuid && !$occupied->contains($s->uuid));
@@ -63,8 +63,7 @@ class StorageMoveServiceTest extends TestCase
     public function test_overlay_item_to_trade_temporary_slot(): void
     {
         $this->inventoryService->addResource($this->player, 'wood', 10);
-        $blueprint = app(CraftingService::class)->createBlueprint($this->player, 'craft_wooden_sword');
-        $item = app(CraftingService::class)->craftItem($this->player, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->player);
 
         $originalSlotUuid = $item->slot_uuid;
         $this->provisioningService->ensureTradeStorage($this->player);
@@ -80,15 +79,14 @@ class StorageMoveServiceTest extends TestCase
     public function test_clear_overlay_from_trade_temporary_slot(): void
     {
         $this->inventoryService->addResource($this->player, 'wood', 10);
-        $blueprint = app(CraftingService::class)->createBlueprint($this->player, 'craft_wooden_sword');
-        $item = app(CraftingService::class)->craftItem($this->player, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->player);
 
         $this->provisioningService->ensureTradeStorage($this->player);
         $tempSlot = $this->provisioningService->findFreeTradeTemporarySlot($this->player);
         $item->update(['temporary_slot_uuid' => $tempSlot->uuid]);
 
         $inventory = $this->player->storages()->where('storage_type', 'inventory')->firstOrFail();
-        $slots = $inventory->slots()->orderBy('id')->get();
+        $slots = $inventory->slots()->whereNull('slot_type')->orderBy('id')->get();
         $occupied = Item::whereIn('slot_uuid', $slots->pluck('uuid'))->pluck('slot_uuid')
             ->merge(Resources::whereIn('slot_uuid', $slots->pluck('uuid'))->pluck('slot_uuid'));
         $targetSlot = $slots->first(fn ($s) => $s->uuid !== $item->slot_uuid && !$occupied->contains($s->uuid));
@@ -104,7 +102,7 @@ class StorageMoveServiceTest extends TestCase
     public function test_merge_stackable_resources(): void
     {
         $inventory = $this->player->storages()->where('storage_type', 'inventory')->firstOrFail();
-        $slots = $inventory->slots()->orderBy('id')->get();
+        $slots = $inventory->slots()->whereNull('slot_type')->orderBy('id')->get();
         $occupied = Resources::whereIn('slot_uuid', $slots->pluck('uuid'))->pluck('slot_uuid')
             ->merge(Item::whereIn('slot_uuid', $slots->pluck('uuid'))->pluck('slot_uuid'));
         $freeSlots = $slots->filter(fn ($s) => !$occupied->contains($s->uuid))->values()->take(2);
@@ -161,8 +159,7 @@ class StorageMoveServiceTest extends TestCase
     public function test_cannot_move_item_with_temporary_overlay(): void
     {
         $this->inventoryService->addResource($this->player, 'wood', 10);
-        $blueprint = app(CraftingService::class)->createBlueprint($this->player, 'craft_wooden_sword');
-        $item = app(CraftingService::class)->craftItem($this->player, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->player);
 
         $this->provisioningService->ensureTradeStorage($this->player);
         $tempSlot = $this->provisioningService->findFreeTradeTemporarySlot($this->player);
@@ -180,8 +177,7 @@ class StorageMoveServiceTest extends TestCase
     public function test_equip_item_to_weapon_slot_and_unequip(): void
     {
         $this->inventoryService->addResource($this->player, 'wood', 10);
-        $blueprint = app(CraftingService::class)->createBlueprint($this->player, 'craft_wooden_sword');
-        $item = app(CraftingService::class)->craftItem($this->player, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->player);
 
         $equipment = $this->player->storages()->where('storage_type', 'equipment')->firstOrFail();
         $weaponSlot = $equipment->slots()->where('slot_type', 'equipment_weapon')->firstOrFail();
@@ -198,5 +194,124 @@ class StorageMoveServiceTest extends TestCase
         $this->moveService->move($this->player, $weaponSlot->uuid, $emptySlot->uuid);
         $item->refresh();
         $this->assertEquals($emptySlot->uuid, $item->slot_uuid);
+    }
+
+    public function test_cannot_move_resource_to_equipment_slot(): void
+    {
+        $this->inventoryService->addResource($this->player, 'wood', 20);
+        $inventory = $this->player->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $wood = Resources::whereIn('slot_uuid', $inventory->slots()->pluck('uuid'))
+            ->where('template_slug', 'wood')
+            ->firstOrFail();
+
+        $equipment = $this->player->storages()->where('storage_type', 'equipment')->firstOrFail();
+        $neckSlot = $equipment->slots()->where('slot_type', 'equipment_amulet')->firstOrFail();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('В слот экипировки можно класть только предметы');
+        $this->moveService->move($this->player, $wood->slot_uuid, $neckSlot->uuid);
+    }
+
+    public function test_equip_item_replaces_resource_in_weapon_slot(): void
+    {
+        $this->inventoryService->addResource($this->player, 'wood', 5);
+        $blueprint = app(CraftingService::class)->createBlueprint($this->player, 'craft_wooden_sword');
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->player, $blueprint);
+        $itemFromSlot = $item->slot_uuid;
+
+        $this->inventoryService->addResource($this->player, 'wood', 20);
+        $inventory = $this->player->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $wood = Resources::whereIn('slot_uuid', $inventory->slots()->pluck('uuid'))
+            ->where('template_slug', 'wood')
+            ->where('slot_uuid', '!=', $itemFromSlot)
+            ->firstOrFail();
+
+        $equipment = $this->player->storages()->where('storage_type', 'equipment')->firstOrFail();
+        $weaponSlot = $equipment->slots()->where('slot_type', 'equipment_weapon')->firstOrFail();
+        $wood->update(['slot_uuid' => $weaponSlot->uuid]);
+
+        $this->moveService->move($this->player, $item->slot_uuid, $weaponSlot->uuid);
+
+        $item->refresh();
+        $wood->refresh();
+        $this->assertEquals($weaponSlot->uuid, $item->slot_uuid);
+        $this->assertEquals($itemFromSlot, $wood->slot_uuid);
+    }
+
+    public function test_cannot_move_resource_to_craft_center_without_craft_formula(): void
+    {
+        $this->inventoryService->addResource($this->player, 'wood', 5);
+        $inventory = $this->player->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $wood = Resources::whereIn('slot_uuid', $inventory->slots()->pluck('uuid'))
+            ->where('template_slug', 'wood')
+            ->firstOrFail();
+
+        WorkbenchHelper::ensureWorkbench($this->player);
+        $centerSlot = app(\App\Services\DisassembleStationService::class)->getCenterTemporarySlot($this->player);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('У ресурса нет формулы разбора');
+        $this->moveService->move($this->player, $wood->slot_uuid, $centerSlot->uuid);
+    }
+
+    public function test_can_move_wood_to_craft_material_slot(): void
+    {
+        $this->inventoryService->addResource($this->player, 'wood', 5);
+        $inventory = $this->player->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $wood = Resources::whereIn('slot_uuid', $inventory->slots()->pluck('uuid'))
+            ->where('template_slug', 'wood')
+            ->firstOrFail();
+
+        WorkbenchHelper::ensureWorkbench($this->player);
+        $materialSlot = app(\App\Services\CraftStationService::class)->getMaterialTemporarySlots($this->player)->first();
+
+        $this->moveService->move($this->player, $wood->slot_uuid, $materialSlot->uuid);
+
+        $wood->refresh();
+        $this->assertEquals($materialSlot->uuid, $wood->temporary_slot_uuid);
+    }
+
+    public function test_can_move_planks_to_disassemble_center_slot(): void
+    {
+        $this->inventoryService->addResource($this->player, 'wooden_plank', 5);
+        $inventory = $this->player->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $planks = Resources::whereIn('slot_uuid', $inventory->slots()->pluck('uuid'))
+            ->where('template_slug', 'wooden_plank')
+            ->firstOrFail();
+
+        app(\App\Services\DisassembleStationService::class)->ensureDisassembleStorage($this->player);
+        $centerSlot = app(\App\Services\DisassembleStationService::class)->getCenterTemporarySlot($this->player);
+
+        $this->moveService->move($this->player, $planks->slot_uuid, $centerSlot->uuid);
+
+        $planks->refresh();
+        $this->assertEquals($centerSlot->uuid, $planks->temporary_slot_uuid);
+    }
+
+    public function test_cannot_move_blueprint_to_craft_material_slot(): void
+    {
+        $blueprint = app(CraftingService::class)->createBlueprint($this->player, 'craft_wooden_sword');
+        WorkbenchHelper::ensureWorkbench($this->player);
+        $materialSlot = app(\App\Services\CraftStationService::class)->getMaterialTemporarySlots($this->player)->first();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Предмет можно положить только в центральный слот станции создания');
+        $this->moveService->move($this->player, $blueprint->slot_uuid, $materialSlot->uuid);
+    }
+
+    public function test_cannot_move_to_craft_regular_slot(): void
+    {
+        $this->inventoryService->addResource($this->player, 'wood', 5);
+        $inventory = $this->player->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $wood = Resources::whereIn('slot_uuid', $inventory->slots()->pluck('uuid'))
+            ->where('template_slug', 'wood')
+            ->firstOrFail();
+
+        $craft = WorkbenchHelper::ensureWorkbench($this->player);
+        $regularSlot = $craft->slots()->where('slot_type', 'craft_material')->firstOrFail();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('На станцию кладите предметы через overlay-слоты');
+        $this->moveService->move($this->player, $wood->slot_uuid, $regularSlot->uuid);
     }
 }

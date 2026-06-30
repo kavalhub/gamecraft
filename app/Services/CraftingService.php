@@ -9,8 +9,8 @@ use App\Models\Formula;
 use App\Models\Item;
 use App\Models\ItemTemplate;
 use App\Models\Recipe;
-use App\Models\Slot;
-use App\Models\Storage;
+use App\Models\Resources;
+use App\Support\ItemMaterialsUsed;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -19,21 +19,53 @@ class CraftingService
 {
     public function __construct(
         private InventoryService $inventoryService,
-        private EventStore $eventStore
+        private EventStore $eventStore,
+        private CraftStationService $craftStationService,
+        private DisassembleStationService $disassembleStationService,
+        private QuestService $questService,
+        private CraftingActionResolver $craftingActionResolver,
     ) {}
 
     public function getAvailableRecipes(Character $character): Collection
     {
         return Recipe::all()->map(function (Recipe $recipe) {
-            $craftFormula = $recipe->craftFormulas()->first();
+            $craftFormula = $recipe->craftFormulas()->with('action')->first();
+            $disassembleFormula = $recipe->disassembleFormulas()->with('action')->first();
+
             return [
                 'slug' => $recipe->slug,
                 'type' => $recipe->type,
                 'name' => $recipe->name,
                 'description' => $recipe->description,
                 'craft_formula' => $craftFormula ? $craftFormula->formula : [],
+                'disassemble_formula' => $disassembleFormula ? $disassembleFormula->formula : [],
+                'craft_action' => $craftFormula ? [
+                    'slug' => $craftFormula->action_slug ?? 'create',
+                    'label' => $this->craftingActionResolver->actionLabelForFormula($craftFormula),
+                ] : null,
+                'disassemble_action' => $disassembleFormula ? [
+                    'slug' => $disassembleFormula->action_slug ?? 'disassemble',
+                    'label' => $this->craftingActionResolver->actionLabelForFormula($disassembleFormula),
+                ] : null,
+                'result_template_slug' => $this->resolveResultTemplateSlug($recipe),
             ];
         });
+    }
+
+    public function resolveResultTemplateSlug(Recipe $recipe): ?string
+    {
+        try {
+            if ($recipe->type === 'blueprint') {
+                return $this->getResultTemplateSlug($recipe->slug);
+            }
+            if ($recipe->type === 'resource') {
+                return $this->determineResourceResult($recipe->slug);
+            }
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return null;
     }
 
     public function craftResource(
@@ -50,18 +82,20 @@ class CraftingService
             }
 
             $inputs = $formula->formula;
+            $available = $this->craftStationService->getCombinedIngredientQuantities($character);
+
             foreach ($inputs as $templateSlug => $quantity) {
-                $available = $this->inventoryService->getResourceQuantity($character, $templateSlug);
                 $needed = $quantity * $times;
-                if ($available < $needed) {
+                $have = $available[$templateSlug] ?? 0;
+                if ($have < $needed) {
                     throw new \RuntimeException(
-                        "Недостаточно ресурса {$templateSlug}: есть {$available}, нужно {$needed}"
+                        "Недостаточно ресурса {$templateSlug} на станции создания: есть {$have}, нужно {$needed}"
                     );
                 }
             }
 
             foreach ($inputs as $templateSlug => $quantity) {
-                $this->inventoryService->removeResource($character, $templateSlug, $quantity * $times);
+                $this->craftStationService->removeIngredients($character, $templateSlug, $quantity * $times);
             }
 
             $resultTemplateSlug = $this->determineResourceResult($recipeSlug);
@@ -90,6 +124,12 @@ class CraftingService
                 $correlationUuid
             );
 
+            $this->questService->handleGameEvent($character, 'resource.crafted', [
+                'recipe_slug' => $recipeSlug,
+                'result_template_slug' => $resultTemplateSlug,
+                'times' => $times,
+            ]);
+
             return [
                 'recipe' => $recipe,
                 'inputs' => $inputs,
@@ -115,26 +155,30 @@ class CraftingService
                 ->where('recipe_slug', $recipeSlug)
                 ->firstOrFail();
 
-            $blueprintSlot = Slot::where('uuid', $blueprint->slot_uuid)->firstOrFail();
-            $blueprintStorage = Storage::where('uuid', $blueprintSlot->storage_uuid)->firstOrFail();
-            if ($blueprintStorage->characters_uuid !== $character->uuid) {
+            $blueprintSlot = $blueprint->slot;
+            $blueprintStorage = $blueprintSlot?->storage;
+            if (!$blueprintStorage || $blueprintStorage->characters_uuid !== $character->uuid) {
                 throw new \RuntimeException('Чертёж не принадлежит персонажу');
             }
 
+            $this->craftStationService->assertBlueprintOnStation($blueprint, $character);
+
             $inputs = $formula->formula;
+            $stationResources = $this->craftStationService->getMaterialQuantities($character);
+
             foreach ($inputs as $templateSlug => $quantity) {
-                $available = $this->inventoryService->getResourceQuantity($character, $templateSlug);
+                $available = $stationResources[$templateSlug] ?? 0;
                 if ($available < $quantity) {
                     throw new \RuntimeException(
-                        "Недостаточно ресурса {$templateSlug}: есть {$available}, нужно {$quantity}"
+                        "Недостаточно ресурса {$templateSlug} на станции создания: есть {$available}, нужно {$quantity}"
                     );
                 }
             }
 
-            $materialsUsed = [];
+            $materialsUsed = ItemMaterialsUsed::build($character, []);
             foreach ($inputs as $templateSlug => $quantity) {
-                $materialsUsed[$templateSlug] = $quantity;
-                $this->inventoryService->removeResource($character, $templateSlug, $quantity);
+                $materialsUsed['resources'][$templateSlug] = $quantity;
+                $this->craftStationService->removeIngredients($character, $templateSlug, $quantity);
             }
 
             // Определяем template_slug для предмета (не blueprint!)
@@ -146,7 +190,7 @@ class CraftingService
                 'stage' => 'item',
                 'template_slug' => $itemTemplateSlug,
                 'slot_type' => $itemTemplate->slot_type,
-                'custom_name' => $customName ?? $this->generateItemName($recipe, $materialsUsed),
+                'custom_name' => $customName ?? $this->generateItemName($recipe, $materialsUsed['resources']),
                 'materials_used' => $materialsUsed,
                 'stats' => $this->generateItemStats($itemTemplateSlug),
             ]);
@@ -171,6 +215,11 @@ class CraftingService
                 $correlationUuid
             );
 
+            $this->questService->handleGameEvent($character, 'item.crafted', [
+                'recipe_slug' => $recipeSlug,
+                'item_template_slug' => $itemTemplateSlug,
+            ]);
+
             return $blueprint->fresh();
         });
     }
@@ -185,11 +234,13 @@ class CraftingService
                 ->where('stage', 'item')
                 ->firstOrFail();
 
-            $slot = Slot::where('uuid', $item->slot_uuid)->firstOrFail();
-            $storage = Storage::where('uuid', $slot->storage_uuid)->firstOrFail();
-            if ($storage->characters_uuid !== $character->uuid) {
+            $slot = $item->slot;
+            $storage = $slot?->storage;
+            if (!$storage || $storage->characters_uuid !== $character->uuid) {
                 throw new \RuntimeException('Предмет не принадлежит персонажу');
             }
+
+            $this->disassembleStationService->assertItemOnStation($item, $character);
 
             $recipe = Recipe::where('slug', $item->recipe_slug)->firstOrFail();
             $formula = $this->selectDisassembleFormula($recipe, $context);
@@ -237,6 +288,78 @@ class CraftingService
                 'item' => $item->fresh(),
                 'formula' => $formula,
                 'returned_resources' => $returnedResources,
+            ];
+        });
+    }
+
+    public function disassembleResource(
+        Character $character,
+        string $recipeSlug,
+        int $times = 1,
+        array $context = []
+    ): array {
+        return DB::transaction(function () use ($character, $recipeSlug, $times, $context) {
+            if ($times < 1) {
+                throw new \RuntimeException('Количество должно быть больше 0');
+            }
+
+            $recipe = Recipe::where('slug', $recipeSlug)->where('type', 'resource')->firstOrFail();
+            $formula = $this->selectDisassembleFormula($recipe, $context);
+            if (!$formula) {
+                throw new \RuntimeException('Нет доступной формулы разбора');
+            }
+
+            $centerSlot = $this->disassembleStationService->getCenterTemporarySlot($character);
+            $resource = Resources::where('temporary_slot_uuid', $centerSlot->uuid)->firstOrFail();
+
+            $this->disassembleStationService->assertResourceOnStation($resource, $character);
+
+            $expectedTemplateSlug = $this->determineResourceResult($recipeSlug);
+            if ($resource->template_slug !== $expectedTemplateSlug) {
+                throw new \RuntimeException('Ресурс на станции разбора не соответствует рецепту разбора');
+            }
+
+            if ($resource->quantity < $times) {
+                throw new \RuntimeException(
+                    "Недостаточно ресурса {$resource->template_slug} на станции разбора: есть {$resource->quantity}, нужно {$times}"
+                );
+            }
+
+            if ($resource->quantity <= $times) {
+                $resource->delete();
+            } else {
+                $resource->update(['quantity' => $resource->quantity - $times]);
+            }
+
+            $returnedResources = [];
+            foreach ($formula->formula as $templateSlug => $quantity) {
+                $total = $quantity * $times;
+                $this->inventoryService->addResource($character, $templateSlug, $total);
+                $returnedResources[$templateSlug] = $total;
+            }
+
+            $correlationUuid = Str::uuid()->toString();
+
+            $this->eventStore->record(
+                'resource.disassembled',
+                'character',
+                $character->uuid,
+                [
+                    'recipe_slug' => $recipeSlug,
+                    'times' => $times,
+                    'source_template_slug' => $expectedTemplateSlug,
+                    'returned_resources' => $returnedResources,
+                    'formula_description' => $formula->description,
+                ],
+                $character->uuid,
+                $correlationUuid
+            );
+
+            return [
+                'recipe' => $recipe,
+                'formula' => $formula,
+                'returned_resources' => $returnedResources,
+                'times' => $times,
             ];
         });
     }

@@ -12,6 +12,7 @@ use App\Models\Storage;
 use App\Models\StorageType;
 use App\Models\User;
 use App\Services\ContentImportService;
+use App\Services\CurrencyService;
 use App\Services\StorageProvisioningService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\File;
@@ -23,6 +24,7 @@ class DatabaseSeeder extends Seeder
     {
         $this->seedCharacterTypes();
         $this->seedStorageTypes();
+        $this->importQuests();
 
         $importService = app(ContentImportService::class);
         $baseContentPath = base_path('content/base.json');
@@ -45,6 +47,20 @@ class DatabaseSeeder extends Seeder
         $this->createAuctionCharacter();
         $this->createSystemCharacter();
         $this->createTestUser();
+    }
+
+    private function importQuests(): void
+    {
+        $questsPath = base_path('content/quests.json');
+        if (!File::exists($questsPath)) {
+            $this->command->warn('content/quests.json not found');
+
+            return;
+        }
+
+        $data = json_decode(File::get($questsPath), true);
+        $report = app(\App\Services\QuestService::class)->importFromArray($data);
+        $this->command->info("Quests: {$report['created']} created, {$report['updated']} updated");
     }
 
     private function seedCharacterTypes(): void
@@ -73,6 +89,7 @@ class DatabaseSeeder extends Seeder
         $types = [
             ['type' => 'inventory', 'name' => 'Инвентарь', 'allowed_types' => ['slots' => [
                 ['slot_type' => 'gold', 'count' => 1, 'hidden' => true, 'priority_fill' => true, 'auto_reclaim' => true],
+                ['slot_type' => 'experience', 'count' => 1, 'hidden' => true, 'priority_fill' => true, 'auto_reclaim' => true],
                 ['slot_type' => null, 'count' => 36],
             ]]],
             ['type' => 'equipment', 'name' => 'Экипировка', 'allowed_types' => ['slots' => [
@@ -125,6 +142,11 @@ class DatabaseSeeder extends Seeder
             ['name' => 'Обмен', 'active' => true]
         );
 
+        Storage::firstOrCreate(
+            ['characters_uuid' => $system->uuid, 'storage_type' => 'world'],
+            ['name' => 'Мир', 'active' => true]
+        );
+
         $this->command->info("System character created: {$system->name} ({$system->uuid})");
     }
 
@@ -172,7 +194,7 @@ class DatabaseSeeder extends Seeder
             $provisioning->provisionStorageSlots($bank);
         }
 
-        $provisioning->ensureStartingGold($character);
+        app(CurrencyService::class)->grantStartingGold($character);
 
         $this->command->info("Test user created: {$user->email} ({$user->uuid})");
         $this->command->info("Test character created: {$character->name} ({$character->uuid})");

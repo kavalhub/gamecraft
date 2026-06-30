@@ -6,11 +6,16 @@ namespace App\Services;
 
 use App\Models\Character;
 use App\Models\CharacterStat;
-use App\Models\Item;
-use App\Models\Storage;
 
 class CharacterStatsService
 {
+  /** @var int[] Пороги опыта для повышения уровня: ур.2 — 10, ур.3 — 50, ур.4 — 150 … */
+    private const XP_LEVEL_THRESHOLDS = [0, 10, 50, 150, 450, 1350, 4050, 12150, 36450];
+
+    public function __construct(
+        private SpecialSlotService $specialSlotService,
+    ) {}
+
     /**
      * @return array<string, int|float>
      */
@@ -20,7 +25,6 @@ class CharacterStatsService
             ['character_uuid' => $character->uuid],
             [
                 'level' => 1,
-                'experience' => 0,
                 'strength' => 10,
                 'agility' => 10,
                 'intellect' => 10,
@@ -30,6 +34,45 @@ class CharacterStatsService
         );
 
         return $this->buildProfile($character, $stats);
+    }
+
+    public function levelFromExperience(int $experience): int
+    {
+        $level = 1;
+        foreach (array_slice(self::XP_LEVEL_THRESHOLDS, 1) as $threshold) {
+            if ($experience >= $threshold) {
+                $level++;
+            } else {
+                break;
+            }
+        }
+
+        return max(1, $level);
+    }
+
+    /**
+     * @return array{current: int, level: int, level_min: int, level_max: ?int}
+     */
+    public function experienceProgress(int $experience): array
+    {
+        $level = $this->levelFromExperience($experience);
+        $levelMin = self::XP_LEVEL_THRESHOLDS[$level - 1] ?? 0;
+        $levelMax = self::XP_LEVEL_THRESHOLDS[$level] ?? null;
+
+        return [
+            'current' => $experience,
+            'level' => $level,
+            'level_min' => $levelMin,
+            'level_max' => $levelMax,
+        ];
+    }
+
+    public function syncLevelFromExperience(Character $character): void
+    {
+        $xp = $this->specialSlotService->getExperienceQuantity($character);
+        $level = $this->levelFromExperience($xp);
+
+        CharacterStat::where('character_uuid', $character->uuid)->update(['level' => $level]);
     }
 
     /**
@@ -43,12 +86,20 @@ class CharacterStatsService
             return $this->ensureFor($character);
         }
 
+        $experience = $this->specialSlotService->getExperienceQuantity($character);
+        $level = $this->levelFromExperience($experience);
+
+        if ($base->level !== $level) {
+            $base->update(['level' => $level]);
+        }
+
         $equipmentBonus = $this->sumEquipmentBonuses($character);
         $baseHealth = 50;
 
         return [
-            'level' => $base->level,
-            'experience' => $base->experience,
+            'level' => $level,
+            'experience' => $experience,
+            'experience_progress' => $this->experienceProgress($experience),
             'base' => [
                 'strength' => $base->strength,
                 'agility' => $base->agility,
@@ -82,7 +133,7 @@ class CharacterStatsService
         }
 
         $slotUuids = $storage->slots()->pluck('uuid');
-        $items = Item::whereIn('slot_uuid', $slotUuids)
+        $items = \App\Models\Item::whereIn('slot_uuid', $slotUuids)
             ->whereNull('temporary_slot_uuid')
             ->where('stage', 'item')
             ->get();
