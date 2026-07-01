@@ -1217,7 +1217,7 @@
         <div class="window-header">
             <div class="window-title">
                 <span class="icon">👥</span>
-                <span>Игроки</span>
+                <span>Общение</span>
             </div>
             <div class="window-controls">
                 <div class="window-btn" onclick="WindowManager.close('players')">✕</div>
@@ -1962,7 +1962,7 @@
     }
 
     // ================================================================
-    //                     WEBSOCKET CLIENT
+    //                     REALTIME EVENTS (WebSocket + HTTP fallback)
     // ================================================================
     window.EventPoller = {
         ws: null,
@@ -1970,14 +1970,24 @@
         reconnectTimer: null,
         reconnectAttempts: 0,
         lastEventId: 0,
+        pollTimer: null,
+        connectTimeout: null,
+        pollIntervalMs: 3000,
+        mode: 'ws',
 
         start(characterUuid) {
             window.characterUuid = characterUuid;
             this.characterUuid = characterUuid;
             this.connect();
+            this.scheduleConnectFallback();
         },
 
         stop() {
+            this.stopPoll();
+            if (this.connectTimeout) {
+                clearTimeout(this.connectTimeout);
+                this.connectTimeout = null;
+            }
             if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
             if (this.ws) { this.ws.close(); this.ws = null; }
         },
@@ -1992,6 +2002,55 @@
             }
         },
 
+        dispatchEvents(events) {
+            if (!events || !events.length) return;
+            const sorted = events.slice().sort((a, b) => (a.id || 0) - (b.id || 0));
+            sorted.forEach((event) => {
+                if (event.id != null) {
+                    this.trackEventId(event.id);
+                }
+            });
+            this.listeners.forEach(cb => {
+                try { cb(sorted); } catch (e) { console.error('Listener error:', e); }
+            });
+        },
+
+        scheduleConnectFallback() {
+            if (this.connectTimeout) clearTimeout(this.connectTimeout);
+            this.connectTimeout = setTimeout(() => {
+                if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                    this.startPoll();
+                }
+            }, 5000);
+        },
+
+        startPoll() {
+            if (this.pollTimer) return;
+            this.mode = 'poll';
+            console.log('EventPoller: HTTP polling mode (3s)');
+
+            const poll = () => {
+                if (!this.characterUuid || !window.GameApi) return;
+                const afterId = this.lastEventId || 0;
+                GameApi.fetch(`/api/events/${this.characterUuid}/latest?after_id=${afterId}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        this.dispatchEvents(data.events || []);
+                    })
+                    .catch(() => {});
+            };
+
+            poll();
+            this.pollTimer = setInterval(poll, this.pollIntervalMs);
+        },
+
+        stopPoll() {
+            if (this.pollTimer) {
+                clearInterval(this.pollTimer);
+                this.pollTimer = null;
+            }
+        },
+
         connect() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
             const lastId = this.lastEventId || 0;
@@ -2003,29 +2062,31 @@
             this.ws.onopen = () => {
                 console.log('WebSocket connected');
                 this.reconnectAttempts = 0;
+                this.mode = 'ws';
+                if (this.connectTimeout) {
+                    clearTimeout(this.connectTimeout);
+                    this.connectTimeout = null;
+                }
+                this.stopPoll();
             };
 
             this.ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
                     if (data.type === 'connected') return;
-                    if (data.id != null) {
-                        this.trackEventId(data.id);
-                    }
-                    this.listeners.forEach(cb => {
-                        try { cb([data]); } catch (e) { console.error('Listener error:', e); }
-                    });
+                    this.dispatchEvents([data]);
                 } catch (e) {
                     console.error('WebSocket parse error:', e);
                 }
             };
 
-            this.ws.onerror = (err) => {
+            this.ws.onerror = () => {
                 console.error('WebSocket error');
             };
 
             this.ws.onclose = () => {
                 console.log('WebSocket closed, reconnecting...');
+                this.startPoll();
                 const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
                 this.reconnectAttempts++;
                 this.reconnectTimer = setTimeout(() => this.connect(), delay);
@@ -2373,9 +2434,15 @@
             });
 
             if (needsOnlineUpdate && WindowManager.isOpen('players')
-                && window.playersState?.activeTab === 'online'
-                && typeof window.renderOnlineView === 'function') {
-                setTimeout(() => window.renderOnlineView(), 100);
+                && window.playersState?.activeTab === 'trade'
+                && typeof window.renderTradeTabView === 'function') {
+                setTimeout(() => window.renderTradeTabView(), 100);
+            }
+
+            if (needsTradeUpdate && WindowManager.isOpen('players')
+                && window.playersState?.activeTab === 'trade'
+                && typeof window.renderTradeTabView === 'function') {
+                setTimeout(() => window.renderTradeTabView(), 100);
             }
 
             if (needsInventoryUpdate || needsTradeUpdate) {
@@ -2396,7 +2463,10 @@
                         if (typeof window.loadTrades === 'function') {
                             window.loadTrades();
                         }
-                    } else if (WindowManager.isOpen('trade') && typeof window.loadTrades === 'function') {
+                        if (typeof window.refreshTradeTabIfOpen === 'function') {
+                            window.refreshTradeTabIfOpen();
+                        }
+                    } else if (typeof window.loadTrades === 'function') {
                         window.loadTrades();
                     }
                 }, 150);

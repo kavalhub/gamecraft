@@ -1091,7 +1091,7 @@
         character: { window: 'character', icon: '🛡️', label: 'Персонаж' },
         quests: { window: 'quests', icon: '📜', label: 'Квесты' },
         auction: { window: 'auction', icon: '🏪', label: 'Аукцион' },
-        players: { window: 'players', icon: '👥', label: 'Игроки' },
+        players: { window: 'players', icon: '👥', label: 'Общение' },
         settings: { window: 'settings', icon: '⚙️', label: 'Настройки' },
     };
 
