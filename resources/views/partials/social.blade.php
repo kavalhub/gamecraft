@@ -1,5 +1,5 @@
 <div id="playersTabs" class="game-tabs">
-    <button type="button" class="game-tab active" data-tab="online" onclick="switchPlayersTab('online')">Онлайн</button>
+    <button type="button" class="game-tab active" data-tab="trade" onclick="switchPlayersTab('trade')">Обмен</button>
     <button type="button" class="game-tab" data-tab="friends" onclick="switchPlayersTab('friends')">Друзья</button>
     <button type="button" class="game-tab" data-tab="guild" onclick="switchPlayersTab('guild')">Гильдия</button>
 </div>
@@ -8,7 +8,7 @@
 <script>
 window.playersState = {
     characterUuid: null,
-    activeTab: 'online',
+    activeTab: 'trade',
 };
 
 function tradeApiUrl(path) {
@@ -20,7 +20,7 @@ function switchPlayersTab(tab) {
     document.querySelectorAll('#playersTabs .game-tab').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === tab);
     });
-    if (tab === 'online') renderOnlineView();
+    if (tab === 'trade') renderTradeTabView();
     else if (tab === 'friends') renderFriendsView();
     else if (tab === 'guild') renderGuildView();
 }
@@ -37,9 +37,76 @@ window.openPlayersWindow = function() {
     if (!playersState.characterUuid) {
         playersState.characterUuid = window.characterUuid;
     }
-    playersState.activeTab = 'online';
-    switchPlayersTab('online');
+    playersState.activeTab = 'trade';
+    switchPlayersTab('trade');
 };
+
+function getTradePartner(trade) {
+    if (!trade) return null;
+    const myUuid = playersState.characterUuid || window.characterUuid;
+    if (trade.initiator && trade.initiator.uuid === myUuid) {
+        return trade.partner;
+    }
+    return trade.initiator;
+}
+
+function renderActiveTradePreview(trade) {
+    const content = document.getElementById('playersContent');
+    if (!content || !trade) return;
+    resizePlayersWindow();
+
+    const partner = getTradePartner(trade);
+    const partnerName = partner?.name || 'Игрок';
+    const partnerUuid = partner?.uuid || '';
+    const safeName = partnerName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+    content.innerHTML = `
+        <div class="trade-tab-preview" style="padding: 12px;">
+            <p style="color: #aaa; font-size: 12px; margin: 0 0 12px;">Активный обмен</p>
+            <div class="online-player-row"
+                 data-uuid="${partnerUuid}"
+                 data-name="${partnerName.replace(/"/g, '&quot;')}"
+                 oncontextmenu="openPlayerContextMenu(event, '${partnerUuid}', '${safeName}'); return false;">
+                <span>${partnerName}</span>
+            </div>
+            <button type="button" class="workbench-btn workbench-btn--craft" style="width: 100%; margin-top: 16px;"
+                    onclick="openTradeWindowFromTab()">Открыть обмен</button>
+        </div>
+    `;
+}
+
+function renderTradeTabView() {
+    const content = document.getElementById('playersContent');
+    if (!content) return;
+    if (!playersState.characterUuid) {
+        playersState.characterUuid = window.characterUuid;
+    }
+    if (!playersState.characterUuid) return;
+
+    resizePlayersWindow();
+
+    GameApi.fetch(tradeApiUrl('/current'))
+        .then(r => r.json())
+        .then(data => {
+            if (data.trade) {
+                if (window.tradeState) {
+                    window.tradeState.currentTrade = typeof mergeTradeSlots === 'function'
+                        ? mergeTradeSlots(data.trade)
+                        : data.trade;
+                }
+                renderActiveTradePreview(data.trade);
+            } else {
+                if (window.tradeState) {
+                    window.tradeState.currentTrade = null;
+                }
+                renderOnlineView();
+            }
+        })
+        .catch(err => {
+            console.error('Trade tab load error:', err);
+            renderOnlineView();
+        });
+}
 
 function renderOnlineView() {
     const content = document.getElementById('playersContent');
@@ -94,6 +161,17 @@ window.openPlayerContextMenu = function(event, uuid, name) {
     }
 };
 
+window.openTradeWindowFromTab = function() {
+    if (typeof window.openTradeSession === 'function') {
+        window.openTradeSession();
+        return;
+    }
+    WindowManager.open('trade');
+    if (typeof window.openTradeWindow === 'function') {
+        window.openTradeWindow();
+    }
+};
+
 window.startTrade = function(partnerUuid) {
     GameApi.fetch(tradeApiUrl('/create'), {
         method: 'POST',
@@ -105,9 +183,16 @@ window.startTrade = function(partnerUuid) {
             if (window.tradeState) {
                 window.tradeState.currentTrade = data.trade;
             }
-            WindowManager.open('trade');
-            if (typeof window.openTradeWindow === 'function') {
-                window.openTradeWindow();
+            if (typeof window.openTradeSession === 'function') {
+                window.openTradeSession();
+            } else {
+                WindowManager.open('trade');
+                if (typeof window.openTradeWindow === 'function') {
+                    window.openTradeWindow();
+                }
+            }
+            if (typeof window.refreshTradeTabIfOpen === 'function') {
+                window.refreshTradeTabIfOpen();
             }
         } else {
             showMsg(data.error || 'Ошибка создания обмена', 'error');
@@ -121,6 +206,7 @@ window.initPlayers = function() {
     openPlayersWindow();
 };
 
+window.renderTradeTabView = renderTradeTabView;
 window.renderOnlineView = renderOnlineView;
 window.switchPlayersTab = switchPlayersTab;
 </script>

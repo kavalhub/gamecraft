@@ -237,6 +237,27 @@ window.handleTradeDrop = function(item, options) {
     });
 };
 
+function refreshTradeTabIfOpen() {
+    if (WindowManager.isOpen('players')
+        && window.playersState?.activeTab === 'trade'
+        && typeof window.renderTradeTabView === 'function') {
+        window.renderTradeTabView();
+    }
+}
+
+window.refreshTradeTabIfOpen = refreshTradeTabIfOpen;
+
+window.openTradeSession = function() {
+    WindowManager.open('trade');
+    if (typeof openTradeWindow === 'function') {
+        return openTradeWindow();
+    }
+    if (tradeState.currentTrade) {
+        renderTradeView();
+    }
+    return Promise.resolve();
+};
+
 function refreshCurrentTrade() {
     return Promise.all([
         GameApi.fetch(tradeApiUrl('/current')).then(r => r.json()),
@@ -248,11 +269,13 @@ function refreshCurrentTrade() {
                 WindowManager.open('trade');
             }
             renderTradeView();
+            refreshTradeTabIfOpen();
         } else if (tradeState.currentTrade) {
             tradeState.currentTrade = null;
             if (WindowManager.isOpen('trade')) {
                 renderTradeEmptyView();
             }
+            refreshTradeTabIfOpen();
             loadPlayerData();
         }
     });
@@ -296,6 +319,7 @@ window.cancelTrade = function() {
         if (data.success) {
             tradeState.currentTrade = null;
             WindowManager.close('trade');
+            refreshTradeTabIfOpen();
             loadPlayerData();
             showMsg('Обмен отменён', 'info');
         } else {
@@ -309,6 +333,7 @@ window.onTradeCompleted = function() {
     if (WindowManager.isOpen('trade')) {
         WindowManager.close('trade');
     }
+    refreshTradeTabIfOpen();
     loadPlayerData();
     showMsg('🎉 Обмен завершён!', 'success');
 };
