@@ -11,6 +11,7 @@ use App\Services\InventoryService;
 use App\Services\StorageProvisioningService;
 use App\Services\TradeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\WorkbenchHelper;
 use Tests\TestCase;
 
 class TradeServiceTest extends TestCase
@@ -51,6 +52,7 @@ class TradeServiceTest extends TestCase
 
         // Создаём хранилища и стартовое золото для player2
         app(StorageProvisioningService::class)->provisionDefaults($this->player2);
+        app(\App\Services\CurrencyService::class)->grantStartingGold($this->player2);
     }
 
     public function test_create_trade(): void
@@ -73,8 +75,7 @@ class TradeServiceTest extends TestCase
     public function test_add_item_to_trade(): void
     {
         $this->inventoryService->addResource($this->player1, 'wood', 10);
-        $blueprint = $this->craftingService->createBlueprint($this->player1, 'craft_wooden_sword');
-        $item = $this->craftingService->craftItem($this->player1, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->player1);
 
         $trade = $this->tradeService->createTrade($this->player1, $this->player2);
         $tradeItem = $this->tradeService->addItemToTrade($this->player1, $trade, $item->uuid);
@@ -115,8 +116,7 @@ class TradeServiceTest extends TestCase
     {
         // Player 1 даёт предмет
         $this->inventoryService->addResource($this->player1, 'wood', 10);
-        $blueprint = $this->craftingService->createBlueprint($this->player1, 'craft_wooden_sword');
-        $item = $this->craftingService->craftItem($this->player1, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->player1);
 
         // Player 2 имеет 1000 золота (уже добавлено в setUp)
 
@@ -146,8 +146,7 @@ class TradeServiceTest extends TestCase
     public function test_cancel_trade(): void
     {
         $this->inventoryService->addResource($this->player1, 'wood', 10);
-        $blueprint = $this->craftingService->createBlueprint($this->player1, 'craft_wooden_sword');
-        $item = $this->craftingService->craftItem($this->player1, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->player1);
 
         $trade = $this->tradeService->createTrade($this->player1, $this->player2);
         $this->tradeService->addItemToTrade($this->player1, $trade, $item->uuid);

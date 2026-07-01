@@ -27,6 +27,8 @@ class InventoryService
         int $quantity,
         ?string $storageType = 'inventory'
     ): Resources {
+        $this->assertCurrencyMutationAllowed($templateSlug);
+
         return DB::transaction(function () use ($character, $templateSlug, $quantity, $storageType) {
             return $this->specialSlotService->depositResource(
                 $character,
@@ -93,6 +95,8 @@ class InventoryService
         string $templateSlug,
         int $quantity
     ): void {
+        $this->assertCurrencyMutationAllowed($templateSlug);
+
         DB::transaction(function () use ($character, $templateSlug, $quantity) {
             $storageUuids = $character->storages()->pluck('uuid');
             $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
@@ -249,6 +253,19 @@ class InventoryService
         return Resources::whereIn('slot_uuid', $slotUuids)->with('template')->get();
     }
 
+    public function countItemsInStorage(
+        Character $character,
+        string $templateSlug,
+        string $stage = 'item',
+        string $storageType = 'inventory'
+    ): int {
+        return $this->getCharacterItems($character, $storageType)
+            ->filter(fn (Item $item) => $item->template_slug === $templateSlug
+                && $item->stage === $stage
+                && $item->temporary_slot_uuid === null)
+            ->count();
+    }
+
     public function findFreeSlot(Storage $storage, ?string $slotType = null): ?Slot
     {
         $slotUuids = $storage->slots()->pluck('uuid');
@@ -319,5 +336,16 @@ class InventoryService
             ->merge(Resources::whereIn('slot_uuid', $slotUuids)->pluck('slot_uuid'));
 
         return $storage->slots()->whereNotIn('uuid', $occupiedSlotUuids)->count();
+    }
+
+    private function assertCurrencyMutationAllowed(string $templateSlug): void
+    {
+        if ($templateSlug === 'gold' && !CurrencyService::isMutationAllowed()) {
+            throw new \RuntimeException('Изменение валюты возможно только через игровые операции');
+        }
+
+        if ($templateSlug === 'experience' && !ExperienceService::isMutationAllowed()) {
+            throw new \RuntimeException('Изменение опыта возможно только через игровые операции');
+        }
     }
 }

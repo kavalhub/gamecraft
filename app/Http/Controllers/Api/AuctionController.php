@@ -29,7 +29,10 @@ class AuctionController extends Controller
         }
 
         return response()->json([
-            'lots' => $lots->map(fn ($lot) => $this->formatLot($lot, $buyer)),
+            'lots' => $lots
+                ->filter(fn ($lot) => !$buyer || $this->auctionService->isLotVisibleToBuyer($buyer, $lot))
+                ->map(fn ($lot) => $this->formatLot($lot, $buyer))
+                ->values(),
         ]);
     }
 

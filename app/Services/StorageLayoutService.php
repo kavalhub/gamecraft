@@ -17,6 +17,9 @@ class StorageLayoutService
         private StorageProvisioningService $provisioningService,
         private SpecialSlotService $specialSlotService,
         private CharacterStatsService $characterStatsService,
+        private CraftStationService $craftStationService,
+        private DisassembleStationService $disassembleStationService,
+        private QuestStorageService $questStorageService,
     ) {}
 
     /**
@@ -26,12 +29,12 @@ class StorageLayoutService
     {
         $include = $include ?? ['inventory'];
         $this->provisioningService->consolidateInventoryResources($character);
-        $this->provisioningService->ensureStartingGold($character);
 
         $result = [
             'character_uuid' => $character->uuid,
             'character_name' => $character->name,
             'gold' => $this->specialSlotService->getGoldQuantity($character),
+            'experience' => $this->specialSlotService->getExperienceQuantity($character),
             'storages' => [],
         ];
 
@@ -91,7 +94,23 @@ class StorageLayoutService
             }
         }
 
+        if (in_array('craft', $include, true)) {
+            $craft = $this->craftStationService->ensureCraftStorage($character);
+            $result['storages'][] = $this->formatStationSlotGrid($character, $craft, $this->craftStationService);
+        }
+
+        if (in_array('disassemble', $include, true)) {
+            $disassemble = $this->disassembleStationService->ensureDisassembleStorage($character);
+            $result['storages'][] = $this->formatStationSlotGrid($character, $disassemble, $this->disassembleStationService);
+        }
+
+        if (in_array('quest', $include, true)) {
+            $questStorage = $this->questStorageService->ensureQuestStorage($character);
+            $result['quest_storage'] = $this->formatQuestSlotGrid($character, $questStorage);
+        }
+
         if (in_array('stats', $include, true) || in_array('equipment', $include, true)) {
+            $this->characterStatsService->syncLevelFromExperience($character);
             $result['character_stats'] = $this->characterStatsService->ensureFor($character);
         }
 
@@ -137,7 +156,7 @@ class StorageLayoutService
         $formatSlot = function (Slot $slot, int $index) use ($items, $resources, $defs) {
             $item = $items->get($slot->uuid);
             $resource = $resources->get($slot->uuid);
-            if ($slot->slot_type === null && $resource && $resource->template_slug === 'gold') {
+            if ($slot->slot_type === null && $resource && in_array($resource->template_slug, ['gold', 'experience'], true)) {
                 $resource = null;
             }
             $policy = $slot->slot_type ? ($defs->get($slot->slot_type) ?? []) : [];
@@ -201,8 +220,8 @@ class StorageLayoutService
                     'kind' => 'temporary',
                     'slot_index' => $tempSlot->slot_index,
                     'index' => $tempSlot->slot_index,
-                    'item' => $item ? $this->formatItem($item) : null,
-                    'resource' => $resource ? $this->formatResource($resource) : null,
+                    'item' => $item ? $this->formatItem($item, true) : null,
+                    'resource' => $resource ? $this->formatResource($resource, true) : null,
                 ];
             })->values()->all(),
         ];
@@ -219,7 +238,124 @@ class StorageLayoutService
         ];
     }
 
-    private function formatItem(Item $item): array
+    private function formatStationSlotGrid(Character $character, Storage $storage, CraftStationService|DisassembleStationService $stationService): array
+    {
+        $tempSlots = $stationService->getTemporarySlots($character);
+        $cols = $storage->storage_type === 'disassemble' ? 1 : 4;
+
+        if ($tempSlots->isEmpty()) {
+            return [
+                'uuid' => $storage->uuid,
+                'storage_type' => $storage->storage_type,
+                'name' => $storage->name,
+                'cols' => $cols,
+                'slots' => [],
+                'special_slots' => [],
+            ];
+        }
+
+        $tempUuids = $tempSlots->pluck('uuid');
+
+        $items = Item::whereIn('temporary_slot_uuid', $tempUuids)
+            ->with('template')
+            ->get()
+            ->keyBy('temporary_slot_uuid');
+
+        $resources = Resources::whereIn('temporary_slot_uuid', $tempUuids)
+            ->with('template')
+            ->get()
+            ->keyBy('temporary_slot_uuid');
+
+        $slots = $tempSlots->map(function (TemporarySlot $tempSlot) use ($items, $resources, $stationService) {
+            $item = $items->get($tempSlot->uuid);
+            $resource = $resources->get($tempSlot->uuid);
+            $slotType = $stationService->slotRole($tempSlot);
+
+            return [
+                'uuid' => $tempSlot->uuid,
+                'kind' => 'temporary',
+                'slot_type' => $slotType,
+                'slot_index' => $tempSlot->slot_index,
+                'index' => $tempSlot->slot_index,
+                'item' => $item ? $this->formatItem($item, true) : null,
+                'resource' => $resource ? $this->formatResource($resource, true) : null,
+            ];
+        })->values()->all();
+
+        return [
+            'uuid' => $storage->uuid,
+            'storage_type' => $storage->storage_type,
+            'name' => $storage->name,
+            'cols' => $cols,
+            'slots' => $slots,
+            'special_slots' => $slots,
+        ];
+    }
+
+    private function formatQuestSlotGrid(Character $character, Storage $questStorage): array
+    {
+        $tempSlots = $this->questStorageService->getTemporarySlots($character);
+
+        if ($tempSlots->isEmpty()) {
+            return [
+                'uuid' => $questStorage->uuid,
+                'storage_type' => 'quest',
+                'name' => $questStorage->name,
+                'cols' => 6,
+                'grant_slots' => [],
+                'turnin_slots' => [],
+                'slots' => [],
+            ];
+        }
+
+        $tempUuids = $tempSlots->pluck('uuid');
+
+        $items = Item::whereIn('temporary_slot_uuid', $tempUuids)
+            ->with('template')
+            ->get()
+            ->keyBy('temporary_slot_uuid');
+
+        $resources = Resources::whereIn('temporary_slot_uuid', $tempUuids)
+            ->with('template')
+            ->get()
+            ->keyBy('temporary_slot_uuid');
+
+        $grantSlots = [];
+        $turninSlots = [];
+
+        foreach ($tempSlots as $tempSlot) {
+            $item = $items->get($tempSlot->uuid);
+            $resource = $resources->get($tempSlot->uuid);
+            $slotType = $this->questStorageService->slotRole($tempSlot);
+            $formatted = [
+                'uuid' => $tempSlot->uuid,
+                'kind' => 'temporary',
+                'slot_type' => $slotType,
+                'slot_index' => $tempSlot->slot_index,
+                'index' => $tempSlot->slot_index,
+                'item' => $item ? $this->formatItem($item, true) : null,
+                'resource' => $resource ? $this->formatResource($resource, true) : null,
+            ];
+
+            if ($slotType === 'quest_grant') {
+                $grantSlots[] = $formatted;
+            } elseif ($slotType === 'quest_turnin') {
+                $turninSlots[] = $formatted;
+            }
+        }
+
+        return [
+            'uuid' => $questStorage->uuid,
+            'storage_type' => 'quest',
+            'name' => $questStorage->name,
+            'cols' => 6,
+            'grant_slots' => $grantSlots,
+            'turnin_slots' => $turninSlots,
+            'slots' => array_merge($grantSlots, $turninSlots),
+        ];
+    }
+
+    private function formatItem(Item $item, bool $asOverlayDestination = false): array
     {
         $baseStats = $item->template?->base_stats;
         $stats = $item->stats;
@@ -239,14 +375,15 @@ class StorageLayoutService
             'stats' => $stats,
             'base_stats' => $baseStats,
             'slot_type' => $item->slot_type ?? $item->template?->slot_type,
+            'quest_slug' => $item->template?->quest_slug,
             'materials_used' => $item->materials_used,
             'slot_uuid' => $item->slot_uuid,
             'temporary_slot_uuid' => $item->temporary_slot_uuid,
-            'locked' => $item->temporary_slot_uuid !== null,
+            'locked' => !$asOverlayDestination && $item->temporary_slot_uuid !== null,
         ];
     }
 
-    private function formatResource(Resources $resource): array
+    private function formatResource(Resources $resource, bool $asOverlayDestination = false): array
     {
         return [
             'uuid' => $resource->uuid,
@@ -259,7 +396,7 @@ class StorageLayoutService
             'slot_uuid' => $resource->slot_uuid,
             'temporary_slot_uuid' => $resource->temporary_slot_uuid,
             'is_resource' => true,
-            'locked' => $resource->temporary_slot_uuid !== null,
+            'locked' => !$asOverlayDestination && $resource->temporary_slot_uuid !== null,
         ];
     }
 }

@@ -11,6 +11,7 @@ use App\Services\InventoryService;
 use App\Services\StorageProvisioningService;
 use App\Services\TradeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\WorkbenchHelper;
 use Tests\TestCase;
 
 class TradeResourceQuantityTest extends TestCase
@@ -50,16 +51,14 @@ class TradeResourceQuantityTest extends TestCase
         ]);
 
         app(StorageProvisioningService::class)->provisionDefaults($this->player2);
-
-        $this->inventoryService->addResource($this->player2, 'gold', 1000);
+        app(\App\Services\CurrencyService::class)->credit($this->player2, 1000, 'test', []);
     }
 
     public function test_trade_resources_preserves_quantity(): void
     {
         // Player 1 создаёт деревянный меч (чертёж трансформируется в меч)
         $this->inventoryService->addResource($this->player1, 'wood', 10);
-        $blueprint = $this->craftingService->createBlueprint($this->player1, 'craft_wooden_sword');
-        $sword = $this->craftingService->craftItem($this->player1, 'craft_wooden_sword', $blueprint->uuid);
+        $sword = WorkbenchHelper::craftWoodenSwordFromInventory($this->player1);
 
         $player1WoodBeforeTrade = $this->inventoryService->getResourceQuantity($this->player1, 'wood');
 

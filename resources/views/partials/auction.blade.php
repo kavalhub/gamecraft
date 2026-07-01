@@ -205,8 +205,9 @@
         if (!lot) return;
 
         const isInfinite = lot.is_infinite === true || lot.is_infinite === 1;
+        const isBulkResource = isInfinite && lot.template_type === 'material';
 
-        if (isInfinite) {
+        if (isBulkResource) {
             let info = { ...lot };
             try {
                 const res = await GameApi.fetch(`/api/auction/${GameState.characterUuid}/lot/${lotUuid}/buy-info`);
@@ -253,6 +254,16 @@
                 confirmDisabled: maxPurchasable < 1,
                 onConfirm: (qty) => window.buyLot(lotUuid, qty),
             });
+            return;
+        }
+
+        if (isInfinite) {
+            const maxPurchasable = Number(lot.max_purchasable ?? 0);
+            if (maxPurchasable < 1) {
+                showMsg('Нельзя купить: нет места в инвентаре, недостаточно золота или предмет уже есть', 'error');
+                return;
+            }
+            window.buyLot(lotUuid, 1);
             return;
         }
 

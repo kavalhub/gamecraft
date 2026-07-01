@@ -119,27 +119,48 @@ class CraftingController extends Controller
     public function disassemble(Request $request, string $characterUuid): JsonResponse
     {
         $request->validate([
-            'item_uuid' => 'required|string',
+            'item_uuid' => 'nullable|string',
+            'recipe_slug' => 'nullable|string',
+            'times' => 'integer|min:1',
         ]);
 
         $character = Character::where('uuid', $characterUuid)->firstOrFail();
 
         try {
-            $result = $this->craftingService->disassembleItem(
-                $character,
-                $request->item_uuid
-            );
+            if ($request->filled('item_uuid')) {
+                $result = $this->craftingService->disassembleItem(
+                    $character,
+                    $request->item_uuid
+                );
 
-            return response()->json([
-                'success' => true,
-                'blueprint' => [
-                    'uuid' => $result['item']->uuid,
-                    'template_slug' => $result['item']->template_slug,
-                    'stage' => $result['item']->stage,
-                ],
-                'returned_resources' => $result['returned_resources'],
-                'formula_description' => $result['formula']->description,
-            ]);
+                return response()->json([
+                    'success' => true,
+                    'blueprint' => [
+                        'uuid' => $result['item']->uuid,
+                        'template_slug' => $result['item']->template_slug,
+                        'stage' => $result['item']->stage,
+                    ],
+                    'returned_resources' => $result['returned_resources'],
+                    'formula_description' => $result['formula']->description,
+                ]);
+            }
+
+            if ($request->filled('recipe_slug')) {
+                $result = $this->craftingService->disassembleResource(
+                    $character,
+                    $request->recipe_slug,
+                    $request->input('times', 1)
+                );
+
+                return response()->json([
+                    'success' => true,
+                    'returned_resources' => $result['returned_resources'],
+                    'formula_description' => $result['formula']->description,
+                    'times' => $result['times'],
+                ]);
+            }
+
+            return response()->json(['error' => 'Укажите item_uuid или recipe_slug'], 400);
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 400);
         }

@@ -102,6 +102,7 @@ class ContentImportService
                 'base_stats' => $data['base_stats'] ?? null,
                 'slot_type' => $data['slot_type'] ?? null,
                 'recipe_slug' => $data['recipe_slug'] ?? null,
+                'quest_slug' => $data['quest_slug'] ?? null,
             ]
         );
 
@@ -134,6 +135,7 @@ class ContentImportService
             Formula::create([
                 'recipe_slug' => $recipe->slug,
                 'type' => $formulaData['type'],
+                'action_slug' => $formulaData['action_slug'] ?? null,
                 'priority' => $formulaData['priority'] ?? 100,
                 'chance' => $formulaData['chance'] ?? 100,
                 'conditions' => $formulaData['conditions'] ?? null,

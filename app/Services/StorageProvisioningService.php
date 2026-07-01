@@ -24,40 +24,9 @@ class StorageProvisioningService
 
     public function provisionDefaults(Character $character): void
     {
-        foreach (['inventory', 'equipment', 'bank', 'play_panel'] as $storageType) {
+        foreach (['inventory', 'equipment', 'bank', 'play_panel', 'craft', 'disassemble', 'quest'] as $storageType) {
             $this->grantStorage($character, $storageType);
         }
-
-        $this->ensureStartingGold($character);
-    }
-
-    public function ensureStartingGold(Character $character, int $amount = 1000): void
-    {
-        $this->consolidateInventoryResources($character);
-
-        if ($this->getInventoryGoldQuantity($character) > 0) {
-            return;
-        }
-
-        $inventory = $character->storages()->where('storage_type', 'inventory')->first();
-        if (!$inventory) {
-            $inventory = $this->grantStorage($character, 'inventory');
-        }
-
-        $goldSlot = $this->specialSlotService->getGoldSlot($inventory);
-        if (!$goldSlot) {
-            return;
-        }
-
-        \App\Models\Resources::create([
-            'uuid' => Str::uuid()->toString(),
-            'slot_uuid' => $goldSlot->uuid,
-            'recipe_slug' => 'gold',
-            'template_slug' => 'gold',
-            'slot_type' => 'gold',
-            'max_stack' => null,
-            'quantity' => $amount,
-        ]);
     }
 
     public function getInventoryGoldQuantity(Character $character): int
@@ -101,6 +70,7 @@ class StorageProvisioningService
         }
 
         $this->specialSlotService->relocateGoldToSpecialSlot($character);
+        $this->specialSlotService->relocateExperienceToSpecialSlot($character);
 
         $inventory = $character->storages()->where('storage_type', 'inventory')->first();
         if ($inventory) {

@@ -50,8 +50,7 @@ class TradeResourceStacksTest extends TestCase
         ]);
 
         app(StorageProvisioningService::class)->provisionDefaults($this->player2);
-
-        $this->inventoryService->addResource($this->player2, 'gold', 1000);
+        app(\App\Services\CurrencyService::class)->credit($this->player2, 1000, 'test', []);
     }
 
     public function test_add_resource_creates_correct_stack_count(): void

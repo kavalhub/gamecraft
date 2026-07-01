@@ -6,10 +6,12 @@ namespace Tests\Feature;
 
 use App\Models\Character;
 use App\Models\User;
+use App\Services\CraftingService;
 use App\Services\InventoryService;
 use App\Services\StorageProvisioningService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\WorkbenchHelper;
 use Tests\TestCase;
 
 class StorageApiTest extends TestCase
@@ -54,8 +56,7 @@ class StorageApiTest extends TestCase
         $inventoryService = app(InventoryService::class);
         $provisioning = app(StorageProvisioningService::class);
         $inventoryService->addResource($this->player, 'wood', 10);
-        $blueprint = app(\App\Services\CraftingService::class)->createBlueprint($this->player, 'craft_wooden_sword');
-        $item = app(\App\Services\CraftingService::class)->craftItem($this->player, 'craft_wooden_sword', $blueprint->uuid);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->player);
 
         $provisioning->ensureTradeStorage($this->player);
         $tempSlot = $provisioning->findFreeTradeTemporarySlot($this->player);
@@ -71,6 +72,28 @@ class StorageApiTest extends TestCase
 
         $this->assertNotNull($occupiedSlot);
         $this->assertTrue($occupiedSlot['item']['locked']);
+    }
+
+    public function test_craft_overlay_shows_unlocked_item(): void
+    {
+        $blueprint = app(CraftingService::class)->createBlueprint($this->player, 'craft_wooden_sword');
+        WorkbenchHelper::placeOnBlueprintSlot($this->player, $blueprint);
+
+        $inventoryResponse = $this->withToken($this->token)
+            ->getJson("/api/storage/{$this->player->uuid}?include=inventory,craft");
+
+        $inventoryResponse->assertOk();
+        $inventory = collect($inventoryResponse->json('storages'))->firstWhere('storage_type', 'inventory');
+        $invSlot = collect($inventory['grid_slots'] ?? $inventory['slots'])
+            ->first(fn ($s) => ($s['item']['uuid'] ?? null) === $blueprint->uuid);
+        $this->assertNotNull($invSlot);
+        $this->assertTrue($invSlot['item']['locked']);
+
+        $craft = collect($inventoryResponse->json('storages'))->firstWhere('storage_type', 'craft');
+        $centerSlot = collect($craft['slots'] ?? [])
+            ->first(fn ($s) => ($s['slot_type'] ?? null) === 'craft_center');
+        $this->assertNotNull($centerSlot);
+        $this->assertFalse($centerSlot['item']['locked']);
     }
 
     public function test_move_item_between_slots_via_api(): void

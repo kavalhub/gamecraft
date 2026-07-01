@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\InventoryController;
+use App\Http\Controllers\Api\ChatController;
 use App\Http\Controllers\Api\CraftingController;
 use App\Http\Controllers\Api\AuctionController;
 use App\Http\Controllers\Api\TradeController;
@@ -9,7 +10,7 @@ use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\EventsController;
 use App\Http\Controllers\Api\EventsStreamController;
 use App\Http\Controllers\Api\HeartbeatController;
-use App\Http\Controllers\Api\PlayPanelController;
+use App\Http\Controllers\Api\QuestController;
 use App\Http\Controllers\Api\StorageController;
 use App\Http\Controllers\Api\ItemTemplateController;
 use Illuminate\Support\Facades\Route;
@@ -26,12 +27,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/inventory/{characterUuid}', [InventoryController::class, 'index']);
         Route::get('/storage/{characterUuid}', [StorageController::class, 'show']);
         Route::post('/storage/{characterUuid}/move', [StorageController::class, 'move']);
+        Route::post('/storage/{characterUuid}/clear-craft-station', [StorageController::class, 'clearCraftStation']);
+        Route::post('/storage/{characterUuid}/clear-disassemble-station', [StorageController::class, 'clearDisassembleStation']);
+        Route::post('/storage/{characterUuid}/clear-quest', [StorageController::class, 'clearQuest']);
+        Route::post('/storage/{characterUuid}/drop-to-world', [StorageController::class, 'dropToWorld']);
 
         Route::get('/crafting/{characterUuid}/recipes', [CraftingController::class, 'recipes']);
         Route::post('/crafting/{characterUuid}/craft-resource', [CraftingController::class, 'craftResource']);
         Route::post('/crafting/{characterUuid}/create-blueprint', [CraftingController::class, 'createBlueprint']);
         Route::post('/crafting/{characterUuid}/craft-item', [CraftingController::class, 'craftItem']);
         Route::post('/crafting/{characterUuid}/disassemble', [CraftingController::class, 'disassemble']);
+
+        Route::get('/quests/{characterUuid}', [QuestController::class, 'index']);
+        Route::get('/quests/{characterUuid}/{questSlug}', [QuestController::class, 'show']);
+        Route::post('/quests/{characterUuid}/accept', [QuestController::class, 'accept']);
+        Route::post('/quests/{characterUuid}/turn-in', [QuestController::class, 'turnIn']);
 
         Route::get('/auction/{characterUuid}/my-lots', [AuctionController::class, 'myLots']);
         Route::get('/auction/{characterUuid}/lot/{lotUuid}/buy-info', [AuctionController::class, 'buyInfo']);
@@ -53,6 +63,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/events/{characterUuid}/stream', [EventsStreamController::class, 'stream']);
         Route::get('/events/{characterUuid}/latest', [EventsController::class, 'latest']);
+
+        Route::get('/chat/{characterUuid}/messages', [ChatController::class, 'messages']);
+        Route::post('/chat/{characterUuid}/send', [ChatController::class, 'send']);
 
         Route::get('/play-panel/{characterUuid}', [PlayPanelController::class, 'show']);
 

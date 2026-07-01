@@ -11,6 +11,7 @@ use App\Services\InventoryService;
 use App\Services\StorageProvisioningService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\WorkbenchHelper;
 use Tests\TestCase;
 
 class CharacterStatsServiceTest extends TestCase
@@ -46,16 +47,7 @@ class CharacterStatsServiceTest extends TestCase
 
         $inventory->addResource($this->player, 'wood', 10);
 
-        $blueprint = app(\App\Services\CraftingService::class)->createBlueprint(
-            $this->player,
-            'craft_wooden_sword'
-        );
-
-        $item = app(\App\Services\CraftingService::class)->craftItem(
-            $this->player,
-            'craft_wooden_sword',
-            $blueprint->uuid
-        );
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->player);
 
         $equipment = $this->player->storages()->where('storage_type', 'equipment')->first();
         $weaponSlot = $equipment->slots()->where('slot_type', 'equipment_weapon')->first();
@@ -64,5 +56,26 @@ class CharacterStatsServiceTest extends TestCase
         $profile = $this->service->ensureFor($this->player);
 
         $this->assertGreaterThan(0, $profile['total']['damage'] ?? 0);
+    }
+
+    public function test_level_from_experience_uses_thresholds(): void
+    {
+        $this->assertSame(1, $this->service->levelFromExperience(0));
+        $this->assertSame(1, $this->service->levelFromExperience(9));
+        $this->assertSame(2, $this->service->levelFromExperience(10));
+        $this->assertSame(2, $this->service->levelFromExperience(49));
+        $this->assertSame(3, $this->service->levelFromExperience(50));
+        $this->assertSame(4, $this->service->levelFromExperience(150));
+    }
+
+    public function test_experience_progress_for_profile(): void
+    {
+        app(\App\Services\ExperienceService::class)->credit($this->player, 25, 'test', []);
+        $profile = $this->service->ensureFor($this->player);
+
+        $this->assertSame(2, $profile['level']);
+        $this->assertSame(25, $profile['experience']);
+        $this->assertSame(10, $profile['experience_progress']['level_min']);
+        $this->assertSame(50, $profile['experience_progress']['level_max']);
     }
 }

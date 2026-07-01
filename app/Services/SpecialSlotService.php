@@ -79,6 +79,81 @@ class SpecialSlotService
         return $storage->slots()->where('slot_type', 'gold')->first();
     }
 
+    public function getExperienceSlot(Storage $storage): ?Slot
+    {
+        return $storage->slots()->where('slot_type', 'experience')->first();
+    }
+
+    public function getExperienceQuantity(Character $character, string $storageType = 'inventory'): int
+    {
+        $storage = $character->storages()->where('storage_type', $storageType)->first();
+        if (!$storage) {
+            return 0;
+        }
+
+        $xpSlot = $this->getExperienceSlot($storage);
+        if (!$xpSlot) {
+            return $this->sumResourceInStorage($storage, 'experience');
+        }
+
+        return (int) Resources::where('slot_uuid', $xpSlot->uuid)
+            ->where('template_slug', 'experience')
+            ->whereNull('temporary_slot_uuid')
+            ->sum('quantity');
+    }
+
+    public function relocateExperienceToSpecialSlot(Character $character, string $storageType = 'inventory'): void
+    {
+        $this->relocateResourceToSpecialSlot($character, 'experience', $storageType);
+    }
+
+    private function relocateResourceToSpecialSlot(Character $character, string $templateSlug, string $storageType = 'inventory'): void
+    {
+        $storage = $character->storages()->where('storage_type', $storageType)->first();
+        if (!$storage) {
+            return;
+        }
+
+        $specialSlot = $storage->slots()->where('slot_type', $templateSlug)->first();
+        if (!$specialSlot) {
+            return;
+        }
+
+        $gridUuids = $this->getGridSlots($storage)->pluck('uuid');
+        $gridRows = Resources::whereIn('slot_uuid', $gridUuids)
+            ->where('template_slug', $templateSlug)
+            ->whereNull('temporary_slot_uuid')
+            ->get();
+
+        if ($gridRows->isEmpty()) {
+            return;
+        }
+
+        $extra = (int) $gridRows->sum('quantity');
+        foreach ($gridRows as $row) {
+            $row->delete();
+        }
+
+        $keeper = Resources::where('slot_uuid', $specialSlot->uuid)
+            ->where('template_slug', $templateSlug)
+            ->whereNull('temporary_slot_uuid')
+            ->first();
+
+        if ($keeper) {
+            $keeper->update(['quantity' => $keeper->quantity + $extra]);
+        } elseif ($extra > 0) {
+            Resources::create([
+                'uuid' => Str::uuid()->toString(),
+                'slot_uuid' => $specialSlot->uuid,
+                'recipe_slug' => $templateSlug,
+                'template_slug' => $templateSlug,
+                'slot_type' => $templateSlug,
+                'max_stack' => null,
+                'quantity' => $extra,
+            ]);
+        }
+    }
+
     public function getGoldQuantity(Character $character, string $storageType = 'inventory'): int
     {
         $storage = $character->storages()->where('storage_type', $storageType)->first();

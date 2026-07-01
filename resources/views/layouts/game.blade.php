@@ -214,12 +214,333 @@
         }
 
         #window-inventory .player-name { font-size: 16px; font-weight: 600; }
+        #window-inventory .player-bar { gap: 8px; flex-wrap: wrap; }
+        #window-inventory .player-resources { display: flex; gap: 10px; align-items: center; }
         #window-inventory .gold { font-size: 15px; color: #fbbf24; font-weight: 700; }
+        #window-inventory .experience { font-size: 15px; color: #a78bfa; font-weight: 700; }
 
-        #window-workbench {
-            width: 900px;
-            height: 650px;
+        #window-confirm {
+            width: 340px;
+            min-height: unset;
+            min-width: unset;
         }
+        #window-confirm .confirm-window-body {
+            padding: 16px 18px 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        #window-confirm .confirm-window-message {
+            margin: 0;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #ddd;
+        }
+        #window-confirm .confirm-window-message .confirm-item-link {
+            color: #93c5fd;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        #window-confirm .confirm-window-actions {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+        #window-confirm .confirm-window-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 8px;
+            border: 2px solid rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.06);
+            color: #fff;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        #window-confirm .confirm-window-btn--yes:hover {
+            background: rgba(16,185,129,0.25);
+            border-color: #10b981;
+        }
+        #window-confirm .confirm-window-btn--no:hover {
+            background: rgba(239,68,68,0.25);
+            border-color: #ef4444;
+        }
+
+        .quest-list-item--ready {
+            border-color: #10b981 !important;
+            background: rgba(16,185,129,0.08);
+        }
+        .quest-list-item--ready::after {
+            content: 'Готов к сдаче';
+            display: block;
+            font-size: 10px;
+            color: #34d399;
+            margin-top: 4px;
+        }
+
+        #window-craft, #window-disassemble {
+            width: 720px;
+            height: auto;
+            min-height: 480px;
+        }
+
+        #window-craft .window-body,
+        #window-disassemble .window-body {
+            padding: 16px;
+        }
+
+        .workbench-grid--disassemble {
+            grid-template-columns: 1fr 1.2fr 1fr;
+        }
+
+        #window-quests, #window-quest {
+            width: 360px;
+            max-height: 70vh;
+        }
+
+        #window-quests .window-body, #window-quest .window-body {
+            padding: 10px;
+            overflow-y: auto;
+        }
+
+        .quests-list { display: flex; flex-direction: column; gap: 6px; max-height: 400px; overflow-y: auto; }
+        .quest-list-item {
+            padding: 8px 10px;
+            border: 1px solid #333;
+            border-radius: 6px;
+            cursor: pointer;
+            background: rgba(0,0,0,0.25);
+        }
+        .quest-list-item:hover { border-color: #10b981; }
+        .quest-list-item strong { display: block; font-size: 13px; }
+        .quest-list-item span { font-size: 11px; color: #aaa; }
+
+        .quest-panel-desc { font-size: 12px; color: #bbb; margin: 6px 0 10px; }
+        .quest-objectives { margin-bottom: 10px; font-size: 12px; }
+        .quest-objective-row { padding: 4px 0; }
+        .quest-objective-row.is-done { color: #10b981; }
+        .quest-storage-section { margin-bottom: 10px; }
+        .quest-section-title { font-size: 11px; color: #888; margin-bottom: 4px; text-transform: uppercase; }
+        .quest-grant-grid, .quest-turnin-grid { grid-template-columns: repeat(6, var(--slot-size, 44px)); gap: 4px; }
+        .quest-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+        .item-icon .quest-badge {
+            position: absolute; top: -2px; right: -2px; font-size: 10px; line-height: 1;
+        }
+        .item-icon { position: relative; }
+
+        .workbench-panel { width: 100%; margin: 0 auto; }
+        .workbench-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr);
+            gap: 14px;
+            align-items: stretch;
+            margin-bottom: 12px;
+            min-height: 260px;
+        }
+        .workbench-col {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .workbench-col--center {
+            align-items: center;
+            justify-content: flex-start;
+            gap: 16px;
+            padding-top: 24px;
+        }
+        .workbench-col--stats,
+        .workbench-col--materials {
+            background: rgba(0,0,0,0.15);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            padding: 10px;
+        }
+        .workbench-section-title {
+            font-size: 11px;
+            color: #aaa;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            letter-spacing: 0.04em;
+            flex-shrink: 0;
+        }
+        .workbench-materials-grid {
+            display: grid;
+            grid-template-columns: repeat(4, var(--slot-size, 44px));
+            gap: 8px;
+            justify-content: center;
+        }
+        .workbench-ingredient-cell { text-align: center; }
+        .workbench-storage-slot {
+            width: var(--slot-size, 44px);
+            height: var(--slot-size, 44px);
+            margin: 0 auto;
+            position: relative;
+        }
+        .workbench-center-slot-wrap,
+        .workbench-result-slot-wrap {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+        }
+        .workbench-center-slot-wrap .workbench-storage-slot {
+            width: calc(var(--slot-size, 44px) * 1.35);
+            height: calc(var(--slot-size, 44px) * 1.35);
+        }
+        .workbench-result-preview {
+            width: calc(var(--slot-size, 44px) * 1.35);
+            height: calc(var(--slot-size, 44px) * 1.35);
+            margin: 0 auto;
+            opacity: 0.85;
+        }
+        .workbench-formula-qty {
+            font-size: 10px;
+            margin-top: 4px;
+            font-weight: 700;
+        }
+        .workbench-formula-qty.is-enough { color: #10b981; }
+        .workbench-formula-qty.is-short { color: #ef4444; }
+        .workbench-formula-qty.is-return { color: #a5b4fc; }
+        .workbench-placeholder {
+            font-size: 24px;
+            color: #666;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+        }
+        .workbench-slot-caption {
+            margin-top: 4px;
+            font-size: 9px;
+            color: #888;
+            text-align: center;
+        }
+        .workbench-stats-body {
+            flex: 1;
+            font-size: 12px;
+            overflow-y: auto;
+            min-height: 120px;
+        }
+        .workbench-stats-empty {
+            color: #666;
+            font-style: italic;
+            padding: 8px 0;
+        }
+        .workbench-stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            color: #ccc;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .workbench-stat-row strong { color: #10b981; }
+        .workbench-label { display: block; font-size: 12px; color: #aaa; margin-bottom: 6px; }
+        .workbench-input {
+            width: 100%;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(0,0,0,0.3);
+            color: #fff;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        .workbench-btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            text-transform: uppercase;
+            margin-top: 8px;
+        }
+        .workbench-btn--craft { background: linear-gradient(135deg,#10b981,#059669); color: #fff; }
+        .workbench-btn--disassemble { background: linear-gradient(135deg,#ef4444,#dc2626); color: #fff; }
+        .workbench-craft-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 12px;
+            margin: 12px 0;
+        }
+        .workbench-craft-name { flex: 1; min-width: 0; }
+        .workbench-craft-row .workbench-btn { flex-shrink: 0; margin-bottom: 0; }
+        .workbench-btn-icon {
+            width: 40px;
+            height: 40px;
+            flex-shrink: 0;
+            border: none;
+            border-radius: 8px;
+            font-size: 20px;
+            line-height: 1;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+        .workbench-btn-icon--craft {
+            background: linear-gradient(135deg,#10b981,#059669);
+            color: #fff;
+        }
+        .workbench-btn-icon--craft:hover { filter: brightness(1.08); }
+        .workbench-empty-hint {
+            text-align: center;
+            font-size: 12px;
+            color: #888;
+            font-style: italic;
+            padding: 12px 0;
+        }
+        .workbench-empty-formula { font-size: 12px; color: #888; }
+
+        .chat-compose {
+            display: flex;
+            gap: 8px;
+            padding: 8px 12px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            background: rgba(0,0,0,0.15);
+            flex-shrink: 0;
+        }
+        .chat-compose input {
+            flex: 1;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background: rgba(0,0,0,0.3);
+            color: #fff;
+            font-size: 13px;
+        }
+        .chat-compose button {
+            padding: 8px 14px;
+            border: none;
+            border-radius: 6px;
+            background: linear-gradient(135deg,#667eea,#764ba2);
+            color: #fff;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .chat-message {
+            font-size: 12px;
+            line-height: 1.45;
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .chat-message-author { color: #a5b4fc; font-weight: 600; }
+        .chat-message-time { color: #666; font-size: 10px; margin-right: 6px; }
+
+        #window-journal .window-body {
+            display: flex;
+            flex-direction: column;
+            padding: 0;
+            overflow: hidden;
+        }
+        #window-journal .game-tabs { flex-shrink: 0; }
 
         #window-auction {
             width: 900px;
@@ -264,6 +585,19 @@
         }
 
         .chat-panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 12px;
+            min-height: 0;
+        }
+
+        #chatGeneral {
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            padding: 0;
+        }
+        #generalChatList {
             flex: 1;
             overflow-y: auto;
             padding: 10px 12px;
@@ -745,17 +1079,21 @@
         </div>
         <div class="window-body">
             <div id="chatTabs" class="game-tabs">
-                <button type="button" class="game-tab" data-tab="general" onclick="ChatPanel.switchTab('general')">Общий</button>
+                <button type="button" class="game-tab active" data-tab="general" onclick="ChatPanel.switchTab('general')">Общий</button>
                 <button type="button" class="game-tab" data-tab="guild" onclick="ChatPanel.switchTab('guild')">Гильдия</button>
-                <button type="button" class="game-tab active" data-tab="journal" onclick="ChatPanel.switchTab('journal')">Журнал</button>
+                <button type="button" class="game-tab" data-tab="journal" onclick="ChatPanel.switchTab('journal')">Журнал</button>
             </div>
-            <div id="chatGeneral" class="chat-panel-content" style="display:none">
-                <div class="chat-placeholder">Общий чат — скоро</div>
+            <div id="chatGeneral" class="chat-panel-content">
+                <div id="generalChatList"></div>
+                <div id="chatComposeGeneral" class="chat-compose">
+                    <input type="text" id="generalChatInput" maxlength="500" placeholder="Сообщение..." autocomplete="off">
+                    <button type="button" id="generalChatSend">Отправить</button>
+                </div>
             </div>
             <div id="chatGuild" class="chat-panel-content" style="display:none">
                 <div class="chat-placeholder">Чат гильдии — скоро</div>
             </div>
-            <div id="chatJournal" class="chat-panel-content">
+            <div id="chatJournal" class="chat-panel-content" style="display:none">
                 <div id="eventsList">
                     <div class="chat-placeholder">Загрузка...</div>
                 </div>
@@ -775,7 +1113,10 @@
         </div>
         <div class="player-bar">
             <div class="player-name" id="playerName">Загрузка...</div>
-            <div class="gold" id="playerGold">💰 0</div>
+            <div class="player-resources">
+                <div class="gold" id="playerGold">💰 0</div>
+                <div class="experience" id="playerExperience">⭐ 0</div>
+            </div>
         </div>
         <div class="window-body">
             <div id="inventoryContent" class="items"></div>
@@ -797,18 +1138,63 @@
         </div>
     </div>
 
-    <div class="window" id="window-workbench" data-window="workbench">
+    <div class="window" id="window-craft" data-window="craft">
         <div class="window-header">
             <div class="window-title">
                 <span class="icon">🔨</span>
-                <span>Верстак</span>
+                <span>Создание предмета</span>
             </div>
             <div class="window-controls">
-                <div class="window-btn" onclick="WindowManager.close('workbench')">✕</div>
+                <div class="window-btn" onclick="WindowManager.close('craft')">✕</div>
             </div>
         </div>
         <div class="window-body">
-            @include('partials.workbench')
+            @include('partials.craft-station')
+        </div>
+    </div>
+
+    <div class="window" id="window-disassemble" data-window="disassemble">
+        <div class="window-header">
+            <div class="window-title">
+                <span class="icon">🧩</span>
+                <span>Разбор предмета</span>
+            </div>
+            <div class="window-controls">
+                <div class="window-btn" onclick="WindowManager.close('disassemble')">✕</div>
+            </div>
+        </div>
+        <div class="window-body">
+            @include('partials.disassemble-station')
+        </div>
+    </div>
+
+    <div class="window" id="window-quests" data-window="quests">
+        <div class="window-header">
+            <div class="window-title">
+                <span class="icon">📜</span>
+                <span>Квесты</span>
+            </div>
+            <div class="window-controls">
+                <div class="window-btn" onclick="WindowManager.close('quests')">✕</div>
+            </div>
+        </div>
+        <div class="window-body">
+            @include('partials.quests')
+        </div>
+    </div>
+
+    <div class="window" id="window-quest" data-window="quest">
+        <div class="window-header">
+            <div class="window-title">
+                <span class="icon">❗</span>
+                <span id="questWindowTitle">Квест</span>
+            </div>
+            <div class="window-controls">
+                <div class="window-btn" onclick="WindowManager.close('quest')">✕</div>
+            </div>
+        </div>
+        <div class="window-body">
+            @include('partials.quest')
         </div>
     </div>
 
@@ -884,6 +1270,8 @@
         </div>
         <div class="window-body" id="itemPreviewBody"></div>
     </div>
+
+    @include('partials.confirm-action-modal')
 </div>
 
 <div id="playPanel" class="play-panel"></div>
@@ -895,15 +1283,14 @@
 </div>
 
 <div id="inventoryContextMenu" class="inventory-context-menu">
-    <button type="button" data-action="craft" style="display:none">Создать</button>
-    <button type="button" data-action="disassemble" style="display:none">Разобрать</button>
-    <button type="button" data-action="transform" style="display:none">Преобразовать</button>
+    <div id="inventoryContextMenuFormulaActions"></div>
+    <button type="button" data-action="drop" style="display:none">Выбросить</button>
 </div>
 
 <div id="msg" class="msg"></div>
 <div id="itemTooltip" class="tooltip"></div>
 @include('partials.resource-quantity-modal')
-<script src="{{ asset('js/game/game.bundle.js') }}?v=20260630"></script>
+<script src="{{ asset('js/game/game.bundle.js') }}?v=20260630j"></script>
 
 <script>
     window.GameApi = {
@@ -1016,11 +1403,15 @@
             journal:    { x: 20,  y: 20 },
             inventory:  { x: null, y: 20, right: 20 },
             character:  { center: true, verticalCenter: true },
-            workbench:  { center: true, verticalCenter: true },
+            craft:      { center: true, verticalCenter: true },
+            disassemble: { center: true, verticalCenter: true },
+            quests:     { x: 20, y: 120 },
+            quest:      { center: true, verticalCenter: true },
             auction:    { center: true, verticalCenter: true },
             players:    { center: true, verticalCenter: true },
             trade:      { center: true, verticalCenter: true },
             'item-preview': { center: true, verticalCenter: true },
+            confirm: { center: true, verticalCenter: true },
             settings:   { x: null, y: null, right: 20, bottom: 80 },
         },
 
@@ -1164,7 +1555,7 @@
             const win = this.windows[name];
             if (!win) return;
 
-            const keepOpen = ['journal', 'inventory', 'settings', 'item-preview'];
+            const keepOpen = ['journal', 'inventory', 'settings', 'item-preview', 'quests', 'confirm'];
             if (!keepOpen.includes(name)) {
                 Object.keys(this.windows).forEach(n => {
                     if (!keepOpen.includes(n) && n !== name) {
@@ -1188,8 +1579,21 @@
             if (name === 'auction' && typeof window.initAuction === 'function') {
                 setTimeout(() => window.initAuction(), 50);
             }
-            if (name === 'workbench' && typeof window.initWorkbench === 'function') {
-                setTimeout(() => window.initWorkbench(), 50);
+            if (name === 'craft' && typeof window.initCraftStation === 'function') {
+                setTimeout(function () {
+                    window.initCraftStation();
+                    if (typeof window.loadCraftPanel === 'function') {
+                        window.loadCraftPanel();
+                    }
+                }, 50);
+            }
+            if (name === 'disassemble' && typeof window.initDisassembleStation === 'function') {
+                setTimeout(function () {
+                    window.initDisassembleStation();
+                    if (typeof window.loadDisassemblePanel === 'function') {
+                        window.loadDisassemblePanel();
+                    }
+                }, 50);
             }
             if (name === 'players' && typeof window.initPlayers === 'function') {
                 setTimeout(() => window.initPlayers(), 50);
@@ -1203,11 +1607,67 @@
             if (name === 'settings' && typeof window.initSettings === 'function') {
                 setTimeout(() => window.initSettings(), 50);
             }
+            if (name === 'quests' && window.QuestLog) {
+                setTimeout(() => QuestLog.refresh(), 50);
+            }
+            if (name === 'quest' && window.QuestWindow && QuestWindow.current) {
+                setTimeout(() => QuestWindow.render(), 50);
+            }
         },
 
         close(name) {
             const win = this.windows[name];
             if (!win) return;
+
+            if (name === 'quest' && window.GameState && window.GameApi) {
+                GameApi.fetch('/api/storage/' + GameState.characterUuid + '/clear-quest', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                }).then(function (res) { return res.json(); }).then(function (data) {
+                    if (data.layout && window.StorageManager) {
+                        StorageManager.layout = data.layout;
+                        StorageManager.questStorage = data.layout.quest_storage || null;
+                        StorageManager.inventoryStorage = (data.layout.storages || []).find(function (s) {
+                            return s.storage_type === 'inventory';
+                        }) || StorageManager.inventoryStorage;
+                        StorageManager.syncGameStateInventory();
+                    }
+                    if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
+                    if (window.QuestWindow) QuestWindow.current = null;
+                }).catch(function (e) {
+                    console.error('clear-quest error:', e);
+                });
+            }
+
+            if (name === 'craft' && window.GameState && window.GameApi) {
+                GameApi.fetch('/api/storage/' + GameState.characterUuid + '/clear-craft-station', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                }).then(function (res) { return res.json(); }).then(function (data) {
+                    if (data.layout && window.StorageManager) {
+                        StorageManager.applyLayout(data.layout);
+                    }
+                    if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
+                    if (typeof loadPlayerData === 'function') loadPlayerData();
+                }).catch(function (e) {
+                    console.error('clear-craft-station error:', e);
+                });
+            }
+
+            if (name === 'disassemble' && window.GameState && window.GameApi) {
+                GameApi.fetch('/api/storage/' + GameState.characterUuid + '/clear-disassemble-station', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                }).then(function (res) { return res.json(); }).then(function (data) {
+                    if (data.layout && window.StorageManager) {
+                        StorageManager.applyLayout(data.layout);
+                    }
+                    if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
+                    if (typeof loadPlayerData === 'function') loadPlayerData();
+                }).catch(function (e) {
+                    console.error('clear-disassemble-station error:', e);
+                });
+            }
 
             win.classList.remove('active');
             win.classList.remove('focused');
@@ -1375,7 +1835,7 @@
     async function loadPlayerData() {
         try {
             if (window.StorageManager) {
-                const data = await StorageManager.load(GameState.characterUuid, 'inventory,equipment,stats');
+                const data = await StorageManager.load(GameState.characterUuid, 'inventory,equipment,craft,disassemble,stats');
                 document.getElementById('playerName').textContent = data.character_name || 'Игрок';
                 const gold = data.gold != null ? data.gold : StorageManager.getGold();
                 if (window.GoldChip && StorageManager.inventoryStorage) {
@@ -1384,10 +1844,24 @@
                 } else {
                     document.getElementById('playerGold').textContent = '💰 ' + gold;
                 }
+                const xp = data.experience != null ? data.experience : 0;
+                if (window.ExperienceChip && StorageManager.inventoryStorage) {
+                    const xpEl = document.getElementById('playerExperience');
+                    if (xpEl) ExperienceChip.mount(xpEl, StorageManager.inventoryStorage, xp);
+                } else {
+                    const xpEl = document.getElementById('playerExperience');
+                    if (xpEl) xpEl.textContent = '⭐ ' + xp;
+                }
                 renderInventory();
                 resizeInventoryWindow();
                 if (WindowManager.isOpen('character') && typeof window.renderCharacterPanel === 'function') {
                     renderCharacterPanel();
+                }
+                if (WindowManager.isOpen('craft') && typeof window.renderCraftPanel === 'function') {
+                    renderCraftPanel();
+                }
+                if (WindowManager.isOpen('disassemble') && typeof window.renderDisassemblePanel === 'function') {
+                    renderDisassemblePanel();
                 }
                 return;
             }
@@ -1435,6 +1909,12 @@
         }
         if (window.StorageManager && StorageManager.equipmentStorage && typeof window.renderCharacterPanel === 'function') {
             renderCharacterPanel();
+        }
+        if (typeof window.renderCraftPanel === 'function' && WindowManager.isOpen('craft')) {
+            renderCraftPanel();
+        }
+        if (typeof window.renderDisassemblePanel === 'function' && WindowManager.isOpen('disassemble')) {
+            renderDisassemblePanel();
         }
         if (typeof window.refreshTradeData === 'function' && window.tradeState?.currentTrade) {
             window.refreshTradeData().then(function() {
@@ -1557,10 +2037,13 @@
     //                     CHAT PANEL (journal tab = personal public events)
     // ================================================================
     window.ChatPanel = {
-        activeTab: 'journal',
+        activeTab: 'general',
         maxEntries: 20,
         lastEventId: 0,
         seenIds: new Set(),
+        generalSeenIds: new Set(),
+        generalLastId: 0,
+        generalPollTimer: null,
         publicTypes: [
             'user.registered',
             'auction.listed',
@@ -1580,6 +2063,15 @@
                     this.addEvent(e, true);
                 });
             });
+
+            const sendBtn = document.getElementById('generalChatSend');
+            const input = document.getElementById('generalChatInput');
+            if (sendBtn) sendBtn.addEventListener('click', () => this.sendGeneralMessage());
+            if (input) {
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') this.sendGeneralMessage();
+                });
+            }
         },
 
         itemLink(payload, slugKey, nameKey, quantityKey) {
@@ -1606,9 +2098,134 @@
             document.querySelectorAll('#chatTabs .game-tab').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.tab === tab);
             });
-            document.getElementById('chatGeneral').style.display = tab === 'general' ? 'block' : 'none';
+            document.getElementById('chatGeneral').style.display = tab === 'general' ? 'flex' : 'none';
             document.getElementById('chatGuild').style.display = tab === 'guild' ? 'block' : 'none';
             document.getElementById('chatJournal').style.display = tab === 'journal' ? 'block' : 'none';
+            this.stopGeneralPoll();
+            if (tab === 'general') {
+                this.loadGeneralChat(false);
+                this.startGeneralPoll();
+            }
+        },
+
+        async loadGeneralChat(pollOnly = false) {
+            try {
+                const characterUuid = GameState.characterUuid || window.characterUuid;
+                const afterParam = pollOnly && this.generalLastId ? `&after_id=${this.generalLastId}` : '';
+                const res = await GameApi.fetch(
+                    `/api/chat/${characterUuid}/messages?channel=general&limit=50${afterParam}`
+                );
+                const data = await res.json();
+                const list = document.getElementById('generalChatList');
+                if (!list) return;
+
+                if (!pollOnly) {
+                    list.innerHTML = '';
+                    this.generalSeenIds.clear();
+                    this.generalLastId = 0;
+                }
+
+                const messages = data.messages || [];
+                if (!pollOnly && messages.length === 0) {
+                    list.innerHTML = '<div class="chat-placeholder">Пока нет сообщений</div>';
+                    return;
+                }
+
+                messages.forEach(m => this.appendGeneralMessage(m, pollOnly));
+            } catch (e) {
+                console.error('General chat load error:', e);
+            }
+        },
+
+        appendGeneralMessage(message, isNew) {
+            if (!message || message.id == null) return;
+            if (this.generalSeenIds.has(message.id)) return;
+            this.generalSeenIds.add(message.id);
+            if (message.id > this.generalLastId) this.generalLastId = message.id;
+
+            const list = document.getElementById('generalChatList');
+            if (!list) return;
+            const placeholder = list.querySelector('.chat-placeholder');
+            if (placeholder) placeholder.remove();
+
+            const el = document.createElement('div');
+            el.className = 'chat-message';
+            el.dataset.messageId = String(message.id);
+            el.innerHTML = `<span class="chat-message-time">${message.created_at || ''}</span>` +
+                `<span class="chat-message-author">${message.character_name || 'Игрок'}:</span> ` +
+                this.escapeHtml(message.body || '');
+            list.appendChild(el);
+            if (isNew) list.scrollTop = list.scrollHeight;
+
+            while (list.children.length > 50) {
+                const removed = list.firstChild;
+                if (removed && removed.dataset && removed.dataset.messageId) {
+                    this.generalSeenIds.delete(Number(removed.dataset.messageId));
+                }
+                list.removeChild(removed);
+            }
+        },
+
+        escapeHtml(text) {
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        },
+
+        async announceConnection() {
+            try {
+                const characterUuid = GameState.characterUuid || window.characterUuid;
+                const res = await GameApi.fetch(`/api/chat/${characterUuid}/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ channel: 'general', message: 'онлайн' }),
+                });
+                const data = await res.json();
+                if (data.message) this.appendGeneralMessage(data.message, true);
+            } catch (e) {
+                console.error('Chat connection announce error:', e);
+            }
+        },
+
+        async sendGeneralMessage() {
+            const input = document.getElementById('generalChatInput');
+            if (!input) return;
+            const text = input.value.trim();
+            if (!text) return;
+
+            try {
+                const characterUuid = GameState.characterUuid || window.characterUuid;
+                const res = await GameApi.fetch(`/api/chat/${characterUuid}/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ channel: 'general', message: text }),
+                });
+                const data = await res.json();
+                if (data.error) {
+                    showMsg(data.error, 'error');
+                    return;
+                }
+                input.value = '';
+                if (data.message) this.appendGeneralMessage(data.message, true);
+            } catch (e) {
+                showMsg('Ошибка отправки: ' + e.message, 'error');
+            }
+        },
+
+        startGeneralPoll() {
+            this.stopGeneralPoll();
+            this.generalPollTimer = setInterval(() => {
+                if (this.activeTab === 'general') this.loadGeneralChat(true);
+            }, 3000);
+        },
+
+        stopGeneralPoll() {
+            if (this.generalPollTimer) {
+                clearInterval(this.generalPollTimer);
+                this.generalPollTimer = null;
+            }
         },
 
         async loadInitial() {
@@ -1798,15 +2415,6 @@
         menu.classList.add('visible');
     };
 
-    window.findResourceCraftRecipe = function(item) {
-        if (!item || !item.template_slug) return null;
-        return (GameState.recipes || []).find(r =>
-            r.type === 'resource' &&
-            r.craft_formula &&
-            Object.prototype.hasOwnProperty.call(r.craft_formula, item.template_slug)
-        ) || null;
-    };
-
     window.readInventoryItemFromElement = function(itemEl) {
         if (window.readItemDescriptorFromElement) {
             return window.readItemDescriptorFromElement(itemEl);
@@ -1825,25 +2433,42 @@
         };
     };
 
-    window.showInventoryContextMenu = function(event, item) {
+    window.showInventoryContextMenu = function(event, item, sourceSlotUuid) {
         if (window.GameItemTooltip) GameItemTooltip.hide();
         const menu = document.getElementById('inventoryContextMenu');
         if (!menu || !item) return;
 
         menu.dataset.itemJson = JSON.stringify(item);
-        const craftBtn = menu.querySelector('[data-action="craft"]');
-        const disBtn = menu.querySelector('[data-action="disassemble"]');
-        const transformBtn = menu.querySelector('[data-action="transform"]');
+        menu.dataset.sourceSlotUuid = sourceSlotUuid || item.slot_uuid || '';
+        const formulaActionsEl = document.getElementById('inventoryContextMenuFormulaActions');
+        const dropBtn = menu.querySelector('[data-action="drop"]');
 
-        const isBlueprint = item.stage === 'blueprint';
-        const isItem = item.stage === 'item';
-        const resourceRecipe = findResourceCraftRecipe(item);
+        const craftActions = window.getCraftActions ? getCraftActions(item) : [];
+        const disassembleActions = window.getDisassembleActions ? getDisassembleActions(item) : [];
+        const isQuestItem = item.stage === 'quest_item' || Boolean(item.quest_slug);
+        const canDrop = Boolean(item.uuid) && !item.locked
+            && (item.stage === 'item' || item.stage === 'blueprint' || isQuestItem);
 
-        craftBtn.style.display = isBlueprint ? 'block' : 'none';
-        disBtn.style.display = isItem ? 'block' : 'none';
-        transformBtn.style.display = resourceRecipe ? 'block' : 'none';
+        if (formulaActionsEl) {
+            const buttons = [];
+            craftActions.forEach(function (action) {
+                buttons.push(
+                    '<button type="button" data-action="craft" data-recipe-slug="' + action.recipe_slug + '" data-mode="' + action.mode + '">' +
+                    action.label + '</button>'
+                );
+            });
+            disassembleActions.forEach(function (action) {
+                buttons.push(
+                    '<button type="button" data-action="disassemble" data-recipe-slug="' + action.recipe_slug + '" data-mode="' + action.mode + '">' +
+                    action.label + '</button>'
+                );
+            });
+            formulaActionsEl.innerHTML = buttons.join('');
+        }
 
-        if (!isBlueprint && !isItem && !resourceRecipe) return;
+        if (dropBtn) dropBtn.style.display = canDrop ? 'block' : 'none';
+
+        if (!craftActions.length && !disassembleActions.length && !canDrop) return;
 
         menu.style.left = event.clientX + 'px';
         menu.style.top = event.clientY + 'px';
@@ -1865,12 +2490,15 @@
 
         if (!item) return;
 
-        WindowManager.open('workbench');
-        setTimeout(() => {
-            if (typeof handleWorkbenchDrop === 'function') {
-                handleWorkbenchDrop(item);
-            }
-        }, 100);
+        const sourceSlotUuid = menu?.dataset.sourceSlotUuid || item.slot_uuid || '';
+
+        if (window.ItemDispatcher) {
+            ItemDispatcher.handleContextAction(action, item, sourceSlotUuid, {
+                recipeSlug: btn.dataset.recipeSlug || null,
+                mode: btn.dataset.mode || null,
+            });
+            return;
+        }
     });
 
     document.addEventListener('click', () => {
@@ -1934,7 +2562,9 @@
         }
         EventPoller.characterUuid = characterUuid;
         ChatPanel.init();
+        ChatPanel.switchTab('general');
         await ChatPanel.loadInitial();
+        await ChatPanel.announceConnection();
         EventPoller.start(characterUuid);
         UIUpdater.init();
 
@@ -1951,8 +2581,9 @@
             const itemEl = e.target.closest('.game-item-interactive');
             if (!itemEl) return;
             e.preventDefault();
+            const slotEl = itemEl.closest('.storage-slot[data-slot-uuid]');
             const fullItem = readInventoryItemFromElement(itemEl);
-            showInventoryContextMenu(e, fullItem);
+            showInventoryContextMenu(e, fullItem, slotEl ? slotEl.dataset.slotUuid : '');
         });
 
         document.addEventListener('contextmenu', (e) => {
@@ -1966,25 +2597,11 @@
             if (!itemEl) return;
 
             const fullItem = readInventoryItemFromElement(itemEl);
-            if (fullItem.locked) {
-                if (typeof showMsg === 'function') showMsg('Предмет занят', 'info');
-                return;
-            }
-            if (!fullItem.uuid && fullItem.stage !== 'blueprint' && fullItem.stage !== 'item' && !fullItem.template_slug) return;
+            const slotEl = itemEl.closest('.storage-slot[data-slot-uuid]');
+            const fromSlotUuid = slotEl ? slotEl.dataset.slotUuid : (fullItem.slot_uuid || '');
 
-            const isResource = fullItem.template_slug && !fullItem.recipe_slug
-                && fullItem.stage !== 'blueprint' && fullItem.stage !== 'item';
-
-            if (WindowManager.isOpen('auction') && typeof handleAuctionDrop === 'function') {
-                handleAuctionDrop(fullItem);
-            } else if (WindowManager.isOpen('trade') && typeof handleTradeDrop === 'function') {
-                handleTradeDrop(fullItem, { fullStack: isResource });
-            } else if (WindowManager.isOpen('workbench') && typeof handleWorkbenchDrop === 'function') {
-                handleWorkbenchDrop(fullItem);
-            } else if (window.StorageQuickActions && StorageQuickActions.isEquippable(fullItem)) {
-                const slotEl = itemEl.closest('.storage-slot[data-slot-uuid]');
-                const fromSlotUuid = slotEl ? slotEl.dataset.slotUuid : '';
-                StorageQuickActions.equipItem(fullItem, fromSlotUuid);
+            if (window.ItemDispatcher) {
+                ItemDispatcher.handleInventoryDblclick(fullItem, fromSlotUuid);
             }
         });
     });

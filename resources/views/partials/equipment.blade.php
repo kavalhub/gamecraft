@@ -72,6 +72,9 @@ window.renderCharacterPanel = function() {
             const itemEl = e.target.closest('.game-item-interactive');
             const slotEl = e.target.closest('.storage-slot[data-slot-uuid]');
             if (!itemEl || !slotEl || !window.StorageQuickActions) return;
+            if (itemEl._itemClickTimer) clearTimeout(itemEl._itemClickTimer);
+            if (window.GameItemTooltip) GameItemTooltip.hide();
+            if (window.GameItemPreview) GameItemPreview.close();
             const item = window.readInventoryItemFromElement
                 ? window.readInventoryItemFromElement(itemEl)
                 : null;
@@ -95,8 +98,14 @@ window.renderCharacterPanel = function() {
 function renderCharacterStats(container, profile) {
     if (!container || !profile) return;
     const total = profile.total || {};
+    const prog = profile.experience_progress || {};
+    let xpLabel = String(profile.experience || 0);
+    if (prog.level_max != null) {
+        xpLabel = (profile.experience || 0) + ' / ' + prog.level_max;
+    }
     const rows = [
         ['Уровень', profile.level || 1],
+        ['Опыт', xpLabel],
         ['Сила', total.strength || 0],
         ['Ловкость', total.agility || 0],
         ['Интеллект', total.intellect || 0],

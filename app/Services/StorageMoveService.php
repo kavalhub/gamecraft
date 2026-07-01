@@ -22,7 +22,12 @@ class StorageMoveService
         private EventStore $eventStore,
         private StorageProvisioningService $provisioningService,
         private ResourceStackingService $stackingService,
-        private SpecialSlotService $specialSlotService
+        private SpecialSlotService $specialSlotService,
+        private CraftStationService $craftStationService,
+        private DisassembleStationService $disassembleStationService,
+        private QuestStorageService $questStorageService,
+        private WorldStorageService $worldStorageService,
+        private CraftingActionResolver $craftingActionResolver,
     ) {}
 
     public function move(
@@ -47,10 +52,10 @@ class StorageMoveService
                 /** @var Slot $fromSlot */
                 $fromSlot = $from['cell'];
                 if (Item::where('slot_uuid', $fromSlot->uuid)->whereNotNull('temporary_slot_uuid')->exists()) {
-                    throw new \RuntimeException('Предмет занят (обмен или аукцион)');
+                    throw new \RuntimeException('Предмет занят');
                 }
                 if (Resources::where('slot_uuid', $fromSlot->uuid)->whereNotNull('temporary_slot_uuid')->exists()) {
-                    throw new \RuntimeException('Ресурс занят (обмен)');
+                    throw new \RuntimeException('Ресурс занят');
                 }
             }
 
@@ -58,6 +63,8 @@ class StorageMoveService
             if (!$occupant) {
                 throw new \RuntimeException('Исходный слот пуст');
             }
+
+            $this->assertQuestItemMoveAllowed($from, $to, $occupant);
 
             if ($from['kind'] === 'regular' && $to['kind'] === 'regular') {
                 return $this->moveRegularToRegular($actor, $from['cell'], $to['cell'], $occupant, $quantity);
@@ -121,6 +128,49 @@ class StorageMoveService
         }
     }
 
+    private function assertQuestItemMoveAllowed(array $from, array $to, Item|Resources $occupant): void
+    {
+        if (!$occupant instanceof Item) {
+            return;
+        }
+
+        if (!$this->worldStorageService->isQuestItem($occupant)) {
+            return;
+        }
+
+        if ($to['kind'] === 'temporary') {
+            throw new \RuntimeException('Квестовый предмет можно перемещать только в инвентаре');
+        }
+
+        if ($from['kind'] !== 'regular' || $to['kind'] !== 'regular') {
+            throw new \RuntimeException('Квестовый предмет можно перемещать только в инвентаре');
+        }
+
+        /** @var Slot $fromSlot */
+        $fromSlot = $from['cell'];
+        /** @var Slot $toSlot */
+        $toSlot = $to['cell'];
+
+        $fromStorage = Storage::where('uuid', $fromSlot->storage_uuid)->firstOrFail();
+        $toStorage = Storage::where('uuid', $toSlot->storage_uuid)->firstOrFail();
+
+        if ($fromStorage->storage_type !== 'inventory' || $toStorage->storage_type !== 'inventory') {
+            throw new \RuntimeException('Квестовый предмет можно перемещать только в инвентаре');
+        }
+    }
+
+    private function isEquipmentSlot(Slot $slot): bool
+    {
+        return $slot->slot_type !== null
+            && str_starts_with($slot->slot_type, 'equipment_');
+    }
+
+    private function isStationSlot(Slot $slot): bool
+    {
+        return $slot->slot_type !== null
+            && (str_starts_with($slot->slot_type, 'craft_') || str_starts_with($slot->slot_type, 'disassemble_'));
+    }
+
     private function assertItemFitsSlot(Item $item, Slot $slot): void
     {
         if ($slot->slot_type === null) {
@@ -131,11 +181,38 @@ class StorageMoveService
             throw new \RuntimeException('В золотой слот можно класть только золото');
         }
 
+        if ($slot->slot_type === 'experience') {
+            throw new \RuntimeException('В слот опыта можно класть только опыт');
+        }
+
+        if (in_array($slot->slot_type, ['craft_center', 'craft_material', 'disassemble_center'], true)) {
+            throw new \RuntimeException('На станцию кладите предметы через overlay-слоты');
+        }
+
         $template = ItemTemplate::where('slug', $item->template_slug)->first();
         $itemSlotType = $item->slot_type ?? $template?->slot_type;
 
         if ($itemSlotType !== $slot->slot_type) {
             throw new \RuntimeException('Предмет не подходит для этого слота экипировки');
+        }
+    }
+
+    private function assertResourceFitsSlot(Resources $resource, Slot $slot): void
+    {
+        if ($this->isEquipmentSlot($slot)) {
+            throw new \RuntimeException('В слот экипировки можно класть только предметы');
+        }
+
+        if (in_array($slot->slot_type, ['craft_center', 'disassemble_center'], true)) {
+            throw new \RuntimeException('На станцию кладите предметы через overlay-слоты');
+        }
+
+        if ($slot->slot_type === 'craft_material') {
+            return;
+        }
+
+        if ($this->isStationSlot($slot)) {
+            throw new \RuntimeException('Неподходящий слот станции');
         }
     }
 
@@ -184,6 +261,10 @@ class StorageMoveService
         Item|Resources $occupant,
         ?int $quantity
     ): array {
+        if ($this->isStationSlot($fromSlot) || $this->isStationSlot($toSlot)) {
+            throw new \RuntimeException('На станцию кладите предметы через overlay-слоты');
+        }
+
         $toOccupant = $this->getTargetOccupant(['kind' => 'regular', 'cell' => $toSlot]);
 
         if ($occupant instanceof Item) {
@@ -198,6 +279,13 @@ class StorageMoveService
                     $toUuid = $toOccupant->slot_uuid;
                     $occupant->update(['slot_uuid' => $toUuid]);
                     $toOccupant->update(['slot_uuid' => $fromUuid]);
+                } elseif (($fromSlot->slot_type === null || $this->isStationSlot($fromSlot))
+                    && $toSlot->slot_type !== null
+                ) {
+                    $resourceQty = $toOccupant->quantity;
+                    $toOccupant->update(['slot_uuid' => $fromSlot->uuid]);
+                    $occupant->update(['slot_uuid' => $toSlot->uuid]);
+                    $this->recordResourceMoved($toOccupant, $toSlot->uuid, $fromSlot->uuid, $resourceQty, $actor);
                 } else {
                     throw new \RuntimeException('Нельзя поместить предмет в слот с ресурсом');
                 }
@@ -224,18 +312,16 @@ class StorageMoveService
     ): array {
         $storage = Storage::where('uuid', $toSlot->storage_uuid)->firstOrFail();
 
+        $this->assertProtectedResourceCanMove($occupant, $fromSlot, $toSlot);
+
+        $this->assertResourceFitsSlot($occupant, $toSlot);
+
         if ($toSlot->slot_type === 'gold' && $occupant->template_slug !== 'gold') {
             throw new \RuntimeException('В золотой слот можно класть только золото');
         }
 
-        if ($occupant->template_slug === 'gold' && $this->specialSlotService->isGridSlot($toSlot)) {
-            $reclaimSlot = $this->specialSlotService->resolveAutoReclaimTarget($storage, 'gold');
-            if ($reclaimSlot) {
-                $toSlot = $reclaimSlot;
-                $toOccupant = Resources::where('slot_uuid', $reclaimSlot->uuid)
-                    ->whereNull('temporary_slot_uuid')
-                    ->first();
-            }
+        if ($toSlot->slot_type === 'experience' && $occupant->template_slug !== 'experience') {
+            throw new \RuntimeException('В слот опыта можно класть только опыт');
         }
 
         $moveQty = $quantity ?? $occupant->quantity;
@@ -269,18 +355,8 @@ class StorageMoveService
         }
 
         if ($toOccupant->template_slug !== $occupant->template_slug) {
-            if ($occupant->template_slug === 'gold') {
-                $reclaimSlot = $this->specialSlotService->resolveAutoReclaimTarget($storage, 'gold');
-                if ($reclaimSlot) {
-                    return $this->moveResourceBetweenRegularSlots(
-                        $actor,
-                        $fromSlot,
-                        $reclaimSlot,
-                        $occupant,
-                        Resources::where('slot_uuid', $reclaimSlot->uuid)->whereNull('temporary_slot_uuid')->first(),
-                        $quantity
-                    );
-                }
+            if (in_array($occupant->template_slug, ['gold', 'experience'], true)) {
+                throw new \RuntimeException('Валюту нельзя перемещать вручную');
             }
 
             $fromUuid = $occupant->slot_uuid;
@@ -320,28 +396,45 @@ class StorageMoveService
         ?int $quantity
     ): array {
         $tempStorage = Storage::where('uuid', $toTempSlot->storage_uuid)->firstOrFail();
-        if ($tempStorage->storage_type !== 'trade') {
-            throw new \RuntimeException('Временные слоты поддерживаются только для обмена');
+        if (!in_array($tempStorage->storage_type, ['trade', 'craft', 'disassemble', 'quest'], true)) {
+            throw new \RuntimeException('Временные слоты поддерживаются только для обмена, станций и квеста');
         }
 
         $toOccupant = $this->provisioningService->getOccupantForTemporarySlot($toTempSlot);
+        $isCraft = $tempStorage->storage_type === 'craft';
+        $isDisassemble = $tempStorage->storage_type === 'disassemble';
+        $isStation = $isCraft || $isDisassemble;
+        $isQuest = $tempStorage->storage_type === 'quest';
+
+        if ($isQuest && $this->questStorageService->slotRole($toTempSlot) === 'quest_grant') {
+            throw new \RuntimeException('В слот выдачи квеста нельзя класть предметы вручную');
+        }
 
         if ($occupant instanceof Item) {
             if ($quantity !== null && $quantity !== 1) {
                 throw new \RuntimeException('Предмет нельзя разделить');
             }
             if ($toOccupant) {
-                throw new \RuntimeException('Целевой слот обмена занят');
+                throw new \RuntimeException($isStation ? 'Слот станции занят' : ($isQuest ? 'Слот квеста занят' : 'Целевой слот обмена занят'));
+            }
+
+            if ($isCraft) {
+                $this->assertCraftStationItemFits($occupant, $toTempSlot);
+            }
+            if ($isDisassemble) {
+                $this->assertDisassembleStationItemFits($occupant, $toTempSlot);
             }
 
             $occupant->update(['temporary_slot_uuid' => $toTempSlot->uuid]);
-            $this->syncTradeItemOnOverlay($actor, $occupant, $toTempSlot);
+            if (!$isStation && !$isQuest) {
+                $this->syncTradeItemOnOverlay($actor, $occupant, $toTempSlot);
+            }
 
             return ['type' => 'item', 'uuid' => $occupant->uuid, 'temporary_slot_uuid' => $toTempSlot->uuid];
         }
 
         /** @var Resources $occupant */
-        return $this->overlayResourceToTemporary($actor, $fromSlot, $toTempSlot, $occupant, $toOccupant, $quantity);
+        return $this->overlayResourceToTemporary($actor, $fromSlot, $toTempSlot, $occupant, $toOccupant, $quantity, $isCraft, $isDisassemble, $isQuest);
     }
 
     private function overlayResourceToTemporary(
@@ -350,10 +443,20 @@ class StorageMoveService
         TemporarySlot $toTempSlot,
         Resources $occupant,
         Item|Resources|null $toOccupant,
-        ?int $quantity
+        ?int $quantity,
+        bool $isCraft = false,
+        bool $isDisassemble = false,
+        bool $isQuest = false
     ): array {
+        if ($isCraft) {
+            $this->assertCraftStationResourceFits($occupant, $toTempSlot);
+        }
+        if ($isDisassemble) {
+            $this->assertDisassembleStationResourceFits($occupant, $toTempSlot);
+        }
+
         if ($toOccupant) {
-            throw new \RuntimeException('Целевой слот обмена занят');
+            throw new \RuntimeException(($isCraft || $isDisassemble) ? 'Слот станции занят' : ($isQuest ? 'Слот квеста занят' : 'Целевой слот обмена занят'));
         }
 
         $moveQty = $quantity ?? $occupant->quantity;
@@ -376,7 +479,9 @@ class StorageMoveService
         }
 
         $tradedResource->update(['temporary_slot_uuid' => $toTempSlot->uuid]);
-        $this->syncTradeResourceOnOverlay($actor, $tradedResource, $toTempSlot, $moveQty);
+        if (!$isCraft && !$isDisassemble && !$isQuest) {
+            $this->syncTradeResourceOnOverlay($actor, $tradedResource, $toTempSlot, $moveQty);
+        }
 
         return [
             'type' => 'resource',
@@ -393,9 +498,24 @@ class StorageMoveService
         Item|Resources $occupant,
         ?int $quantity
     ): array {
+        $tempStorage = Storage::where('uuid', $fromTempSlot->storage_uuid)->firstOrFail();
+        $isCraft = $tempStorage->storage_type === 'craft';
+        $isDisassemble = $tempStorage->storage_type === 'disassemble';
+        $isStation = $isCraft || $isDisassemble;
+        $isQuest = $tempStorage->storage_type === 'quest';
         $toOccupant = $this->getTargetOccupant(['kind' => 'regular', 'cell' => $toSlot]);
 
         if ($occupant instanceof Item) {
+            if ($toOccupant && $toSlot->uuid !== $occupant->slot_uuid) {
+                throw new \RuntimeException('Целевой слот занят');
+            }
+
+            if ($isStation && $toSlot->uuid === $occupant->slot_uuid) {
+                $occupant->update(['temporary_slot_uuid' => null]);
+
+                return ['type' => 'item', 'uuid' => $occupant->uuid];
+            }
+
             if ($toOccupant) {
                 throw new \RuntimeException('Целевой слот занят');
             }
@@ -404,7 +524,9 @@ class StorageMoveService
                 'temporary_slot_uuid' => null,
                 'slot_uuid' => $toSlot->uuid,
             ]);
-            $this->removeTradeItemForOccupant($actor, $occupant);
+            if (!$isStation && !$isQuest) {
+                $this->removeTradeItemForOccupant($actor, $occupant);
+            }
 
             return ['type' => 'item', 'uuid' => $occupant->uuid];
         }
@@ -412,6 +534,12 @@ class StorageMoveService
         /** @var Resources $occupant */
         if ($toOccupant instanceof Item) {
             throw new \RuntimeException('Нельзя поместить ресурс в слот с предметом');
+        }
+
+        if ($isWorkbench && $toSlot->uuid === $occupant->slot_uuid) {
+            $occupant->update(['temporary_slot_uuid' => null]);
+
+            return ['type' => 'resource', 'uuid' => $occupant->uuid, 'quantity' => $occupant->quantity];
         }
 
         $storage = Storage::where('uuid', $toSlot->storage_uuid)->firstOrFail();
@@ -432,7 +560,9 @@ class StorageMoveService
                 'temporary_slot_uuid' => null,
                 'slot_uuid' => $toSlot->uuid,
             ]);
-            $this->removeTradeItemForOccupant($actor, $occupant);
+            if (!$isStation && !$isQuest) {
+                $this->removeTradeItemForOccupant($actor, $occupant);
+            }
 
             return ['type' => 'resource', 'uuid' => $occupant->uuid, 'quantity' => $moveQty];
         }
@@ -448,7 +578,9 @@ class StorageMoveService
             } else {
                 $occupant->update(['quantity' => $occupant->quantity - $merged]);
             }
-            $this->removeTradeItemForOccupant($actor, $occupant);
+            if (!$isQuest) {
+                $this->removeTradeItemForOccupant($actor, $occupant);
+            }
 
             return ['type' => 'resource', 'uuid' => $toOccupant->uuid, 'quantity' => $merged];
         }
@@ -462,11 +594,33 @@ class StorageMoveService
         TemporarySlot $toTempSlot,
         Item|Resources $occupant
     ): array {
+        $fromStorage = Storage::where('uuid', $fromTempSlot->storage_uuid)->firstOrFail();
+        $toStorage = Storage::where('uuid', $toTempSlot->storage_uuid)->firstOrFail();
+        $fromStation = in_array($fromStorage->storage_type, ['craft', 'disassemble'], true);
+        $toCraft = $toStorage->storage_type === 'craft';
+        $toDisassemble = $toStorage->storage_type === 'disassemble';
+        $toStation = $toCraft || $toDisassemble;
+
+        if ($toCraft && $occupant instanceof Item) {
+            $this->assertCraftStationItemFits($occupant, $toTempSlot);
+        }
+        if ($toCraft && $occupant instanceof Resources) {
+            $this->assertCraftStationResourceFits($occupant, $toTempSlot);
+        }
+        if ($toDisassemble && $occupant instanceof Item) {
+            $this->assertDisassembleStationItemFits($occupant, $toTempSlot);
+        }
+        if ($toDisassemble && $occupant instanceof Resources) {
+            $this->assertDisassembleStationResourceFits($occupant, $toTempSlot);
+        }
+
         $toOccupant = $this->provisioningService->getOccupantForTemporarySlot($toTempSlot);
 
         if (!$toOccupant) {
             $occupant->update(['temporary_slot_uuid' => $toTempSlot->uuid]);
-            $this->updateTradeItemTempSlot($actor, $occupant, $toTempSlot);
+            if (!$fromStation && !$toStation) {
+                $this->updateTradeItemTempSlot($actor, $occupant, $toTempSlot);
+            }
 
             return [
                 'type' => $occupant instanceof Item ? 'item' : 'resource',
@@ -481,6 +635,61 @@ class StorageMoveService
         $toOccupant->update(['temporary_slot_uuid' => $fromUuid]);
 
         return ['type' => 'swap', 'swapped' => true];
+    }
+
+    private function assertCraftStationItemFits(Item $item, TemporarySlot $tempSlot): void
+    {
+        if ($tempSlot->slot_index !== CraftStationService::CENTER_SLOT_INDEX) {
+            throw new \RuntimeException('Предмет можно положить только в центральный слот станции создания');
+        }
+
+        if (!$this->craftingActionResolver->isAllowedInCraftCenter($item)) {
+            throw new \RuntimeException('У предмета нет формулы крафта для центрального слота');
+        }
+    }
+
+    private function assertDisassembleStationItemFits(Item $item, TemporarySlot $tempSlot): void
+    {
+        if ($tempSlot->slot_index !== DisassembleStationService::CENTER_SLOT_INDEX) {
+            throw new \RuntimeException('Предмет можно положить только в центральный слот станции разбора');
+        }
+
+        if (!$this->craftingActionResolver->isAllowedInDisassembleCenter($item)) {
+            throw new \RuntimeException('У предмета нет формулы разбора');
+        }
+    }
+
+    private function assertCraftStationResourceFits(Resources $resource, TemporarySlot $tempSlot): void
+    {
+        if ($tempSlot->slot_index === CraftStationService::CENTER_SLOT_INDEX) {
+            if (!$this->craftingActionResolver->isAllowedInCraftCenter($resource)) {
+                throw new \RuntimeException('У ресурса нет формулы крафта для центрального слота');
+            }
+
+            return;
+        }
+
+        if (!$this->craftingActionResolver->isAllowedInCraftMaterial($resource)) {
+            throw new \RuntimeException('Ресурс не подходит как ингредиент станции создания');
+        }
+    }
+
+    private function assertDisassembleStationResourceFits(Resources $resource, TemporarySlot $tempSlot): void
+    {
+        if ($tempSlot->slot_index !== DisassembleStationService::CENTER_SLOT_INDEX) {
+            throw new \RuntimeException('На станции разбора доступен только центральный слот');
+        }
+
+        if (!$this->craftingActionResolver->isAllowedInDisassembleCenter($resource)) {
+            throw new \RuntimeException('У ресурса нет формулы разбора');
+        }
+    }
+
+    private function assertProtectedResourceCanMove(Resources $resource, Slot $fromSlot, Slot $toSlot): void
+    {
+        if (in_array($resource->template_slug, ['gold', 'experience'], true)) {
+            throw new \RuntimeException('Валюту нельзя перемещать вручную');
+        }
     }
 
     private function syncTradeItemOnOverlay(Character $actor, Item $item, TemporarySlot $tempSlot): void

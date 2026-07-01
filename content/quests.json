@@ -1,0 +1,97 @@
+{
+  "version": "1.1.0",
+  "quests": [
+    {
+      "slug": "first_wooden_sword",
+      "name": "Создай свой первый деревянный меч",
+      "description": "Возьми чертёж и материалы, скрафти деревянный меч и принеси его.",
+      "starter_item_template_slug": "quest_first_wooden_sword",
+      "sort_order": 0,
+      "accept_grants": {
+        "items": [
+          {
+            "template_slug": "recipe_wooden_sword",
+            "stage": "blueprint",
+            "count": 1
+          }
+        ],
+        "resources": {
+          "wood": 5
+        }
+      },
+      "objectives": [
+        {
+          "key": "have_sword",
+          "type": "have_item",
+          "template_slug": "wooden_sword",
+          "stage": "item",
+          "count": 1
+        }
+      ],
+      "rewards": {
+        "resources": {
+          "gold": 5,
+          "experience": 10
+        }
+      }
+    },
+    {
+      "slug": "tutorial_planks",
+      "name": "Первые доски",
+      "description": "Преобразуй дерево в деревянные доски на верстаке.",
+      "sort_order": 1,
+      "objectives": [
+        {
+          "key": "craft_planks",
+          "type": "craft_resource",
+          "recipe_slug": "craft_wooden_plank",
+          "count": 1
+        }
+      ],
+      "rewards": {
+        "resources": {
+          "wood": 5
+        }
+      }
+    },
+    {
+      "slug": "tutorial_sword",
+      "name": "Деревянный меч",
+      "description": "Создай деревянный меч по чертежу.",
+      "sort_order": 2,
+      "prerequisites": ["tutorial_planks"],
+      "objectives": [
+        {
+          "key": "craft_sword",
+          "type": "craft_item",
+          "recipe_slug": "craft_wooden_sword",
+          "count": 1
+        }
+      ],
+      "rewards": {
+        "resources": {
+          "wood": 10
+        }
+      }
+    },
+    {
+      "slug": "stock_wood",
+      "name": "Запас древесины",
+      "description": "Накопи 20 единиц дерева в инвентаре.",
+      "sort_order": 3,
+      "objectives": [
+        {
+          "key": "collect_wood",
+          "type": "collect_resource",
+          "template_slug": "wood",
+          "count": 20
+        }
+      ],
+      "rewards": {
+        "resources": {
+          "wooden_plank": 5
+        }
+      }
+    }
+  ]
+}

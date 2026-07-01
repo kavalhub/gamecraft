@@ -10,7 +10,7 @@ class ItemTemplate extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['slug', 'name', 'type', 'icon', 'is_stackable', 'max_stack', 'description', 'base_stats', 'slot_type', 'recipe_slug'];
+    protected $fillable = ['slug', 'name', 'type', 'icon', 'is_stackable', 'max_stack', 'description', 'base_stats', 'slot_type', 'recipe_slug', 'quest_slug'];
     protected $casts = ['is_stackable' => 'boolean', 'max_stack' => 'integer', 'base_stats' => 'array'];
 
     public function recipe(): BelongsTo

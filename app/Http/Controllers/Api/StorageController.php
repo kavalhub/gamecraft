@@ -6,8 +6,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Character;
+use App\Services\CraftStationService;
+use App\Services\DisassembleStationService;
+use App\Services\QuestStorageService;
 use App\Services\StorageLayoutService;
 use App\Services\StorageMoveService;
+use App\Services\WorldStorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -15,7 +19,11 @@ class StorageController extends Controller
 {
     public function __construct(
         private StorageLayoutService $layoutService,
-        private StorageMoveService $moveService
+        private StorageMoveService $moveService,
+        private CraftStationService $craftStationService,
+        private DisassembleStationService $disassembleStationService,
+        private QuestStorageService $questStorageService,
+        private WorldStorageService $worldStorageService,
     ) {}
 
     public function show(Request $request, string $characterUuid): JsonResponse
@@ -52,11 +60,93 @@ class StorageController extends Controller
                 $request->quantity ? (int) $request->quantity : null
             );
 
-            $layout = $this->layoutService->getCharacterLayout($character, ['inventory', 'trade', 'equipment', 'stats']);
+            $layout = $this->layoutService->getCharacterLayout($character, ['inventory', 'trade', 'equipment', 'craft', 'disassemble', 'quest', 'stats']);
 
             return response()->json([
                 'success' => true,
                 'move' => $result,
+                'layout' => $layout,
+            ]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 400);
+        }
+    }
+
+    public function clearCraftStation(Request $request, string $characterUuid): JsonResponse
+    {
+        /** @var Character $character */
+        $character = $request->attributes->get('character');
+
+        if ($character->uuid !== $characterUuid) {
+            return response()->json(['error' => 'Несоответствие персонажа'], 403);
+        }
+
+        $cleared = $this->craftStationService->clearOverlays($character);
+        $layout = $this->layoutService->getCharacterLayout($character, ['inventory', 'craft', 'stats']);
+
+        return response()->json([
+            'success' => true,
+            'cleared' => $cleared,
+            'layout' => $layout,
+        ]);
+    }
+
+    public function clearDisassembleStation(Request $request, string $characterUuid): JsonResponse
+    {
+        /** @var Character $character */
+        $character = $request->attributes->get('character');
+
+        if ($character->uuid !== $characterUuid) {
+            return response()->json(['error' => 'Несоответствие персонажа'], 403);
+        }
+
+        $cleared = $this->disassembleStationService->clearOverlays($character);
+        $layout = $this->layoutService->getCharacterLayout($character, ['inventory', 'disassemble', 'stats']);
+
+        return response()->json([
+            'success' => true,
+            'cleared' => $cleared,
+            'layout' => $layout,
+        ]);
+    }
+
+    public function clearQuest(Request $request, string $characterUuid): JsonResponse
+    {
+        /** @var Character $character */
+        $character = $request->attributes->get('character');
+
+        if ($character->uuid !== $characterUuid) {
+            return response()->json(['error' => 'Несоответствие персонажа'], 403);
+        }
+
+        $cleared = $this->questStorageService->clearOverlays($character);
+        $layout = $this->layoutService->getCharacterLayout($character, ['inventory', 'quest', 'stats']);
+
+        return response()->json([
+            'success' => true,
+            'cleared' => $cleared,
+            'layout' => $layout,
+        ]);
+    }
+
+    public function dropToWorld(Request $request, string $characterUuid): JsonResponse
+    {
+        $request->validate(['item_uuid' => 'required|string']);
+
+        /** @var Character $character */
+        $character = $request->attributes->get('character');
+
+        if ($character->uuid !== $characterUuid) {
+            return response()->json(['error' => 'Несоответствие персонажа'], 403);
+        }
+
+        try {
+            $item = $this->worldStorageService->dropFromInventory($character, $request->item_uuid);
+            $layout = $this->layoutService->getCharacterLayout($character, ['inventory', 'quest', 'stats']);
+
+            return response()->json([
+                'success' => true,
+                'item' => $item,
                 'layout' => $layout,
             ]);
         } catch (\RuntimeException $e) {
