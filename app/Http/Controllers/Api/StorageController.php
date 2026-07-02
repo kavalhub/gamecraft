@@ -65,7 +65,10 @@ class StorageController extends Controller
                 $request->quantity ? (int) $request->quantity : null
             );
 
-            $layout = $this->layoutService->getCharacterLayout($character, ['inventory', 'trade', 'equipment', 'craft', 'disassemble', 'quest', 'stats']);
+            $layout = $this->layoutService->getCharacterLayout(
+                $character,
+                ['inventory', 'trade', 'equipment', 'craft', 'disassemble', 'quest', 'bank', 'guild_bank', 'stats']
+            );
 
             return response()->json([
                 'success' => true,
@@ -81,7 +84,7 @@ class StorageController extends Controller
     {
         $request->validate([
             'from_slot_uuid' => 'required|string',
-            'intent' => 'required|string|in:equip,inventory,craft,disassemble,station_return',
+            'intent' => 'required|string|in:equip,inventory,bank,guild_bank,craft,disassemble,station_return',
             'station_mode' => 'nullable|string|in:center,material',
             'quantity' => 'nullable|integer|min:1',
         ]);
@@ -102,7 +105,10 @@ class StorageController extends Controller
                 $request->quantity ? (int) $request->quantity : null,
             );
 
-            $layout = $this->layoutService->getCharacterLayout($character, ['inventory', 'trade', 'equipment', 'craft', 'disassemble', 'quest', 'stats']);
+            $layout = $this->layoutService->getCharacterLayout(
+                $character,
+                ['inventory', 'trade', 'equipment', 'craft', 'disassemble', 'quest', 'bank', 'guild_bank', 'stats']
+            );
 
             return response()->json([
                 'success' => true,

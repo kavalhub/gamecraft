@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Models\DuelOffer;
 use App\Models\GameEvent;
 use App\Models\TradeOffer;
 use Illuminate\Support\Collection;
@@ -14,24 +13,16 @@ class EventQueryService
     public function getEventsAfter(string $characterUuid, int $afterId, int $limit = 50): Collection
     {
         $tradeUuids = $this->activeTradeUuids($characterUuid);
-        $duelUuids = $this->activeDuelUuids($characterUuid);
 
         return GameEvent::query()
             ->where('id', '>', $afterId)
-            ->where(function ($query) use ($characterUuid, $tradeUuids, $duelUuids) {
+            ->where(function ($query) use ($characterUuid, $tradeUuids) {
                 $query->where('actor_uuid', $characterUuid);
 
                 if ($tradeUuids->isNotEmpty()) {
                     $query->orWhere(function ($sub) use ($tradeUuids) {
                         $sub->where('aggregate_type', 'trade')
                             ->whereIn('aggregate_uuid', $tradeUuids);
-                    });
-                }
-
-                if ($duelUuids->isNotEmpty()) {
-                    $query->orWhere(function ($sub) use ($duelUuids) {
-                        $sub->where('aggregate_type', 'duel')
-                            ->whereIn('aggregate_uuid', $duelUuids);
                     });
                 }
 
@@ -45,23 +36,15 @@ class EventQueryService
     public function getLatestEvents(string $characterUuid, ?int $afterId, int $limit = 50): Collection
     {
         $tradeUuids = $this->activeTradeUuids($characterUuid);
-        $duelUuids = $this->activeDuelUuids($characterUuid);
 
         $query = GameEvent::query()
-            ->where(function ($q) use ($characterUuid, $tradeUuids, $duelUuids) {
+            ->where(function ($q) use ($characterUuid, $tradeUuids) {
                 $q->where('actor_uuid', $characterUuid);
 
                 if ($tradeUuids->isNotEmpty()) {
                     $q->orWhere(function ($sub) use ($tradeUuids) {
                         $sub->where('aggregate_type', 'trade')
                             ->whereIn('aggregate_uuid', $tradeUuids);
-                    });
-                }
-
-                if ($duelUuids->isNotEmpty()) {
-                    $q->orWhere(function ($sub) use ($duelUuids) {
-                        $sub->where('aggregate_type', 'duel')
-                            ->whereIn('aggregate_uuid', $duelUuids);
                     });
                 }
 
@@ -133,18 +116,6 @@ class EventQueryService
         return TradeOffer::query()
             ->where('initiator_uuid', $characterUuid)
             ->orWhere('partner_uuid', $characterUuid)
-            ->pluck('uuid');
-    }
-
-    private function activeDuelUuids(string $characterUuid): \Illuminate\Support\Collection
-    {
-        return DuelOffer::query()
-            ->where(function ($q) use ($characterUuid) {
-                $q->where('challenger_uuid', $characterUuid)
-                    ->orWhere('opponent_uuid', $characterUuid);
-            })
-            ->whereIn('status', ['pending', 'resolved'])
-            ->where('updated_at', '>=', now()->subHour())
             ->pluck('uuid');
     }
 }

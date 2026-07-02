@@ -39,6 +39,7 @@ export const GameItemPresenter = {
             description: t.description,
             max_stack: t.max_stack,
             stage: t.type === 'blueprint' ? 'blueprint' : (t.type === 'material' ? '' : 'item'),
+            recipe_slug: t.recipe_slug || '',
             quantity,
         });
     },

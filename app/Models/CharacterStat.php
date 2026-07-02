@@ -12,6 +12,7 @@ class CharacterStat extends Model
     protected $fillable = [
         'character_uuid',
         'level',
+        'base_damage',
         'strength',
         'agility',
         'intellect',
@@ -21,6 +22,7 @@ class CharacterStat extends Model
 
     protected $casts = [
         'level' => 'integer',
+        'base_damage' => 'integer',
         'strength' => 'integer',
         'agility' => 'integer',
         'intellect' => 'integer',

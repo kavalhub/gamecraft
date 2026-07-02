@@ -97,7 +97,7 @@ class StorageMoveService
                 throw new \RuntimeException('Нельзя перемещать из чужого слота обмена');
             }
         } else {
-            $this->assertOwnsRegularSlot($actor, $from['cell']);
+            $this->assertCanUseRegularSlot($actor, $from['cell']);
         }
 
         if ($to['kind'] === 'temporary') {
@@ -111,10 +111,11 @@ class StorageMoveService
                 throw new \RuntimeException('Нельзя перемещать в чужой слот обмена');
             }
         } else {
-            $this->assertOwnsRegularSlot($actor, $to['cell']);
+            $this->assertCanUseRegularSlot($actor, $to['cell']);
         }
 
         $this->assertTradeStorageMoveAllowed($actor, $from, $to);
+        $this->assertPersonalBankMoveAllowed($from, $to);
     }
 
     private function assertTradeStorageMoveAllowed(Character $actor, array $from, array $to): void
@@ -151,12 +152,56 @@ class StorageMoveService
         return Storage::where('uuid', $cell['cell']->storage_uuid)->value('storage_type');
     }
 
-    private function assertOwnsRegularSlot(Character $actor, Slot $slot): void
+    private function assertCanUseRegularSlot(Character $actor, Slot $slot): void
     {
         $storage = Storage::where('uuid', $slot->storage_uuid)->firstOrFail();
-        if ($storage->characters_uuid !== $actor->uuid) {
-            throw new \RuntimeException('Слот не принадлежит персонажу');
+        if ($storage->characters_uuid === $actor->uuid) {
+            return;
         }
+
+        if ($storage->storage_type === 'guild_bank') {
+            if ($this->isGuildBankMember($actor, $storage->characters_uuid)) {
+                return;
+            }
+
+            throw new \RuntimeException('Нет доступа к банку гильдии');
+        }
+
+        throw new \RuntimeException('Слот не принадлежит персонажу');
+    }
+
+    private function isGuildBankMember(Character $actor, string $guildUuid): bool
+    {
+        return DB::table('guilds_members')
+            ->where('head_uuid', $guildUuid)
+            ->where('member_uuid', $actor->uuid)
+            ->where('active', true)
+            ->exists();
+    }
+
+    private function assertPersonalBankMoveAllowed(array $from, array $to): void
+    {
+        $fromType = $this->resolveRegularStorageType($from);
+        $toType = $this->resolveRegularStorageType($to);
+
+        if ($fromType === 'bank' || $toType === 'bank') {
+            $other = $fromType === 'bank' ? $toType : $fromType;
+            if ($other !== 'inventory') {
+                throw new \RuntimeException('Личный банк доступен только для инвентаря');
+            }
+        }
+
+        if ($fromType === 'guild_bank' || $toType === 'guild_bank') {
+            $other = $fromType === 'guild_bank' ? $toType : $fromType;
+            if ($other !== 'inventory') {
+                throw new \RuntimeException('Банк гильдии доступен только для инвентаря');
+            }
+        }
+    }
+
+    private function assertOwnsRegularSlot(Character $actor, Slot $slot): void
+    {
+        $this->assertCanUseRegularSlot($actor, $slot);
     }
 
     private function assertQuestItemMoveAllowed(array $from, array $to, Item|Resources $occupant): void

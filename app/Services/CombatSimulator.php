@@ -217,7 +217,9 @@ class CombatSimulator
     {
         $rawDamage = (int) ($stats['damage'] ?? 0);
         if ($rawDamage < 1) {
-            $rawDamage = max(1, (int) floor(((int) ($stats['strength'] ?? 10)) / 2));
+            $baseDamage = max(3, min(5, (int) ($stats['base_damage'] ?? 4)));
+            $level = max(1, (int) ($stats['level'] ?? 1));
+            $rawDamage = max(1, $baseDamage * $level);
         }
 
         return max(1, $rawDamage - $targetDefense);

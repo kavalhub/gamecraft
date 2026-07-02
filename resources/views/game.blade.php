@@ -55,6 +55,23 @@
             border-top: 1px solid #e0e0e0;
         }
         .login-section h3 { color: #555; margin-bottom: 15px; font-size: 16px; }
+        .avatar-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .avatar-option {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 10px 6px;
+            text-align: center;
+            cursor: pointer;
+            background: #fafafa;
+            font-size: 24px;
+        }
+        .avatar-option.selected { border-color: #667eea; background: #eef2ff; }
+        .avatar-option span { display: block; font-size: 11px; color: #666; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -68,6 +85,11 @@
         <div class="form-group">
             <label for="username">Имя героя</label>
             <input type="text" id="username" name="username" required minlength="3" maxlength="50">
+        </div>
+        <div class="form-group">
+            <label>Аватар героя</label>
+            <div id="avatarGrid" class="avatar-grid"></div>
+            <input type="hidden" id="avatar" name="avatar" value="warrior">
         </div>
         <div class="form-group">
             <label for="password">Пароль</label>
@@ -96,6 +118,33 @@
     const registerForm = document.getElementById('registerForm');
     const loginForm = document.getElementById('loginForm');
     const messageDiv = document.getElementById('message');
+    let selectedAvatar = 'warrior';
+
+    async function loadAvatars() {
+        try {
+            const res = await fetch('/api/game/meta');
+            const data = await res.json();
+            const grid = document.getElementById('avatarGrid');
+            if (!grid || !data.avatars) return;
+            grid.innerHTML = Object.entries(data.avatars).map(([key, meta]) => `
+                <div class="avatar-option${key === selectedAvatar ? ' selected' : ''}" data-avatar="${key}">
+                    ${meta.icon}<span>${meta.label}</span>
+                </div>
+            `).join('');
+            grid.querySelectorAll('.avatar-option').forEach(el => {
+                el.addEventListener('click', () => {
+                    selectedAvatar = el.dataset.avatar;
+                    document.getElementById('avatar').value = selectedAvatar;
+                    grid.querySelectorAll('.avatar-option').forEach(o => o.classList.remove('selected'));
+                    el.classList.add('selected');
+                });
+            });
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    loadAvatars();
 
     function showMessage(text, type) {
         messageDiv.textContent = text;
@@ -117,6 +166,7 @@
         e.preventDefault();
         const username = document.getElementById('username').value.trim();
         const password = document.getElementById('password').value;
+        const avatar = document.getElementById('avatar').value || 'warrior';
 
         try {
             const response = await fetch('/api/register', {
@@ -125,7 +175,7 @@
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
                 },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ username, password, avatar })
             });
             const data = await response.json();
 

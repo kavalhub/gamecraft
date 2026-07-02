@@ -141,4 +141,28 @@ class StorageQuickMoveServiceTest extends TestCase
         $blueprint->refresh();
         $this->assertNull($blueprint->buffer_slot_uuid);
     }
+
+    public function test_quick_move_inventory_to_bank_and_back(): void
+    {
+        $this->inventoryService->addResource($this->character, 'wood', 3);
+        $wood = \App\Models\Resources::query()
+            ->whereIn('slot_uuid', $this->character->storages()->where('storage_type', 'inventory')->firstOrFail()->slots()->pluck('uuid'))
+            ->where('template_slug', 'wood')
+            ->whereNull('buffer_slot_uuid')
+            ->firstOrFail();
+
+        $toBank = $this->service->quickMove($this->character, $wood->slot_uuid, 'bank');
+        $this->assertArrayNotHasKey('noop', $toBank);
+
+        $wood->refresh();
+        $bank = $this->character->storages()->where('storage_type', 'bank')->firstOrFail();
+        $this->assertTrue($bank->slots()->where('uuid', $wood->slot_uuid)->exists());
+
+        $toInventory = $this->service->quickMove($this->character, $wood->slot_uuid, 'inventory');
+        $this->assertArrayNotHasKey('noop', $toInventory);
+
+        $wood->refresh();
+        $inventory = $this->character->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $this->assertTrue($inventory->slots()->where('uuid', $wood->slot_uuid)->exists());
+    }
 }

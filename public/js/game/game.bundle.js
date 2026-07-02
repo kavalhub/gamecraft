@@ -150,6 +150,73 @@
         return String(value);
     }
 
+    function getRecipesForTooltip() {
+        return (window.GameState && GameState.recipes) || [];
+    }
+
+    function getTemplateDisplayForTooltip(slug) {
+        if (window.GameItemPresenter && GameItemPresenter.templateCache && GameItemPresenter.templateCache.get(slug)) {
+            var t = GameItemPresenter.templateCache.get(slug);
+            return { icon: t.icon || '📦', name: t.name || slug };
+        }
+        if (window.GameItemPresenter && GameItemPresenter.descriptorFromSlug) {
+            var d = GameItemPresenter.descriptorFromSlug(slug, 1);
+            return { icon: d.icon || '📦', name: d.name || slug };
+        }
+        return { icon: '📦', name: slug };
+    }
+
+    function resolveBlueprintRecipeSlug(descriptor) {
+        if (descriptor.recipe_slug) {
+            return descriptor.recipe_slug;
+        }
+        if (descriptor.template_slug && window.GameItemPresenter && GameItemPresenter.templateCache) {
+            var template = GameItemPresenter.templateCache.get(descriptor.template_slug);
+            if (template && template.recipe_slug) {
+                return template.recipe_slug;
+            }
+        }
+        return '';
+    }
+
+    function findRecipeForTooltip(slug) {
+        if (!slug) return null;
+        var recipes = getRecipesForTooltip();
+        for (var i = 0; i < recipes.length; i++) {
+            if (recipes[i].slug === slug) {
+                return recipes[i];
+            }
+        }
+        return null;
+    }
+
+    function buildCraftRecipeHtml(recipe) {
+        var formula = recipe && recipe.craft_formula;
+        if (!formula || typeof formula !== 'object' || !Object.keys(formula).length) {
+            return '';
+        }
+
+        var html = '<div class="tooltip-recipe">';
+        html += '<div class="tooltip-recipe-title">Рецепт крафта</div>';
+        html += '<ul class="tooltip-recipe-list">';
+        Object.keys(formula).forEach(function (slug) {
+            var qty = formula[slug];
+            var material = getTemplateDisplayForTooltip(slug);
+            html += '<li><span class="tooltip-recipe-item">' + material.icon + ' ' + material.name +
+                '</span><span class="tooltip-recipe-qty">×' + qty + '</span></li>';
+        });
+        html += '</ul>';
+
+        if (recipe.result_template_slug) {
+            var result = getTemplateDisplayForTooltip(recipe.result_template_slug);
+            var resultQty = recipe.result_quantity > 1 ? ' ×' + recipe.result_quantity : '';
+            html += '<div class="tooltip-recipe-result">Создаёт: ' + result.icon + ' ' + result.name + resultQty + '</div>';
+        }
+
+        html += '</div>';
+        return html;
+    }
+
     function buildTooltipHtml(descriptor) {
         var d = normalizeDescriptor(descriptor);
         var stage = d.stage || '';
@@ -167,6 +234,14 @@
 
         if (d.description) {
             html += '<div class="tooltip-description">' + d.description + '</div>';
+        }
+
+        if (stage === 'blueprint') {
+            var recipeSlug = resolveBlueprintRecipeSlug(d);
+            var blueprintRecipe = findRecipeForTooltip(recipeSlug);
+            if (blueprintRecipe) {
+                html += buildCraftRecipeHtml(blueprintRecipe);
+            }
         }
 
         var statEntries = Object.keys(d.stats || {}).filter(function (key) {
@@ -327,6 +402,7 @@
                 base_stats: t.base_stats || {},
                 slot_type: t.slot_type || '',
                 stage: t.type === 'blueprint' ? 'blueprint' : (t.type === 'material' ? '' : 'item'),
+                recipe_slug: t.recipe_slug || '',
                 quantity: quantity,
             });
         },
@@ -805,6 +881,8 @@
         encounterLootStorage: null,
         corpseStorage: null,
         questStorage: null,
+        bankStorage: null,
+        guildBankStorage: null,
         characterStats: null,
         myTradeSlots: null,
         partnerTradeSlots: null,
@@ -855,6 +933,12 @@
             this.disassembleStorage = storages.find(function (s) {
                 return s.storage_type === 'disassemble';
             }) || this.disassembleStorage;
+            this.bankStorage = storages.find(function (s) {
+                return s.storage_type === 'bank';
+            }) || this.bankStorage;
+            this.guildBankStorage = layout.guild_bank || storages.find(function (s) {
+                return s.storage_type === 'guild_bank';
+            }) || this.guildBankStorage;
             if (this._requestedCorpse) {
                 var corpseStorage = storages.find(function (s) {
                     return s.storage_type === 'corpse';
@@ -1181,6 +1265,7 @@
         auction: { window: 'auction', icon: '🏪', label: 'Аукцион' },
         players: { window: 'players', icon: '👥', label: 'Общение' },
         encounter: { window: 'encounter', icon: '⚔️', label: 'Бой' },
+        bank: { window: 'bank', icon: '🏦', label: 'Банк' },
         settings: { window: 'settings', icon: '⚙️', label: 'Настройки' },
     };
 
@@ -1256,7 +1341,7 @@
         },
 
         renderSkeleton: function () {
-            var defaults = ['journal', 'inventory', 'character', 'quests', 'encounter', 'auction', 'players', 'settings'];
+            var defaults = ['journal', 'inventory', 'character', 'quests', 'encounter', 'auction', 'players', 'bank', 'settings'];
             this.cols = 12;
             this.slots = [];
             this.layout = {};
@@ -1467,6 +1552,10 @@
         if (typeof loadPlayerData === 'function') loadPlayerData();
         if (options.craft && window.CraftPanel) CraftPanel.render();
         if (options.disassemble && window.DisassemblePanel) DisassemblePanel.render();
+        if (options.bank !== false && typeof window.loadBankData === 'function'
+            && window.WindowManager && WindowManager.isOpen('bank')) {
+            window.loadBankData();
+        }
     }
 
     function quickMoveWasNoop(data) {
@@ -1492,6 +1581,7 @@
                     refreshAfterStorageChange({
                         craft: intent === 'craft' || intent === 'station_return',
                         disassemble: intent === 'disassemble' || intent === 'station_return',
+                        bank: intent === 'bank' || intent === 'guild_bank' || intent === 'inventory',
                     });
                 } else if (!silent && typeof showMsg === 'function') {
                     showMsg('Нет подходящего слота', 'error');
@@ -1540,11 +1630,19 @@
         returnToInventory: function (fromSlotUuid) {
             return this.unequipFromSlot(fromSlotUuid);
         },
+
+        moveToBank: function (fromSlotUuid, options) {
+            options = options || {};
+            var intent = (window.bankState && window.bankState.activeTab === 'guild') ? 'guild_bank' : 'bank';
+            return StorageManager.load(GameState.characterUuid, 'inventory,bank,guild_bank').then(function () {
+                return StorageQuickActions.quickMove(fromSlotUuid, intent, options);
+            });
+        },
     };
 
     var ItemDispatcher = {
-        SINK_WINDOWS: ['craft', 'disassemble', 'trade', 'auction', 'quest'],
-        SINK_PRIORITY: ['trade', 'auction', 'craft', 'disassemble', 'quest'],
+        SINK_WINDOWS: ['craft', 'disassemble', 'trade', 'auction', 'quest', 'bank'],
+        SINK_PRIORITY: ['trade', 'auction', 'bank', 'craft', 'disassemble', 'quest'],
 
         getOpenSinks: function () {
             if (!window.WindowManager) return [];
@@ -1704,6 +1802,8 @@
                     return this.dispatchTrade(descriptor, sourceSlotUuid);
                 case 'auction':
                     return this.dispatchAuction(descriptor);
+                case 'bank':
+                    return this.dispatchBank(descriptor, sourceSlotUuid, options);
                 default:
                     return Promise.resolve();
             }
@@ -1749,6 +1849,14 @@
             if (typeof window.handleAuctionDrop !== 'function') return Promise.resolve();
             window.handleAuctionDrop(item);
             return Promise.resolve();
+        },
+
+        dispatchBank: function (item, sourceSlotUuid, options) {
+            var qa = window.StorageQuickActions;
+            if (!qa || !qa.moveToBank) return Promise.resolve();
+            var fromUuid = sourceSlotUuid || item.slot_uuid;
+            if (!fromUuid) return Promise.resolve();
+            return qa.moveToBank(fromUuid, { silent: options.silent === true });
         },
     };
 
@@ -2478,6 +2586,9 @@
 
         playExternalBattle: function (battle) {
             battle = battle || {};
+            if (battle.viewer_uuid && battle.viewer_uuid !== GameState.characterUuid) {
+                return Promise.resolve();
+            }
             battle.mode = battle.mode || 'duel';
             battle.encounter_name = battle.encounter_name || battle.foe_name || battle.opponent_name || 'Противник';
             this.mode = battle.mode;

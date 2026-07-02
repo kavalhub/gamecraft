@@ -738,6 +738,25 @@
             min-height: 0;
         }
 
+        #chatGuild {
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            padding: 0;
+        }
+        #guildChatList {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 12px;
+            min-height: 0;
+        }
+
+        .bank-panel-content {
+            padding: 8px;
+            overflow: auto;
+            max-height: 400px;
+        }
+
         .chat-journal-entry {
             font-size: 12px;
             line-height: 1.5;
@@ -1158,6 +1177,12 @@
         .tooltip-stat-label { color: #888; }
         .tooltip-stat-value { color: #10b981; font-weight: 600; }
         .tooltip-quantity { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); text-align: center; font-size: 14px; color: #fbbf24; font-weight: 700; }
+        .tooltip-recipe { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); }
+        .tooltip-recipe-title { font-size: 11px; color: #a5b4fc; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; font-weight: 600; }
+        .tooltip-recipe-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+        .tooltip-recipe-list li { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #ddd; }
+        .tooltip-recipe-qty { color: #fbbf24; font-weight: 700; }
+        .tooltip-recipe-result { margin-top: 8px; font-size: 12px; color: #86efac; font-weight: 600; }
 
         /* Mobile adaptation */
         @media (max-width: 768px) {
@@ -1225,7 +1250,11 @@
                 </div>
             </div>
             <div id="chatGuild" class="chat-panel-content" style="display:none">
-                <div class="chat-placeholder">Чат гильдии — скоро</div>
+                <div id="guildChatList"></div>
+                <div id="chatComposeGuild" class="chat-compose">
+                    <input type="text" id="guildChatInput" maxlength="500" placeholder="Сообщение гильдии..." autocomplete="off">
+                    <button type="button" id="guildChatSend">Отправить</button>
+                </div>
             </div>
             <div id="chatJournal" class="chat-panel-content" style="display:none">
                 <div id="eventsList">
@@ -1246,7 +1275,7 @@
             </div>
         </div>
         <div class="player-bar">
-            <div class="player-name" id="playerName">Загрузка...</div>
+            <div class="player-name"><span id="playerAvatar">🧙</span> <span id="playerName">Загрузка...</span></div>
             <div class="player-resources">
                 <div class="gold" id="playerGold">💰 0</div>
                 <div class="experience" id="playerExperience">⭐ 0</div>
@@ -1392,6 +1421,26 @@
         </div>
     </div>
 
+    <div class="window" id="window-bank" data-window="bank">
+        <div class="window-header">
+            <div class="window-title">
+                <span class="icon">🏦</span>
+                <span>Банк</span>
+            </div>
+            <div class="window-controls">
+                <div class="window-btn" onclick="WindowManager.close('bank')">✕</div>
+            </div>
+        </div>
+        <div class="window-body">
+            <div id="bankTabs" class="game-tabs">
+                <button type="button" class="game-tab active" data-tab="personal" onclick="switchBankTab('personal')">Личный</button>
+                <button type="button" class="game-tab" data-tab="guild" onclick="switchBankTab('guild')">Гильдия</button>
+            </div>
+            <div id="bankPersonalContent" class="bank-panel-content"></div>
+            <div id="bankGuildContent" class="bank-panel-content" style="display:none;"></div>
+        </div>
+    </div>
+
     <div class="window" id="window-settings" data-window="settings">
         <div class="window-header">
             <div class="window-title">
@@ -1440,7 +1489,7 @@
 <div id="msg" class="msg"></div>
 <div id="itemTooltip" class="tooltip"></div>
 @include('partials.resource-quantity-modal')
-<script src="{{ asset('js/game/game.bundle.js') }}?v=20260702m"></script>
+<script src="{{ asset('js/game/game.bundle.js') }}?v=20260702p"></script>
 
 <script>
     window.GameApi = {
@@ -1989,11 +2038,72 @@
         } catch (e) { console.error(e); }
     }
 
+    window.bankState = { activeTab: 'personal' };
+
+    window.switchBankTab = function(tab) {
+        bankState.activeTab = tab;
+        document.querySelectorAll('#bankTabs .game-tab').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+        document.getElementById('bankPersonalContent').style.display = tab === 'personal' ? 'block' : 'none';
+        document.getElementById('bankGuildContent').style.display = tab === 'guild' ? 'block' : 'none';
+    };
+
+    async function loadBankData() {
+        if (!window.StorageManager || !GameState.characterUuid) return;
+        try {
+            const data = await StorageManager.load(GameState.characterUuid, 'bank,guild_bank');
+            renderBankGrids();
+        } catch (e) {
+            console.error('Bank load error:', e);
+        }
+    }
+
+    function renderBankGrids() {
+        const personalEl = document.getElementById('bankPersonalContent');
+        const guildEl = document.getElementById('bankGuildContent');
+        if (!personalEl || !window.StorageGrid || !window.StorageManager) return;
+
+        const bank = StorageManager.bankStorage;
+        if (bank) {
+            StorageGrid.mount(personalEl, bank, { draggable: true, gridId: 'bank-personal-grid', compact: true });
+        } else {
+            personalEl.innerHTML = '<div class="chat-placeholder">Личный банк недоступен</div>';
+        }
+
+        const guildBank = StorageManager.guildBankStorage;
+        if (guildBank) {
+            StorageGrid.mount(guildEl, guildBank, { draggable: true, gridId: 'bank-guild-grid', compact: true });
+        } else {
+            guildEl.innerHTML = '<div class="chat-placeholder">Вступите в гильдию для доступа к банку</div>';
+        }
+
+        bindBankDblclick(personalEl);
+        bindBankDblclick(guildEl);
+    }
+
+    function bindBankDblclick(container) {
+        if (!container || container.dataset.dblBound) return;
+        container.dataset.dblBound = '1';
+        container.addEventListener('dblclick', (e) => {
+            const itemEl = e.target.closest('.game-item-interactive');
+            const slotEl = e.target.closest('.storage-slot[data-slot-uuid]');
+            if (!itemEl || !slotEl || !window.StorageQuickActions) return;
+            if (window.GameItemTooltip) GameItemTooltip.hide();
+            if (window.GameItemPreview) GameItemPreview.close();
+            StorageQuickActions.returnToInventory(slotEl.dataset.slotUuid);
+        });
+    }
+
+    window.loadBankData = loadBankData;
+
     async function loadPlayerData() {
         try {
             if (window.StorageManager) {
                 const data = await StorageManager.load(GameState.characterUuid, 'inventory,equipment,craft,disassemble,stats');
                 document.getElementById('playerName').textContent = data.character_name || 'Игрок';
+                const avatarEl = document.getElementById('playerAvatar');
+                if (avatarEl) avatarEl.textContent = data.character_avatar_icon || '🧙';
                 const gold = data.gold != null ? data.gold : StorageManager.getGold();
                 if (window.GoldChip && StorageManager.inventoryStorage) {
                     const goldEl = document.getElementById('playerGold');
@@ -2019,6 +2129,9 @@
                 }
                 if (WindowManager.isOpen('disassemble') && typeof window.renderDisassemblePanel === 'function') {
                     renderDisassemblePanel();
+                }
+                if (WindowManager.isOpen('bank') && typeof window.loadBankData === 'function') {
+                    loadBankData();
                 }
                 return;
             }
@@ -2075,6 +2188,12 @@
         }
         if (typeof window.renderEncounterPanel === 'function' && WindowManager.isOpen('encounter')) {
             renderEncounterPanel();
+        }
+        if (typeof window.loadBankData === 'function' && WindowManager.isOpen('bank')) {
+            loadBankData();
+        }
+        if (typeof window.loadBankData === 'function' && WindowManager.isOpen('bank')) {
+            loadBankData();
         }
         if (typeof window.refreshTradeData === 'function' && window.tradeState?.currentTrade) {
             window.refreshTradeData().then(function() {
@@ -2265,6 +2384,9 @@
         generalSeenIds: new Set(),
         generalLastId: 0,
         generalPollTimer: null,
+        guildSeenIds: new Set(),
+        guildLastId: 0,
+        guildPollTimer: null,
         publicTypes: [
             'user.registered',
             'auction.listed',
@@ -2291,6 +2413,14 @@
             if (input) {
                 input.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') this.sendGeneralMessage();
+                });
+            }
+            const guildSendBtn = document.getElementById('guildChatSend');
+            const guildInput = document.getElementById('guildChatInput');
+            if (guildSendBtn) guildSendBtn.addEventListener('click', () => this.sendGuildMessage());
+            if (guildInput) {
+                guildInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') this.sendGuildMessage();
                 });
             }
         },
@@ -2320,12 +2450,16 @@
                 btn.classList.toggle('active', btn.dataset.tab === tab);
             });
             document.getElementById('chatGeneral').style.display = tab === 'general' ? 'flex' : 'none';
-            document.getElementById('chatGuild').style.display = tab === 'guild' ? 'block' : 'none';
+            document.getElementById('chatGuild').style.display = tab === 'guild' ? 'flex' : 'none';
             document.getElementById('chatJournal').style.display = tab === 'journal' ? 'block' : 'none';
             this.stopGeneralPoll();
+            this.stopGuildPoll();
             if (tab === 'general') {
                 this.loadGeneralChat(false);
                 this.startGeneralPoll();
+            } else if (tab === 'guild') {
+                this.loadGuildChat(false);
+                this.startGuildPoll();
             }
         },
 
@@ -2373,7 +2507,7 @@
             el.className = 'chat-message';
             el.dataset.messageId = String(message.id);
             el.innerHTML = `<span class="chat-message-time">${message.created_at || ''}</span>` +
-                `<span class="chat-message-author">${message.character_name || 'Игрок'}:</span> ` +
+                `<span class="chat-message-author">${message.avatar_icon || ''} ${message.character_name || 'Игрок'}:</span> ` +
                 this.escapeHtml(message.body || '');
             list.appendChild(el);
             if (isNew) list.scrollTop = list.scrollHeight;
@@ -2432,6 +2566,95 @@
                 if (data.message) this.appendGeneralMessage(data.message, true);
             } catch (e) {
                 showMsg('Ошибка отправки: ' + e.message, 'error');
+            }
+        },
+
+        async loadGuildChat(pollOnly = false) {
+            try {
+                const characterUuid = GameState.characterUuid || window.characterUuid;
+                const afterParam = pollOnly && this.guildLastId ? `&after_id=${this.guildLastId}` : '';
+                const res = await GameApi.fetch(
+                    `/api/chat/${characterUuid}/messages?channel=guild&limit=50${afterParam}`
+                );
+                const data = await res.json();
+                const list = document.getElementById('guildChatList');
+                if (!list) return;
+
+                if (!pollOnly) {
+                    list.innerHTML = '';
+                    this.guildSeenIds.clear();
+                    this.guildLastId = 0;
+                }
+
+                const messages = data.messages || [];
+                if (!pollOnly && messages.length === 0) {
+                    list.innerHTML = '<div class="chat-placeholder">Пока нет сообщений гильдии</div>';
+                    return;
+                }
+
+                messages.forEach(m => this.appendGuildMessage(m, pollOnly));
+            } catch (e) {
+                console.error('Guild chat load error:', e);
+            }
+        },
+
+        appendGuildMessage(message, isNew) {
+            if (!message || message.id == null) return;
+            if (this.guildSeenIds.has(message.id)) return;
+            this.guildSeenIds.add(message.id);
+            if (message.id > this.guildLastId) this.guildLastId = message.id;
+
+            const list = document.getElementById('guildChatList');
+            if (!list) return;
+            const placeholder = list.querySelector('.chat-placeholder');
+            if (placeholder) placeholder.remove();
+
+            const el = document.createElement('div');
+            el.className = 'chat-message';
+            el.dataset.messageId = String(message.id);
+            el.innerHTML = `<span class="chat-message-time">${message.created_at || ''}</span>` +
+                `<span class="chat-message-author">${message.avatar_icon || ''} ${message.character_name || 'Игрок'}:</span> ` +
+                this.escapeHtml(message.body || '');
+            list.appendChild(el);
+            if (isNew) list.scrollTop = list.scrollHeight;
+        },
+
+        async sendGuildMessage() {
+            const input = document.getElementById('guildChatInput');
+            if (!input) return;
+            const text = input.value.trim();
+            if (!text) return;
+
+            try {
+                const characterUuid = GameState.characterUuid || window.characterUuid;
+                const res = await GameApi.fetch(`/api/chat/${characterUuid}/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ channel: 'guild', message: text }),
+                });
+                const data = await res.json();
+                if (data.error) {
+                    showMsg(data.error, 'error');
+                    return;
+                }
+                input.value = '';
+                if (data.message) this.appendGuildMessage(data.message, true);
+            } catch (e) {
+                showMsg('Ошибка отправки: ' + e.message, 'error');
+            }
+        },
+
+        startGuildPoll() {
+            this.stopGuildPoll();
+            this.guildPollTimer = setInterval(() => {
+                if (this.activeTab === 'guild') this.loadGuildChat(true);
+            }, 3000);
+        },
+
+        stopGuildPoll() {
+            if (this.guildPollTimer) {
+                clearInterval(this.guildPollTimer);
+                this.guildPollTimer = null;
             }
         },
 
@@ -2600,6 +2823,9 @@
                     }
                 }
                 if (e.type === 'duel.resolved' && e.payload && e.payload.mode === 'duel') {
+                    if (e.payload.viewer_uuid && e.payload.viewer_uuid !== GameState.characterUuid) {
+                        return;
+                    }
                     setTimeout(function () {
                         if (window.WindowManager) WindowManager.open('encounter');
                         if (window.EncounterPanel && typeof EncounterPanel.playExternalBattle === 'function') {
@@ -2773,8 +2999,14 @@
             if (typeof window.startDuel === 'function') {
                 window.startDuel(uuid);
             }
-        } else if (action === 'friend' || action === 'guild') {
-            showMsg('Скоро', 'info');
+        } else if (action === 'friend' && uuid) {
+            if (typeof window.requestFriend === 'function') {
+                window.requestFriend(uuid);
+            }
+        } else if (action === 'guild' && uuid) {
+            if (typeof window.inviteToGuild === 'function') {
+                window.inviteToGuild(uuid);
+            }
         }
     });
 

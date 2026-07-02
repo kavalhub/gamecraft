@@ -279,6 +279,8 @@ class StorageProvisioningService
             'inventory' => 4,
             'trade' => 3,
             'play_panel' => 12,
+            'bank' => 15,
+            'guild_bank' => 15,
             default => 4,
         };
     }

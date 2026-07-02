@@ -15,8 +15,13 @@ use App\Http\Controllers\Api\HeartbeatController;
 use App\Http\Controllers\Api\QuestController;
 use App\Http\Controllers\Api\StorageController;
 use App\Http\Controllers\Api\ItemTemplateController;
+use App\Http\Controllers\Api\PlayPanelController;
+use App\Http\Controllers\Api\FriendController;
+use App\Http\Controllers\Api\GuildController;
+use App\Http\Controllers\Api\GameMetaController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('/game/meta', [GameMetaController::class, 'index']);
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
@@ -79,6 +84,19 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/chat/{characterUuid}/messages', [ChatController::class, 'messages']);
         Route::post('/chat/{characterUuid}/send', [ChatController::class, 'send']);
+
+        Route::get('/friends/{characterUuid}', [FriendController::class, 'index']);
+        Route::post('/friends/{characterUuid}/request', [FriendController::class, 'request']);
+        Route::post('/friends/{characterUuid}/accept', [FriendController::class, 'accept']);
+        Route::post('/friends/{characterUuid}/remove', [FriendController::class, 'remove']);
+
+        Route::get('/guild/options', [GuildController::class, 'options']);
+        Route::get('/guild/{characterUuid}', [GuildController::class, 'index']);
+        Route::post('/guild/{characterUuid}/create', [GuildController::class, 'create']);
+        Route::post('/guild/{characterUuid}/join', [GuildController::class, 'join']);
+        Route::post('/guild/{characterUuid}/leave', [GuildController::class, 'leave']);
+        Route::post('/guild/{characterUuid}/invite', [GuildController::class, 'invite']);
+        Route::post('/guild/{characterUuid}/decline-invite', [GuildController::class, 'declineInvite']);
 
         Route::get('/play-panel/{characterUuid}', [PlayPanelController::class, 'show']);
 

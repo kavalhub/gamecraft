@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 
 class Character extends Model
 {
-    protected $fillable = ['uuid', 'user_uuid', 'character_type', 'name', 'active'];
+    protected $fillable = ['uuid', 'user_uuid', 'character_type', 'name', 'avatar', 'emblem', 'active'];
     protected $casts = ['active' => 'boolean'];
 
     protected static function boot(): void
@@ -42,4 +42,23 @@ class Character extends Model
     public function isPlayer(): bool { return $this->character_type === 'player'; }
     public function isNpc(): bool { return str_starts_with($this->character_type, 'npc'); }
     public function isAuction(): bool { return $this->character_type === 'auction'; }
+    public function isGuild(): bool { return $this->character_type === 'guild'; }
+
+    public function avatarIcon(): string
+    {
+        $avatars = config('game.avatars', []);
+
+        return $avatars[$this->avatar]['icon'] ?? '🧙';
+    }
+
+    public function emblemIcon(): string
+    {
+        if (!$this->emblem) {
+            return '🛡️';
+        }
+
+        $emblems = config('game.guild_emblems', []);
+
+        return $emblems[$this->emblem]['icon'] ?? '🛡️';
+    }
 }

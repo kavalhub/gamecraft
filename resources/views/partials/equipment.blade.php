@@ -111,6 +111,7 @@ function renderCharacterStats(container, profile) {
         ['Интеллект', total.intellect || 0],
         ['Выносливость', total.stamina || 0],
         ['Дух', total.spirit || 0],
+        ['Базовый урон', (profile.base && profile.base.base_damage) || 0],
         ['Урон', total.damage || 0],
         ['Защита', total.defense || 0],
         ['Здоровье', total.health || 0],
