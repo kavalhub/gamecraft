@@ -287,9 +287,69 @@
             min-height: 480px;
         }
 
+        #window-encounter {
+            width: 820px;
+            height: auto;
+            min-height: 480px;
+        }
+
         #window-craft .window-body,
-        #window-disassemble .window-body {
+        #window-disassemble .window-body,
+        #window-encounter .window-body {
             padding: 16px;
+        }
+
+        .encounter-layout {
+            display: grid;
+            grid-template-columns: 200px 1fr 220px;
+            gap: 14px;
+            min-height: 400px;
+        }
+        .encounter-section-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 8px;
+            letter-spacing: 0.04em;
+        }
+        .encounter-list { display: flex; flex-direction: column; gap: 6px; }
+        .encounter-list-item {
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(0,0,0,0.2);
+            cursor: pointer;
+            text-align: left;
+        }
+        .encounter-list-item.active {
+            border-color: rgba(102, 126, 234, 0.8);
+            background: rgba(102, 126, 234, 0.15);
+        }
+        .encounter-list-item-name { font-weight: 600; font-size: 14px; }
+        .encounter-list-item-desc { font-size: 11px; color: #999; margin-top: 4px; }
+        .encounter-combat-log {
+            min-height: 280px;
+            max-height: 320px;
+            overflow-y: auto;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            padding: 10px;
+            background: rgba(0,0,0,0.25);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .encounter-combat-empty { color: #666; font-style: italic; }
+        .encounter-log-line { font-size: 13px; line-height: 1.4; }
+        .encounter-log-line--player { color: #93c5fd; }
+        .encounter-log-line--enemy { color: #fca5a5; }
+        .encounter-log-line--system { color: #fbbf24; font-weight: 600; }
+        .encounter-actions { display: flex; gap: 8px; margin-top: 10px; }
+        .encounter-status { margin-top: 8px; font-size: 12px; color: #aaa; }
+        .encounter-loot-grid {
+            display: grid;
+            grid-template-columns: repeat(4, var(--slot-size));
+            gap: 6px;
         }
 
         #window-quests, #window-quest {
@@ -1164,6 +1224,21 @@
         </div>
     </div>
 
+    <div class="window" id="window-encounter" data-window="encounter">
+        <div class="window-header">
+            <div class="window-title">
+                <span class="icon">⚔️</span>
+                <span>Столкновение</span>
+            </div>
+            <div class="window-controls">
+                <div class="window-btn" onclick="WindowManager.close('encounter')">✕</div>
+            </div>
+        </div>
+        <div class="window-body">
+            @include('partials.encounter')
+        </div>
+    </div>
+
     <div class="window" id="window-quests" data-window="quests">
         <div class="window-header">
             <div class="window-title">
@@ -1286,7 +1361,7 @@
 <div id="msg" class="msg"></div>
 <div id="itemTooltip" class="tooltip"></div>
 @include('partials.resource-quantity-modal')
-<script src="{{ asset('js/game/game.bundle.js') }}?v=20260702g"></script>
+<script src="{{ asset('js/game/game.bundle.js') }}?v=20260702h"></script>
 
 <script>
     window.GameApi = {
@@ -1401,6 +1476,7 @@
             character:  { center: true, verticalCenter: true },
             craft:      { center: true, verticalCenter: true },
             disassemble: { center: true, verticalCenter: true },
+            encounter: { center: true, verticalCenter: true },
             quests:     { x: 20, y: 120 },
             quest:      { center: true, verticalCenter: true },
             auction:    { center: true, verticalCenter: true },
@@ -1589,6 +1665,12 @@
                     if (typeof window.loadDisassemblePanel === 'function') {
                         window.loadDisassemblePanel();
                     }
+                }, 50);
+            }
+            if (name === 'encounter' && typeof window.loadEncounterPanel === 'function') {
+                setTimeout(function () {
+                    if (typeof window.initEncounterPanel === 'function') window.initEncounterPanel();
+                    window.loadEncounterPanel();
                 }, 50);
             }
             if (name === 'players' && typeof window.initPlayers === 'function') {
@@ -1911,6 +1993,9 @@
         }
         if (typeof window.renderDisassemblePanel === 'function' && WindowManager.isOpen('disassemble')) {
             renderDisassemblePanel();
+        }
+        if (typeof window.renderEncounterPanel === 'function' && WindowManager.isOpen('encounter')) {
+            renderEncounterPanel();
         }
         if (typeof window.refreshTradeData === 'function' && window.tradeState?.currentTrade) {
             window.refreshTradeData().then(function() {

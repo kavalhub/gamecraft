@@ -134,7 +134,7 @@ class CharacterStatsService
 
         $slotUuids = $storage->slots()->pluck('uuid');
         $items = \App\Models\Item::whereIn('slot_uuid', $slotUuids)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->where('stage', 'item')
             ->get();
 

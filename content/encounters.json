@@ -1,0 +1,52 @@
+{
+  "version": "1.0.0",
+  "encounters": [
+    {
+      "slug": "forest_wolf",
+      "name": "Лесной волк",
+      "description": "Слабый хищник у опушки леса.",
+      "stats": {
+        "health": 35,
+        "damage": 6,
+        "defense": 1
+      },
+      "experience": 12,
+      "loot": [
+        {
+          "template_slug": "wood",
+          "min": 1,
+          "max": 3,
+          "chance": 100,
+          "priority": 1
+        },
+        {
+          "template_slug": "gold",
+          "min": 3,
+          "max": 8,
+          "chance": 70,
+          "priority": 2
+        }
+      ]
+    },
+    {
+      "slug": "cave_rat",
+      "name": "Пещерная крыса",
+      "description": "Мелкий вредитель в тёмных туннелях.",
+      "stats": {
+        "health": 18,
+        "damage": 4,
+        "defense": 0
+      },
+      "experience": 6,
+      "loot": [
+        {
+          "template_slug": "gold",
+          "min": 1,
+          "max": 5,
+          "chance": 90,
+          "priority": 1
+        }
+      ]
+    }
+  ]
+}

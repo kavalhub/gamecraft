@@ -66,7 +66,7 @@ class QuestServiceTest extends TestCase
         $this->assertTrue(
             Item::where('template_slug', 'recipe_wooden_sword')
                 ->whereIn('slot_uuid', $this->inventorySlotUuids())
-                ->whereNull('temporary_slot_uuid')
+                ->whereNull('buffer_slot_uuid')
                 ->exists()
         );
 

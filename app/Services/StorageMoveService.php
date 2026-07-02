@@ -27,6 +27,7 @@ class StorageMoveService
         private QuestStorageService $questStorageService,
         private WorldStorageService $worldStorageService,
         private SlotFitService $slotFitService,
+        private SlotCellResolver $slotCellResolver,
     ) {}
 
     public function move(
@@ -50,11 +51,8 @@ class StorageMoveService
             if ($from['kind'] === 'regular') {
                 /** @var Slot $fromSlot */
                 $fromSlot = $from['cell'];
-                if (Item::where('slot_uuid', $fromSlot->uuid)->whereNotNull('temporary_slot_uuid')->exists()) {
+                if ($this->slotCellResolver->hasBufferedOccupantOnRegularSlot($fromSlot)) {
                     throw new \RuntimeException('Предмет занят');
-                }
-                if (Resources::where('slot_uuid', $fromSlot->uuid)->whereNotNull('temporary_slot_uuid')->exists()) {
-                    throw new \RuntimeException('Ресурс занят');
                 }
             }
 
@@ -83,17 +81,7 @@ class StorageMoveService
 
     private function resolveCell(string $uuid): array
     {
-        $tempSlot = TemporarySlot::where('uuid', $uuid)->lockForUpdate()->first();
-        if ($tempSlot) {
-            return ['kind' => 'temporary', 'cell' => $tempSlot];
-        }
-
-        $slot = Slot::where('uuid', $uuid)->lockForUpdate()->first();
-        if ($slot) {
-            return ['kind' => 'regular', 'cell' => $slot];
-        }
-
-        throw new \RuntimeException('Слот не найден');
+        return $this->slotCellResolver->resolve($uuid, true);
     }
 
     private function validateMove(Character $actor, array $from, array $to): void
@@ -222,21 +210,14 @@ class StorageMoveService
         if ($cell['kind'] === 'regular') {
             /** @var Slot $slot */
             $slot = $cell['cell'];
-            $item = Item::where('slot_uuid', $slot->uuid)->first();
-            if ($item && !$item->temporary_slot_uuid) {
-                return $item;
-            }
-            $resource = Resources::where('slot_uuid', $slot->uuid)
-                ->whereNull('temporary_slot_uuid')
-                ->first();
 
-            return $resource;
+            return $this->slotCellResolver->getOccupantForRegularSlot($slot);
         }
 
         /** @var TemporarySlot $tempSlot */
         $tempSlot = $cell['cell'];
 
-        return $this->provisioningService->getOccupantForTemporarySlot($tempSlot);
+        return $this->slotCellResolver->getOccupantForTemporarySlot($tempSlot);
     }
 
     private function getTargetOccupant(array $cell): Item|Resources|null
@@ -425,14 +406,14 @@ class StorageMoveService
                 throw new \RuntimeException($isStation ? 'Слот станции занят' : ($isQuest ? 'Слот квеста занят' : 'Целевой слот обмена занят'));
             }
 
-            $occupant->update(['temporary_slot_uuid' => $toTempSlot->uuid]);
+            $occupant->update(['buffer_slot_uuid' => $toTempSlot->uuid]);
             if (!$isStation && !$isQuest) {
                 $this->syncTradeItemOnOverlay($actor, $occupant, $toTempSlot);
             }
 
             $this->maybeSyncCraftStation($actor, $toTempSlot);
 
-            return ['type' => 'item', 'uuid' => $occupant->uuid, 'temporary_slot_uuid' => $toTempSlot->uuid];
+            return ['type' => 'item', 'uuid' => $occupant->uuid, 'buffer_slot_uuid' => $toTempSlot->uuid];
         }
 
         /** @var Resources $occupant */
@@ -483,7 +464,7 @@ class StorageMoveService
                 'type' => 'resource',
                 'uuid' => $toOccupant->uuid,
                 'quantity' => $merged,
-                'temporary_slot_uuid' => $toTempSlot->uuid,
+                'buffer_slot_uuid' => $toTempSlot->uuid,
             ];
         }
 
@@ -510,7 +491,7 @@ class StorageMoveService
             ]);
         }
 
-        $tradedResource->update(['temporary_slot_uuid' => $toTempSlot->uuid]);
+        $tradedResource->update(['buffer_slot_uuid' => $toTempSlot->uuid]);
         if (!$isCraft && !$isDisassemble && !$isQuest) {
             $this->syncTradeResourceOnOverlay($actor, $tradedResource, $toTempSlot, $moveQty);
         }
@@ -521,7 +502,7 @@ class StorageMoveService
             'type' => 'resource',
             'uuid' => $tradedResource->uuid,
             'quantity' => $moveQty,
-            'temporary_slot_uuid' => $toTempSlot->uuid,
+            'buffer_slot_uuid' => $toTempSlot->uuid,
         ];
     }
 
@@ -546,6 +527,7 @@ class StorageMoveService
         $tempStorage = Storage::where('uuid', $fromTempSlot->storage_uuid)->firstOrFail();
         $isCraft = $tempStorage->storage_type === 'craft';
         $isDisassemble = $tempStorage->storage_type === 'disassemble';
+        $isEncounterLoot = $tempStorage->storage_type === 'encounter_loot';
         $isStation = $isCraft || $isDisassemble;
         $isQuest = $tempStorage->storage_type === 'quest';
         $toOccupant = $this->getTargetOccupant($toCell);
@@ -556,7 +538,7 @@ class StorageMoveService
             }
 
             if ($isStation && $toSlot->uuid === $occupant->slot_uuid) {
-                $occupant->update(['temporary_slot_uuid' => null]);
+                $occupant->update(['buffer_slot_uuid' => null]);
                 $this->maybeSyncCraftStation($actor, $fromTempSlot);
 
                 return ['type' => 'item', 'uuid' => $occupant->uuid];
@@ -567,7 +549,7 @@ class StorageMoveService
             }
 
             $occupant->update([
-                'temporary_slot_uuid' => null,
+                'buffer_slot_uuid' => null,
                 'slot_uuid' => $toSlot->uuid,
             ]);
             if (!$isStation && !$isQuest) {
@@ -585,7 +567,7 @@ class StorageMoveService
         }
 
         if ($isStation && $toSlot->uuid === $occupant->slot_uuid) {
-            $occupant->update(['temporary_slot_uuid' => null]);
+            $occupant->update(['buffer_slot_uuid' => null]);
             $this->maybeSyncCraftStation($actor, $fromTempSlot);
 
             return ['type' => 'resource', 'uuid' => $occupant->uuid, 'quantity' => $occupant->quantity];
@@ -595,7 +577,7 @@ class StorageMoveService
 
         if (!$toOccupant) {
             $occupant->update([
-                'temporary_slot_uuid' => null,
+                'buffer_slot_uuid' => null,
                 'slot_uuid' => $toSlot->uuid,
             ]);
             if (!$isStation && !$isQuest) {
@@ -677,13 +659,13 @@ class StorageMoveService
                     'type' => 'resource',
                     'uuid' => $toOccupant->uuid,
                     'quantity' => $merged,
-                    'temporary_slot_uuid' => $toTempSlot->uuid,
+                    'buffer_slot_uuid' => $toTempSlot->uuid,
                 ];
             }
         }
 
         if (!$toOccupant) {
-            $occupant->update(['temporary_slot_uuid' => $toTempSlot->uuid]);
+            $occupant->update(['buffer_slot_uuid' => $toTempSlot->uuid]);
             if (!$fromStation && !$toStation) {
                 $this->updateTradeItemTempSlot($actor, $occupant, $toTempSlot);
             }
@@ -694,14 +676,14 @@ class StorageMoveService
             return [
                 'type' => $occupant instanceof Item ? 'item' : 'resource',
                 'uuid' => $occupant->uuid,
-                'temporary_slot_uuid' => $toTempSlot->uuid,
+                'buffer_slot_uuid' => $toTempSlot->uuid,
             ];
         }
 
-        $fromUuid = $occupant->temporary_slot_uuid;
-        $toUuid = $toOccupant->temporary_slot_uuid;
-        $occupant->update(['temporary_slot_uuid' => $toUuid]);
-        $toOccupant->update(['temporary_slot_uuid' => $fromUuid]);
+        $fromUuid = $occupant->buffer_slot_uuid;
+        $toUuid = $toOccupant->buffer_slot_uuid;
+        $occupant->update(['buffer_slot_uuid' => $toUuid]);
+        $toOccupant->update(['buffer_slot_uuid' => $fromUuid]);
 
         $this->maybeSyncCraftStation($actor, $fromTempSlot);
         $this->maybeSyncCraftStation($actor, $toTempSlot);

@@ -131,7 +131,7 @@ class DisassembleStationService
         $moved = 0;
 
         foreach ($this->getTemporarySlots($character) as $tempSlot) {
-            $item = Item::where('temporary_slot_uuid', $tempSlot->uuid)->first();
+            $item = Item::where('buffer_slot_uuid', $tempSlot->uuid)->first();
             if ($item) {
                 $backingSlot = Slot::where('uuid', $item->slot_uuid)->first();
                 $backingStorage = $backingSlot
@@ -157,7 +157,7 @@ class DisassembleStationService
                 continue;
             }
 
-            $resource = Resources::where('temporary_slot_uuid', $tempSlot->uuid)->first();
+            $resource = Resources::where('buffer_slot_uuid', $tempSlot->uuid)->first();
             if (!$resource) {
                 continue;
             }
@@ -187,24 +187,24 @@ class DisassembleStationService
 
     public function assertItemOnStation(Item $item, Character $character): void
     {
-        if (!$item->temporary_slot_uuid) {
+        if (!$item->buffer_slot_uuid) {
             throw new \RuntimeException('Предмет для разборки должен быть на станции разбора');
         }
 
         $centerSlot = $this->getCenterTemporarySlot($character);
-        if ($item->temporary_slot_uuid !== $centerSlot->uuid) {
+        if ($item->buffer_slot_uuid !== $centerSlot->uuid) {
             throw new \RuntimeException('Предмет для разборки должен быть в центральном слоте');
         }
     }
 
     public function assertResourceOnStation(Resources $resource, Character $character): void
     {
-        if (!$resource->temporary_slot_uuid) {
+        if (!$resource->buffer_slot_uuid) {
             throw new \RuntimeException('Ресурс для разборки должен быть на станции разбора');
         }
 
         $centerSlot = $this->getCenterTemporarySlot($character);
-        if ($resource->temporary_slot_uuid !== $centerSlot->uuid) {
+        if ($resource->buffer_slot_uuid !== $centerSlot->uuid) {
             throw new \RuntimeException('Ресурс для разборки должен быть в центральном слоте');
         }
     }

@@ -41,7 +41,12 @@ final class TemporarySlotScope implements SlotScope
         }
 
         $tempUuids = $this->temporarySlots->pluck('uuid');
-        $query = Resources::whereIn('temporary_slot_uuid', $tempUuids)
+        $query = Resources::where(function ($q) use ($tempUuids) {
+            $q->whereIn('buffer_slot_uuid', $tempUuids)
+                ->orWhere(function ($q2) use ($tempUuids) {
+                    $q2->whereIn('slot_uuid', $tempUuids)->whereNull('buffer_slot_uuid');
+                });
+        })
             ->where('template_slug', $templateSlug);
 
         if ($maxStack !== null) {
@@ -80,7 +85,7 @@ final class TemporarySlotScope implements SlotScope
         return Resources::create([
             'uuid' => Str::uuid()->toString(),
             'slot_uuid' => $backingSlot->uuid,
-            'temporary_slot_uuid' => $cell->uuid,
+            'buffer_slot_uuid' => $cell->uuid,
             'recipe_slug' => $templateSlug,
             'template_slug' => $templateSlug,
             'slot_type' => $template->slot_type,

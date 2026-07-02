@@ -46,7 +46,7 @@ class StorageQuickMoveServiceTest extends TestCase
         $this->assertArrayNotHasKey('noop', $result);
         $item->refresh();
         $this->assertNotNull($item->slot_uuid);
-        $this->assertNull($item->temporary_slot_uuid);
+        $this->assertNull($item->buffer_slot_uuid);
 
         $equipment = $this->character->storages()->where('storage_type', 'equipment')->firstOrFail();
         $equipSlot = $equipment->slots()->where('slot_type', 'equipment_weapon')->firstOrFail();
@@ -80,14 +80,14 @@ class StorageQuickMoveServiceTest extends TestCase
         $wood = \App\Models\Resources::query()
             ->whereIn('slot_uuid', $this->character->storages()->where('storage_type', 'inventory')->firstOrFail()->slots()->pluck('uuid'))
             ->where('template_slug', 'wood')
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->firstOrFail();
 
         $result = $this->service->quickMove($this->character, $wood->slot_uuid, 'craft', 'material');
 
         $this->assertArrayNotHasKey('noop', $result);
         $wood->refresh();
-        $this->assertNotNull($wood->temporary_slot_uuid);
+        $this->assertNotNull($wood->buffer_slot_uuid);
     }
 
     public function test_quick_move_iron_sword_materials(): void
@@ -104,13 +104,13 @@ class StorageQuickMoveServiceTest extends TestCase
         $plank = \App\Models\Resources::query()
             ->whereIn('slot_uuid', $inventorySlotUuids)
             ->where('template_slug', 'wooden_plank')
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->firstOrFail();
 
         $ingot = \App\Models\Resources::query()
             ->whereIn('slot_uuid', $inventorySlotUuids)
             ->where('template_slug', 'iron_ingot')
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->firstOrFail();
 
         $plankResult = $this->service->quickMove($this->character, $plank->slot_uuid, 'craft', 'material');
@@ -121,8 +121,8 @@ class StorageQuickMoveServiceTest extends TestCase
 
         $plank->refresh();
         $ingot->refresh();
-        $this->assertNotNull($plank->temporary_slot_uuid);
-        $this->assertNotNull($ingot->temporary_slot_uuid);
+        $this->assertNotNull($plank->buffer_slot_uuid);
+        $this->assertNotNull($ingot->buffer_slot_uuid);
     }
 
     public function test_quick_move_station_return(): void
@@ -132,13 +132,13 @@ class StorageQuickMoveServiceTest extends TestCase
         WorkbenchHelper::placeOnBlueprintSlot($this->character, $blueprint);
         $blueprint->refresh();
 
-        $tempUuid = $blueprint->temporary_slot_uuid;
+        $tempUuid = $blueprint->buffer_slot_uuid;
         $this->assertNotNull($tempUuid);
 
         $result = $this->service->quickMove($this->character, $tempUuid, 'station_return');
 
         $this->assertArrayNotHasKey('noop', $result);
         $blueprint->refresh();
-        $this->assertNull($blueprint->temporary_slot_uuid);
+        $this->assertNull($blueprint->buffer_slot_uuid);
     }
 }

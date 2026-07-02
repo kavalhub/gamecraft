@@ -92,7 +92,7 @@ class AuctionController extends Controller
 
             return response()->json([
                 'success' => true,
-                'temporary_slot_uuid' => $temporarySlot->uuid,
+                'buffer_slot_uuid' => $temporarySlot->uuid,
                 'expires_at' => $temporarySlot->timestamps_end,
             ]);
         } catch (\RuntimeException $e) {

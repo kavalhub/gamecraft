@@ -154,6 +154,17 @@ class SlotDepositService
         );
     }
 
+    public function scopeForEncounterLoot(Character $character, EncounterLootStationService $station): TemporarySlotScope
+    {
+        $storage = $station->ensureEncounterLootStorage($character);
+
+        return TemporarySlotScope::forTemporarySlots(
+            $storage,
+            $station->getTemporarySlots($character),
+            'encounter_loot_backing'
+        );
+    }
+
     private function applyPlacementStep(
         Character $character,
         string $templateSlug,

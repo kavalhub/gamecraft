@@ -19,7 +19,9 @@ class StorageLayoutService
         private CharacterStatsService $characterStatsService,
         private CraftStationService $craftStationService,
         private DisassembleStationService $disassembleStationService,
+        private EncounterLootStationService $encounterLootStationService,
         private QuestStorageService $questStorageService,
+        private SlotCellResolver $slotCellResolver,
     ) {}
 
     /**
@@ -102,6 +104,12 @@ class StorageLayoutService
         if (in_array('disassemble', $include, true)) {
             $disassemble = $this->disassembleStationService->ensureDisassembleStorage($character);
             $result['storages'][] = $this->formatStationSlotGrid($character, $disassemble, $this->disassembleStationService);
+        }
+
+        if (in_array('encounter_loot', $include, true)) {
+            $this->encounterLootStationService->clearExpiredLoot($character);
+            $lootStorage = $this->encounterLootStationService->ensureEncounterLootStorage($character);
+            $result['storages'][] = $this->formatEncounterLootGrid($character, $lootStorage);
         }
 
         if (in_array('quest', $include, true)) {
@@ -197,13 +205,13 @@ class StorageLayoutService
         $slotUuids = $slots->pluck('uuid');
 
         $items = Item::whereIn('slot_uuid', $slotUuids)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->with('template')
             ->get()
             ->keyBy('slot_uuid');
 
         $resources = Resources::whereIn('slot_uuid', $slotUuids)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->with('template')
             ->get()
             ->keyBy('slot_uuid');
@@ -262,21 +270,8 @@ class StorageLayoutService
             ];
         }
 
-        $tempUuids = $tempSlots->pluck('uuid');
-
-        $items = Item::whereIn('temporary_slot_uuid', $tempUuids)
-            ->with('template')
-            ->get()
-            ->keyBy('temporary_slot_uuid');
-
-        $resources = Resources::whereIn('temporary_slot_uuid', $tempUuids)
-            ->with('template')
-            ->get()
-            ->keyBy('temporary_slot_uuid');
-
-        $slots = $tempSlots->map(function (TemporarySlot $tempSlot) use ($items, $resources, $stationService) {
-            $item = $items->get($tempSlot->uuid);
-            $resource = $resources->get($tempSlot->uuid);
+        $slots = $tempSlots->map(function (TemporarySlot $tempSlot) {
+            $occ = $this->occupantPayloadForTemporarySlot($tempSlot);
 
             return [
                 'uuid' => $tempSlot->uuid,
@@ -284,8 +279,8 @@ class StorageLayoutService
                 'slot_type' => $tempSlot->slot_type,
                 'slot_index' => $tempSlot->slot_index,
                 'index' => $tempSlot->slot_index,
-                'item' => $item ? $this->formatItem($item, true) : null,
-                'resource' => $resource ? $this->formatResource($resource, true) : null,
+                'item' => $occ['item'],
+                'resource' => $occ['resource'],
             ];
         })->values()->all();
 
@@ -296,6 +291,74 @@ class StorageLayoutService
             'cols' => $cols,
             'slots' => $slots,
             'special_slots' => $slots,
+        ];
+    }
+
+    /**
+     * @return array{item: ?array, resource: ?array}
+     */
+    private function occupantPayloadForTemporarySlot(TemporarySlot $tempSlot): array
+    {
+        $occupant = $this->slotCellResolver->getOccupantForTemporarySlot($tempSlot);
+        if ($occupant instanceof Item) {
+            return [
+                'item' => $this->formatItem($occupant, true),
+                'resource' => null,
+            ];
+        }
+        if ($occupant instanceof Resources) {
+            return [
+                'item' => null,
+                'resource' => $this->formatResource($occupant, true),
+            ];
+        }
+
+        return ['item' => null, 'resource' => null];
+    }
+
+    private function formatEncounterLootGrid(Character $character, Storage $storage): array
+    {
+        $tempSlots = $this->encounterLootStationService->getTemporarySlots($character);
+        $cols = 4;
+
+        if ($tempSlots->isEmpty()) {
+            return [
+                'uuid' => $storage->uuid,
+                'storage_type' => $storage->storage_type,
+                'name' => $storage->name,
+                'cols' => $cols,
+                'slots' => [],
+                'special_slots' => [],
+            ];
+        }
+
+        $claimExpiresAt = $tempSlots
+            ->filter(fn (TemporarySlot $slot) => $slot->timestamps_end !== null)
+            ->max('timestamps_end');
+
+        $slots = $tempSlots->map(function (TemporarySlot $tempSlot) {
+            $occ = $this->occupantPayloadForTemporarySlot($tempSlot);
+
+            return [
+                'uuid' => $tempSlot->uuid,
+                'kind' => 'temporary',
+                'slot_type' => $tempSlot->slot_type,
+                'slot_index' => $tempSlot->slot_index,
+                'index' => $tempSlot->slot_index,
+                'timestamps_end' => $tempSlot->timestamps_end?->toIso8601String(),
+                'item' => $occ['item'],
+                'resource' => $occ['resource'],
+            ];
+        })->values()->all();
+
+        return [
+            'uuid' => $storage->uuid,
+            'storage_type' => $storage->storage_type,
+            'name' => $storage->name,
+            'cols' => $cols,
+            'slots' => $slots,
+            'special_slots' => $slots,
+            'claim_expires_at' => $claimExpiresAt?->toIso8601String(),
         ];
     }
 
@@ -315,24 +378,11 @@ class StorageLayoutService
             ];
         }
 
-        $tempUuids = $tempSlots->pluck('uuid');
-
-        $items = Item::whereIn('temporary_slot_uuid', $tempUuids)
-            ->with('template')
-            ->get()
-            ->keyBy('temporary_slot_uuid');
-
-        $resources = Resources::whereIn('temporary_slot_uuid', $tempUuids)
-            ->with('template')
-            ->get()
-            ->keyBy('temporary_slot_uuid');
-
         $grantSlots = [];
         $turninSlots = [];
 
         foreach ($tempSlots as $tempSlot) {
-            $item = $items->get($tempSlot->uuid);
-            $resource = $resources->get($tempSlot->uuid);
+            $occ = $this->occupantPayloadForTemporarySlot($tempSlot);
             $slotType = $this->questStorageService->slotRole($tempSlot);
             $formatted = [
                 'uuid' => $tempSlot->uuid,
@@ -340,8 +390,8 @@ class StorageLayoutService
                 'slot_type' => $slotType,
                 'slot_index' => $tempSlot->slot_index,
                 'index' => $tempSlot->slot_index,
-                'item' => $item ? $this->formatItem($item, true) : null,
-                'resource' => $resource ? $this->formatResource($resource, true) : null,
+                'item' => $occ['item'],
+                'resource' => $occ['resource'],
             ];
 
             if ($slotType === 'quest_grant') {
@@ -385,8 +435,8 @@ class StorageLayoutService
             'quest_slug' => $item->template?->quest_slug,
             'materials_used' => $item->materials_used,
             'slot_uuid' => $item->slot_uuid,
-            'temporary_slot_uuid' => $item->temporary_slot_uuid,
-            'locked' => !$asOverlayDestination && $item->temporary_slot_uuid !== null,
+            'buffer_slot_uuid' => $item->buffer_slot_uuid,
+            'locked' => !$asOverlayDestination && $item->buffer_slot_uuid !== null,
         ];
     }
 
@@ -402,9 +452,9 @@ class StorageLayoutService
             'max_stack' => $resource->max_stack ?? $resource->template?->max_stack,
             'slot_type' => $resource->slot_type ?? $resource->template?->slot_type,
             'slot_uuid' => $resource->slot_uuid,
-            'temporary_slot_uuid' => $resource->temporary_slot_uuid,
+            'buffer_slot_uuid' => $resource->buffer_slot_uuid,
             'is_resource' => true,
-            'locked' => !$asOverlayDestination && $resource->temporary_slot_uuid !== null,
+            'locked' => !$asOverlayDestination && $resource->buffer_slot_uuid !== null,
         ];
     }
 }

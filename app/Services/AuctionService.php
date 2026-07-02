@@ -80,7 +80,7 @@ class AuctionService
 
             $item = Item::where('uuid', $itemUuid)
                 ->whereIn('stage', ['item', 'blueprint'])
-                ->whereNull('temporary_slot_uuid')
+                ->whereNull('buffer_slot_uuid')
                 ->firstOrFail();
 
             // Проверяем, что предмет принадлежит продавцу
@@ -110,7 +110,7 @@ class AuctionService
             ]);
 
             // Привязываем предмет к временному слоту (но slot_uuid остаётся у продавца!)
-            $item->update(['temporary_slot_uuid' => $temporarySlot->uuid]);
+            $item->update(['buffer_slot_uuid' => $temporarySlot->uuid]);
 
             $this->eventStore->record(
                 'auction.prepared',
@@ -118,7 +118,7 @@ class AuctionService
                 $item->uuid,
                 [
                     'price' => $price,
-                    'temporary_slot_uuid' => $temporarySlot->uuid,
+                    'buffer_slot_uuid' => $temporarySlot->uuid,
                     'expires_at' => $temporarySlot->timestamps_end->toDateTimeString(),
                 ],
                 $seller->uuid
@@ -156,12 +156,12 @@ class AuctionService
     ): AuctionLot {
         return DB::transaction(function () use ($seller, $itemUuid, $price) {
             $item = Item::where('uuid', $itemUuid)
-                ->whereNotNull('temporary_slot_uuid')
+                ->whereNotNull('buffer_slot_uuid')
                 ->firstOrFail();
 
             $sourceSlotUuid = $item->slot_uuid;
 
-            $temporarySlot = TemporarySlot::where('uuid', $item->temporary_slot_uuid)->firstOrFail();
+            $temporarySlot = TemporarySlot::where('uuid', $item->buffer_slot_uuid)->firstOrFail();
             if ($temporarySlot->character_uuid !== $seller->uuid) {
                 throw new \RuntimeException('Временный слот не принадлежит продавцу');
             }
@@ -190,7 +190,7 @@ class AuctionService
             // Перемещаем предмет в аукционный слот
             $item->update([
                 'slot_uuid' => $auctionSlot->uuid,
-                'temporary_slot_uuid' => null,
+                'buffer_slot_uuid' => null,
             ]);
 
             // Создаём лот

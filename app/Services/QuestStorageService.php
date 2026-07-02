@@ -171,11 +171,11 @@ class QuestStorageService
         if ($grantSlots->isNotEmpty()) {
             $tempUuids = $grantSlots->pluck('uuid');
 
-            foreach (Item::whereIn('temporary_slot_uuid', $tempUuids)->get() as $item) {
+            foreach (Item::whereIn('buffer_slot_uuid', $tempUuids)->get() as $item) {
                 $this->transferOverlayItemToInventory($character, $item);
             }
 
-            foreach (Resources::whereIn('temporary_slot_uuid', $tempUuids)->get() as $resource) {
+            foreach (Resources::whereIn('buffer_slot_uuid', $tempUuids)->get() as $resource) {
                 $this->transferOverlayResourceToInventory($character, $resource);
             }
 
@@ -226,8 +226,8 @@ class QuestStorageService
         $requirementSlots = $this->getSlotsByRole($character, $quest->slug, self::SLOT_ROLE_REQUIREMENT);
         $tempUuids = $requirementSlots->pluck('uuid');
 
-        foreach (Item::whereIn('temporary_slot_uuid', $tempUuids)->get() as $item) {
-            $item->update(['temporary_slot_uuid' => null]);
+        foreach (Item::whereIn('buffer_slot_uuid', $tempUuids)->get() as $item) {
+            $item->update(['buffer_slot_uuid' => null]);
             $this->worldStorageService->depositItem($item);
         }
 
@@ -241,11 +241,11 @@ class QuestStorageService
         $rewardSlots = $this->getSlotsByRole($character, $quest->slug, self::SLOT_ROLE_REWARD);
         $rewardTempUuids = $rewardSlots->pluck('uuid');
 
-        foreach (Item::whereIn('temporary_slot_uuid', $rewardTempUuids)->get() as $item) {
+        foreach (Item::whereIn('buffer_slot_uuid', $rewardTempUuids)->get() as $item) {
             $this->transferOverlayItemToInventory($character, $item);
         }
 
-        foreach (Resources::whereIn('temporary_slot_uuid', $rewardTempUuids)->get() as $resource) {
+        foreach (Resources::whereIn('buffer_slot_uuid', $rewardTempUuids)->get() as $resource) {
             $this->transferOverlayResourceToInventory($character, $resource);
         }
 
@@ -285,7 +285,7 @@ class QuestStorageService
                     continue;
                 }
 
-                $inventoryItem->update(['temporary_slot_uuid' => $tempSlot->uuid]);
+                $inventoryItem->update(['buffer_slot_uuid' => $tempSlot->uuid]);
                 $slotIndex++;
             }
         }
@@ -296,7 +296,7 @@ class QuestStorageService
         $requirementSlots = $this->getSlotsByRole($character, $questSlug, self::SLOT_ROLE_REQUIREMENT);
         $tempUuids = $requirementSlots->pluck('uuid');
 
-        return Item::whereIn('temporary_slot_uuid', $tempUuids)
+        return Item::whereIn('buffer_slot_uuid', $tempUuids)
             ->where('template_slug', $templateSlug)
             ->where('stage', $stage)
             ->count();
@@ -339,7 +339,7 @@ class QuestStorageService
                 continue;
             }
 
-            $already = (int) Resources::whereIn('temporary_slot_uuid', $grantTempUuids)
+            $already = (int) Resources::whereIn('buffer_slot_uuid', $grantTempUuids)
                 ->where('template_slug', (string) $templateSlug)
                 ->sum('quantity');
             $needed = $qty - $already;
@@ -371,7 +371,7 @@ class QuestStorageService
                 continue;
             }
 
-            $already = (int) Resources::whereIn('temporary_slot_uuid', $rewardTempUuids)
+            $already = (int) Resources::whereIn('buffer_slot_uuid', $rewardTempUuids)
                 ->where('template_slug', (string) $templateSlug)
                 ->sum('quantity');
             $needed = $qty - $already;
@@ -429,22 +429,22 @@ class QuestStorageService
 
         $cleared = 0;
 
-        $items = Item::whereIn('temporary_slot_uuid', $tempUuids)->get();
+        $items = Item::whereIn('buffer_slot_uuid', $tempUuids)->get();
         foreach ($items as $item) {
             if ($backingUuids->contains($item->slot_uuid)) {
                 $item->delete();
             } else {
-                $item->update(['temporary_slot_uuid' => null]);
+                $item->update(['buffer_slot_uuid' => null]);
             }
             $cleared++;
         }
 
-        $resources = Resources::whereIn('temporary_slot_uuid', $tempUuids)->get();
+        $resources = Resources::whereIn('buffer_slot_uuid', $tempUuids)->get();
         foreach ($resources as $resource) {
             if ($backingUuids->contains($resource->slot_uuid)) {
                 $resource->delete();
             } else {
-                $resource->update(['temporary_slot_uuid' => null]);
+                $resource->update(['buffer_slot_uuid' => null]);
             }
             $cleared++;
         }
@@ -575,19 +575,19 @@ class QuestStorageService
         $backingUuids = $questStorage->slots()->where('slot_type', 'quest_backing')->pluck('uuid');
         $tempUuids = $slots->pluck('uuid');
 
-        foreach (Item::whereIn('temporary_slot_uuid', $tempUuids)->get() as $item) {
+        foreach (Item::whereIn('buffer_slot_uuid', $tempUuids)->get() as $item) {
             if ($backingUuids->contains($item->slot_uuid)) {
                 $item->delete();
             } else {
-                $item->update(['temporary_slot_uuid' => null]);
+                $item->update(['buffer_slot_uuid' => null]);
             }
         }
 
-        foreach (Resources::whereIn('temporary_slot_uuid', $tempUuids)->get() as $resource) {
+        foreach (Resources::whereIn('buffer_slot_uuid', $tempUuids)->get() as $resource) {
             if ($backingUuids->contains($resource->slot_uuid)) {
                 $resource->delete();
             } else {
-                $resource->update(['temporary_slot_uuid' => null]);
+                $resource->update(['buffer_slot_uuid' => null]);
             }
         }
     }
@@ -652,7 +652,7 @@ class QuestStorageService
 
         $item->update([
             'slot_uuid' => $slot->uuid,
-            'temporary_slot_uuid' => null,
+            'buffer_slot_uuid' => null,
         ]);
     }
 
@@ -692,7 +692,7 @@ class QuestStorageService
         return Item::whereIn('slot_uuid', $slotUuids)
             ->where('template_slug', $templateSlug)
             ->where('stage', $stage)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->first();
     }
 
@@ -705,7 +705,7 @@ class QuestStorageService
 
         return Item::whereIn('slot_uuid', $slotUuids)
             ->where('template_slug', $templateSlug)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->first();
     }
 
@@ -724,7 +724,7 @@ class QuestStorageService
         return Item::create([
             'uuid' => Str::uuid()->toString(),
             'slot_uuid' => $backingSlot->uuid,
-            'temporary_slot_uuid' => $tempSlot->uuid,
+            'buffer_slot_uuid' => $tempSlot->uuid,
             'recipe_slug' => $recipeSlug ?? 'quest_item_stub',
             'template_slug' => $templateSlug,
             'stage' => $stage,

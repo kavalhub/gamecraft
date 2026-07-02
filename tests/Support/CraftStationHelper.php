@@ -29,7 +29,7 @@ final class CraftStationHelper
         }
 
         $item->refresh();
-        if ($item->temporary_slot_uuid === $tempSlot->uuid) {
+        if ($item->buffer_slot_uuid === $tempSlot->uuid) {
             return;
         }
 
@@ -64,7 +64,7 @@ final class CraftStationHelper
             $resource = Resources::query()
                 ->whereIn('slot_uuid', $inventory->slots()->pluck('uuid'))
                 ->where('template_slug', $templateSlug)
-                ->whereNull('temporary_slot_uuid')
+                ->whereNull('buffer_slot_uuid')
                 ->orderByDesc('quantity')
                 ->first();
 
@@ -84,7 +84,7 @@ final class CraftStationHelper
                     return false;
                 }
 
-                $occupant = Resources::where('temporary_slot_uuid', $tempSlot->uuid)->first();
+                $occupant = Resources::where('buffer_slot_uuid', $tempSlot->uuid)->first();
 
                 return !$occupant
                     || ($occupant->template_slug === $templateSlug

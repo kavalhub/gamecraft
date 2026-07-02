@@ -40,7 +40,7 @@ final class RegularSlotScope implements SlotScope
             ->where('template_slug', $templateSlug);
 
         if ($this->onlyWithoutOverlay) {
-            $query->whereNull('temporary_slot_uuid');
+            $query->whereNull('buffer_slot_uuid');
         }
 
         if ($maxStack !== null) {

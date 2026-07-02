@@ -333,7 +333,7 @@ class CraftingService
             }
 
             $centerSlot = $this->disassembleStationService->getCenterTemporarySlot($character);
-            $resource = Resources::where('temporary_slot_uuid', $centerSlot->uuid)->firstOrFail();
+            $resource = Resources::where('buffer_slot_uuid', $centerSlot->uuid)->firstOrFail();
 
             $this->disassembleStationService->assertResourceOnStation($resource, $character);
 

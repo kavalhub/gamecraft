@@ -107,6 +107,8 @@ class QuestProgressResolver
             'collect_resource' => in_array($eventType, ['resource.crafted', 'resource.received'], true)
                 && ($payload['template_slug'] ?? $payload['result_template_slug'] ?? null)
                     === ($objective->config['template_slug'] ?? null),
+            'defeat_encounter' => $eventType === 'encounter.won'
+                && ($payload['encounter_slug'] ?? null) === ($objective->config['encounter_slug'] ?? null),
             default => false,
         };
     }

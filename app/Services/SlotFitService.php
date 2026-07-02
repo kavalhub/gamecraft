@@ -83,6 +83,10 @@ class SlotFitService
                 && $this->disassembleStationService->isOutputSlot($toTemp)) {
                 return true;
             }
+
+            if ($storage?->storage_type === 'encounter_loot') {
+                return true;
+            }
         }
 
         if ($from['kind'] === 'regular' && $to['kind'] === 'regular') {
@@ -166,6 +170,10 @@ class SlotFitService
             return true;
         }
 
+        if ($storage->storage_type === 'encounter_loot') {
+            return false;
+        }
+
         return $this->occupantFitsTypedSlot(
             $this->resolveOccupantSlotType($occupant),
             $tempSlot->slot_type
@@ -213,7 +221,8 @@ class SlotFitService
         }
 
         return str_starts_with($slot->slot_type, 'craft_')
-            || str_starts_with($slot->slot_type, 'disassemble_');
+            || str_starts_with($slot->slot_type, 'disassemble_')
+            || str_starts_with($slot->slot_type, 'encounter_loot_');
     }
 
     /**

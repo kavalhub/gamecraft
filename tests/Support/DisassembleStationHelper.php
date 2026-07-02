@@ -14,7 +14,7 @@ final class DisassembleStationHelper
     {
         app(DisassembleStationService::class)->ensureDisassembleStorage($character);
         $centerSlot = app(DisassembleStationService::class)->getCenterTemporarySlot($character);
-        $resource->update(['temporary_slot_uuid' => $centerSlot->uuid]);
+        $resource->update(['buffer_slot_uuid' => $centerSlot->uuid]);
     }
 
     public static function placeResource(Character $character, string $templateSlug, int $quantity = 1): Resources
