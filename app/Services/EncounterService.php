@@ -14,8 +14,9 @@ class EncounterService
 {
     public function __construct(
         private EncounterCatalog $catalog,
-        private EncounterLootStationService $lootStation,
+        private CorpseLootService $corpseLoot,
         private CharacterStatsService $characterStatsService,
+        private CombatSimulator $combatSimulator,
         private ExperienceService $experienceService,
         private EventStore $eventStore,
         private QuestService $questService,
@@ -44,16 +45,20 @@ class EncounterService
         $encounter = $this->catalog->get($encounterSlug);
 
         return DB::transaction(function () use ($character, $encounter, $encounterSlug) {
-            $this->lootStation->clearExpiredLoot($character);
+            $this->corpseLoot->clearExpiredLootForPlayer($character);
 
-            if ($this->lootStation->hasUnclaimedLoot($character)) {
+            if ($this->corpseLoot->hasUnclaimedLoot($character)) {
                 throw new \RuntimeException('Сначала заберите добычу с прошлого боя');
             }
 
             $stats = $this->characterStatsService->ensureFor($character);
-            $simulation = $this->simulateCombat($character, $encounter, $stats);
+            $simulation = $this->combatSimulator->resolveVsNpc(
+                $character->name,
+                $stats,
+                $encounter,
+            );
 
-            $lineMs = (int) config('game.combat_log_line_ms', 800);
+            $lineMs = (int) config('game.combat_log_line_ms', 500);
             $graceMs = (int) config('game.combat_claim_grace_ms', 60_000);
             $battleDurationMs = count($simulation['combat_log']) * $lineMs;
             $claimExpiresAt = now()->addMilliseconds($battleDurationMs + $graceMs);
@@ -61,13 +66,21 @@ class EncounterService
 
             $loot = [];
             $experienceReward = 0;
+            $corpseUuid = null;
 
             if ($simulation['outcome'] === 'won') {
                 $loot = $this->rollLoot($encounter);
                 $experienceReward = (int) ($encounter['experience'] ?? 0);
 
                 if ($loot !== []) {
-                    $this->lootStation->depositLoot($character, $loot, $claimExpiresAt);
+                    $corpseResult = $this->corpseLoot->createCorpseWithLoot(
+                        $character,
+                        $encounterSlug,
+                        (string) ($encounter['name'] ?? $encounterSlug),
+                        $loot,
+                        $claimExpiresAt,
+                    );
+                    $corpseUuid = $corpseResult['corpse_uuid'];
                 }
             }
 
@@ -76,9 +89,11 @@ class EncounterService
                 'encounter_name' => $encounter['name'] ?? $encounterSlug,
                 'outcome' => $simulation['outcome'],
                 'combat_log' => $simulation['combat_log'],
+                'combat_ui' => $simulation['combat_ui'],
                 'player_hp_remaining' => $simulation['player_hp_remaining'],
                 'loot' => $loot,
                 'experience_reward' => $experienceReward,
+                'corpse_uuid' => $corpseUuid,
                 'battle_duration_ms' => $battleDurationMs,
                 'combat_log_line_ms' => $lineMs,
                 'claim_grace_ms' => $graceMs,
@@ -109,9 +124,11 @@ class EncounterService
                 'encounter_slug' => $encounterSlug,
                 'encounter_name' => $encounter['name'] ?? $encounterSlug,
                 'combat_log' => $simulation['combat_log'],
+                'combat_ui' => $simulation['combat_ui'],
                 'player_hp_remaining' => $simulation['player_hp_remaining'],
                 'loot' => $loot,
                 'experience_reward' => $experienceReward,
+                'corpse_uuid' => $corpseUuid,
                 'battle_duration_ms' => $battleDurationMs,
                 'combat_log_line_ms' => $lineMs,
                 'claim_grace_ms' => $graceMs,
@@ -127,36 +144,21 @@ class EncounterService
     public function claim(Character $character, string $correlationUuid): array
     {
         return DB::transaction(function () use ($character, $correlationUuid) {
-            $resolved = GameEvent::where('event_type', 'encounter.resolved')
-                ->where('actor_uuid', $character->uuid)
-                ->where('payload->correlation_uuid', $correlationUuid)
-                ->orderByDesc('occurred_at')
-                ->first();
-
-            if (!$resolved) {
-                throw new \RuntimeException('Бой не найден');
-            }
-
-            if (($resolved->payload['outcome'] ?? null) !== 'won') {
-                throw new \RuntimeException('Добычу можно забрать только после победы');
-            }
-
-            $alreadyClaimed = GameEvent::where('event_type', 'encounter.claimed')
-                ->where('actor_uuid', $character->uuid)
-                ->where('payload->correlation_uuid', $correlationUuid)
-                ->exists();
-
-            if ($alreadyClaimed) {
-                throw new \RuntimeException('Добыча уже получена');
-            }
+            [$resolved, $corpse] = $this->resolveWonEncounter($character, $correlationUuid);
 
             $expiresAt = Carbon::parse($resolved->payload['claim_expires_at'] ?? '');
             if ($expiresAt->isPast()) {
-                $this->lootStation->clearExpiredLoot($character);
+                if ($corpse) {
+                    $this->corpseLoot->clearCorpse($corpse);
+                }
                 throw new \RuntimeException('Время на получение добычи истекло');
             }
 
-            $moved = $this->lootStation->claimAllToInventory($character);
+            $moved = 0;
+            if ($corpse) {
+                $moved = $this->corpseLoot->claimCorpseToInventory($character, $corpse);
+            }
+
             $experienceReward = (int) ($resolved->payload['experience_reward'] ?? 0);
             $encounterSlug = (string) ($resolved->payload['encounter_slug'] ?? '');
 
@@ -172,6 +174,7 @@ class EncounterService
             $claimPayload = [
                 'encounter_slug' => $encounterSlug,
                 'correlation_uuid' => $correlationUuid,
+                'corpse_uuid' => $corpse?->uuid,
                 'items_moved' => $moved,
                 'experience_reward' => $experienceReward,
             ];
@@ -203,81 +206,88 @@ class EncounterService
                 'items_moved' => $moved,
                 'experience_reward' => $experienceReward,
                 'encounter_slug' => $encounterSlug,
+                'corpse_uuid' => $corpse?->uuid,
             ];
         });
     }
 
     /**
-     * @param  array<string, mixed>  $encounter
-     * @param  array<string, mixed>  $stats
-     * @return array{outcome: string, combat_log: list<array<string, mixed>>, player_hp_remaining: int}
+     * @return array<string, mixed>
      */
-    private function simulateCombat(Character $character, array $encounter, array $stats): array
+    public function refuse(Character $character, string $correlationUuid): array
     {
-        $enemyStats = $encounter['stats'] ?? [];
-        $enemyName = (string) ($encounter['name'] ?? 'Противник');
-        $playerHp = (int) ($stats['total']['health'] ?? 50);
-        $enemyHp = (int) ($enemyStats['health'] ?? 10);
-        $playerDefense = (int) ($stats['total']['defense'] ?? 0);
-        $enemyDefense = (int) ($enemyStats['defense'] ?? 0);
+        return DB::transaction(function () use ($character, $correlationUuid) {
+            [$resolved, $corpse] = $this->resolveWonEncounter($character, $correlationUuid);
 
-        $playerAttack = $this->resolveAttackPower($stats, $enemyDefense);
-        $enemyAttack = max(1, (int) ($enemyStats['damage'] ?? 1) - $playerDefense);
-
-        $log = [];
-        $round = 0;
-        $maxRounds = 100;
-
-        while ($playerHp > 0 && $enemyHp > 0 && $round < $maxRounds) {
-            $round++;
-            $damage = $playerAttack;
-            $enemyHp = max(0, $enemyHp - $damage);
-            $log[] = [
-                'actor' => 'player',
-                'message' => "Вы наносите {$damage} урона. У {$enemyName} осталось {$enemyHp} HP.",
-            ];
-
-            if ($enemyHp <= 0) {
-                $log[] = [
-                    'actor' => 'system',
-                    'message' => 'Победа!',
-                ];
-                break;
+            if (!$corpse) {
+                throw new \RuntimeException('Нет добычи для отказа');
             }
 
-            $damage = $enemyAttack;
-            $playerHp = max(0, $playerHp - $damage);
-            $log[] = [
-                'actor' => 'enemy',
-                'message' => "{$enemyName} наносит {$damage} урона. У вас осталось {$playerHp} HP.",
-            ];
-        }
+            foreach ($this->corpseLoot->getLootSlots($corpse) as $slot) {
+                if ($slot->character_uuid !== null && $slot->character_uuid !== $character->uuid) {
+                    throw new \RuntimeException('Нельзя отказаться от чужой добычи');
+                }
+            }
 
-        if ($enemyHp > 0 && $playerHp <= 0) {
-            $log[] = [
-                'actor' => 'system',
-                'message' => 'Поражение.',
-            ];
-        }
+            $this->corpseLoot->refuseLoot($corpse);
 
-        return [
-            'outcome' => $enemyHp <= 0 ? 'won' : 'lost',
-            'combat_log' => $log,
-            'player_hp_remaining' => max(0, $playerHp),
-        ];
+            $encounterSlug = (string) ($resolved->payload['encounter_slug'] ?? '');
+
+            $this->eventStore->record(
+                'encounter.refused',
+                'encounter',
+                $encounterSlug,
+                [
+                    'encounter_slug' => $encounterSlug,
+                    'correlation_uuid' => $correlationUuid,
+                    'corpse_uuid' => $corpse->uuid,
+                ],
+                $character->uuid,
+                $correlationUuid
+            );
+
+            return [
+                'success' => true,
+                'corpse_uuid' => $corpse->uuid,
+                'encounter_slug' => $encounterSlug,
+            ];
+        });
     }
 
     /**
-     * @param  array<string, mixed>  $stats
+     * @return array{0: GameEvent, 1: ?Character}
      */
-    private function resolveAttackPower(array $stats, int $enemyDefense): int
+    private function resolveWonEncounter(Character $character, string $correlationUuid): array
     {
-        $rawDamage = (int) ($stats['total']['damage'] ?? 0);
-        if ($rawDamage < 1) {
-            $rawDamage = max(1, (int) floor(((int) ($stats['total']['strength'] ?? 10)) / 2));
+        $resolved = GameEvent::where('event_type', 'encounter.resolved')
+            ->where('actor_uuid', $character->uuid)
+            ->where('payload->correlation_uuid', $correlationUuid)
+            ->orderByDesc('occurred_at')
+            ->first();
+
+        if (!$resolved) {
+            throw new \RuntimeException('Бой не найден');
         }
 
-        return max(1, $rawDamage - $enemyDefense);
+        if (($resolved->payload['outcome'] ?? null) !== 'won') {
+            throw new \RuntimeException('Добычу можно забрать только после победы');
+        }
+
+        $alreadyClaimed = GameEvent::where('event_type', 'encounter.claimed')
+            ->where('actor_uuid', $character->uuid)
+            ->where('payload->correlation_uuid', $correlationUuid)
+            ->exists();
+
+        if ($alreadyClaimed) {
+            throw new \RuntimeException('Добыча уже получена');
+        }
+
+        $corpseUuid = $resolved->payload['corpse_uuid'] ?? null;
+        $corpse = $corpseUuid
+            ? Character::where('uuid', $corpseUuid)->where('character_type', 'corpse')->first()
+            : null;
+
+        return [$resolved, $corpse];
     }
 
     /**

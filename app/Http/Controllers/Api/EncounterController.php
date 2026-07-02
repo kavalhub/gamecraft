@@ -23,7 +23,7 @@ class EncounterController extends Controller
         return response()->json([
             'encounters' => $this->encounterService->listEncounters(),
             'timing' => [
-                'combat_log_line_ms' => (int) config('game.combat_log_line_ms', 800),
+                'combat_log_line_ms' => (int) config('game.combat_log_line_ms', 500),
                 'combat_claim_grace_ms' => (int) config('game.combat_claim_grace_ms', 60_000),
             ],
         ]);
@@ -59,6 +59,29 @@ class EncounterController extends Controller
 
         try {
             $result = $this->encounterService->claim(
+                $character,
+                $request->string('correlation_uuid')->toString()
+            );
+
+            return response()->json($result);
+        } catch (\RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    public function refuse(Request $request, string $characterUuid): JsonResponse
+    {
+        $request->validate([
+            'correlation_uuid' => 'required|uuid',
+        ]);
+
+        $character = Character::where('uuid', $characterUuid)->firstOrFail();
+
+        try {
+            $result = $this->encounterService->refuse(
                 $character,
                 $request->string('correlation_uuid')->toString()
             );

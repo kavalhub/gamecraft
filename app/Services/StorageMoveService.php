@@ -28,6 +28,7 @@ class StorageMoveService
         private WorldStorageService $worldStorageService,
         private SlotFitService $slotFitService,
         private SlotCellResolver $slotCellResolver,
+        private CorpseLootService $corpseLootService,
     ) {}
 
     public function move(
@@ -89,7 +90,10 @@ class StorageMoveService
         if ($from['kind'] === 'temporary') {
             /** @var TemporarySlot $fromTemp */
             $fromTemp = $from['cell'];
-            if ($fromTemp->character_uuid !== $actor->uuid) {
+            $fromStorage = Storage::where('uuid', $fromTemp->storage_uuid)->first();
+            if ($fromStorage?->storage_type === 'corpse') {
+                $this->corpseLootService->assertCanClaimSlot($actor, $fromTemp);
+            } elseif ($fromTemp->character_uuid !== null && $fromTemp->character_uuid !== $actor->uuid) {
                 throw new \RuntimeException('Нельзя перемещать из чужого слота обмена');
             }
         } else {
@@ -99,7 +103,11 @@ class StorageMoveService
         if ($to['kind'] === 'temporary') {
             /** @var TemporarySlot $toTemp */
             $toTemp = $to['cell'];
-            if ($toTemp->character_uuid !== $actor->uuid) {
+            $toStorage = Storage::where('uuid', $toTemp->storage_uuid)->first();
+            if ($toStorage?->storage_type === 'corpse') {
+                throw new \RuntimeException('Нельзя класть предметы на труп');
+            }
+            if ($toTemp->character_uuid !== null && $toTemp->character_uuid !== $actor->uuid) {
                 throw new \RuntimeException('Нельзя перемещать в чужой слот обмена');
             }
         } else {
@@ -196,6 +204,29 @@ class StorageMoveService
 
         if ($tempSlot->slot_index === CraftStationService::CENTER_SLOT_INDEX) {
             $this->craftStationService->syncAfterCenterChange($actor);
+        }
+    }
+
+    private function maybeDeactivateEmptyCorpse(TemporarySlot $fromTempSlot): void
+    {
+        $storage = Storage::where('uuid', $fromTempSlot->storage_uuid)->first();
+        if ($storage?->storage_type !== 'corpse') {
+            return;
+        }
+
+        $corpse = Character::where('uuid', $storage->characters_uuid)
+            ->where('character_type', 'corpse')
+            ->first();
+
+        if (!$corpse) {
+            return;
+        }
+
+        $hasLoot = $this->corpseLootService->getLootSlots($corpse)
+            ->contains(fn (TemporarySlot $slot) => $this->slotCellResolver->getOccupantForTemporarySlot($slot));
+
+        if (!$hasLoot) {
+            $corpse->update(['active' => false]);
         }
     }
 
@@ -527,7 +558,7 @@ class StorageMoveService
         $tempStorage = Storage::where('uuid', $fromTempSlot->storage_uuid)->firstOrFail();
         $isCraft = $tempStorage->storage_type === 'craft';
         $isDisassemble = $tempStorage->storage_type === 'disassemble';
-        $isEncounterLoot = $tempStorage->storage_type === 'encounter_loot';
+        $isCorpse = $tempStorage->storage_type === 'corpse';
         $isStation = $isCraft || $isDisassemble;
         $isQuest = $tempStorage->storage_type === 'quest';
         $toOccupant = $this->getTargetOccupant($toCell);
@@ -552,11 +583,14 @@ class StorageMoveService
                 'buffer_slot_uuid' => null,
                 'slot_uuid' => $toSlot->uuid,
             ]);
-            if (!$isStation && !$isQuest) {
+            if (!$isStation && !$isQuest && !$isCorpse) {
                 $this->removeTradeItemForOccupant($actor, $occupant);
             }
 
             $this->maybeSyncCraftStation($actor, $fromTempSlot);
+            if ($isCorpse) {
+                $this->maybeDeactivateEmptyCorpse($fromTempSlot);
+            }
 
             return ['type' => 'item', 'uuid' => $occupant->uuid];
         }
@@ -580,8 +614,12 @@ class StorageMoveService
                 'buffer_slot_uuid' => null,
                 'slot_uuid' => $toSlot->uuid,
             ]);
-            if (!$isStation && !$isQuest) {
+            if (!$isStation && !$isQuest && !$isCorpse) {
                 $this->removeTradeItemForOccupant($actor, $occupant);
+            }
+
+            if ($isCorpse) {
+                $this->maybeDeactivateEmptyCorpse($fromTempSlot);
             }
 
             return ['type' => 'resource', 'uuid' => $occupant->uuid, 'quantity' => $moveQty];
@@ -598,8 +636,12 @@ class StorageMoveService
             } else {
                 $occupant->update(['quantity' => $occupant->quantity - $merged]);
             }
-            if (!$isQuest) {
+            if (!$isQuest && !$isCorpse) {
                 $this->removeTradeItemForOccupant($actor, $occupant);
+            }
+
+            if ($isCorpse) {
+                $this->maybeDeactivateEmptyCorpse($fromTempSlot);
             }
 
             return ['type' => 'resource', 'uuid' => $toOccupant->uuid, 'quantity' => $merged];

@@ -7,8 +7,9 @@ namespace Tests\Feature;
 use App\Models\Character;
 use App\Models\GameEvent;
 use App\Models\Resources;
+use App\Models\Storage;
 use App\Models\User;
-use App\Services\EncounterLootStationService;
+use App\Services\CorpseLootService;
 use App\Services\EncounterService;
 use App\Services\InventoryService;
 use Carbon\Carbon;
@@ -32,7 +33,7 @@ class EncounterApiTest extends TestCase
         $this->player = $user->characters()->where('character_type', 'player')->first();
         $this->token = $user->createToken('game')->plainTextToken;
 
-        app(EncounterLootStationService::class)->clearAllLoot($this->player);
+        $this->clearPlayerCorpseLoot();
     }
 
     public function test_catalog_lists_encounters(): void
@@ -51,11 +52,11 @@ class EncounterApiTest extends TestCase
         $this->assertTrue($slugs->contains('cave_rat'));
     }
 
-    public function test_resolve_win_deposits_loot_in_temporary_slots(): void
+    public function test_resolve_win_spawns_corpse_with_loot(): void
     {
         $response = $this->withToken($this->token)
             ->postJson("/api/encounter/{$this->player->uuid}/resolve", [
-                'encounter_slug' => 'cave_rat',
+                'encounter_slug' => 'forest_wolf',
             ]);
 
         $response->assertOk()
@@ -66,28 +67,35 @@ class EncounterApiTest extends TestCase
         }
 
         $correlationUuid = $response->json('correlation_uuid');
+        $corpseUuid = $response->json('corpse_uuid');
         $this->assertNotEmpty($correlationUuid);
+        $this->assertNotEmpty($corpseUuid);
         $this->assertNotEmpty($response->json('combat_log'));
         $this->assertGreaterThan(0, $response->json('battle_duration_ms'));
 
-        $lootStation = app(EncounterLootStationService::class);
+        $corpse = Character::where('uuid', $corpseUuid)->where('character_type', 'corpse')->first();
+        $this->assertNotNull($corpse);
+
+        $corpseLoot = app(CorpseLootService::class);
         $hasLoot = false;
-        foreach ($lootStation->getTemporarySlots($this->player) as $slot) {
-            if (Resources::where('buffer_slot_uuid', $slot->uuid)->exists()) {
+        foreach ($corpseLoot->getLootSlots($corpse) as $slot) {
+            if (Resources::where('slot_uuid', $slot->uuid)->whereNull('buffer_slot_uuid')->exists()) {
                 $hasLoot = true;
+                $this->assertSame($this->player->uuid, $slot->fresh()->character_uuid);
                 $this->assertNotNull($slot->fresh()->timestamps_end);
             }
         }
         $this->assertTrue($hasLoot || ($response->json('loot') ?? []) === []);
 
         $storageResponse = $this->withToken($this->token)
-            ->getJson("/api/storage/{$this->player->uuid}?include=encounter_loot,inventory");
+            ->getJson("/api/storage/{$this->player->uuid}?include=corpse,inventory&corpse_uuid={$corpseUuid}");
 
-        $storageResponse->assertOk();
-        $lootStorage = collect($storageResponse->json('storages'))
-            ->firstWhere('storage_type', 'encounter_loot');
-        $this->assertNotNull($lootStorage);
-        $this->assertNotEmpty($lootStorage['claim_expires_at']);
+        $storageResponse->assertOk()
+            ->assertJsonPath('corpse_uuid', $corpseUuid);
+        $corpseStorage = collect($storageResponse->json('storages'))
+            ->firstWhere('storage_type', 'corpse');
+        $this->assertNotNull($corpseStorage);
+        $this->assertNotEmpty($corpseStorage['claim_expires_at']);
     }
 
     public function test_claim_moves_loot_and_grants_experience(): void
@@ -95,19 +103,9 @@ class EncounterApiTest extends TestCase
         $encounterService = app(EncounterService::class);
         $inventoryService = app(InventoryService::class);
 
-        $resolved = null;
-        for ($attempt = 0; $attempt < 30; $attempt++) {
-            try {
-                $resolved = $encounterService->resolve($this->player, 'cave_rat');
-                if ($resolved['outcome'] === 'won') {
-                    break;
-                }
-            } catch (\RuntimeException) {
-                app(EncounterLootStationService::class)->clearAllLoot($this->player);
-            }
-        }
+        $resolved = $this->resolveWinningEncounter($encounterService, 'forest_wolf');
 
-        if (!$resolved || $resolved['outcome'] !== 'won') {
+        if (!$resolved) {
             $this->markTestSkipped('Could not get a winning combat outcome');
         }
 
@@ -120,10 +118,10 @@ class EncounterApiTest extends TestCase
 
         $claimResponse->assertOk()
             ->assertJsonPath('success', true)
-            ->assertJsonPath('experience_reward', 6);
+            ->assertJsonPath('experience_reward', 12);
 
         $xpAfter = $inventoryService->getResourceQuantity($this->player, 'experience');
-        $this->assertSame($xpBefore + 6, $xpAfter);
+        $this->assertSame($xpBefore + 12, $xpAfter);
 
         $this->assertTrue(
             GameEvent::where('event_type', 'encounter.won')
@@ -131,9 +129,11 @@ class EncounterApiTest extends TestCase
                 ->exists()
         );
 
-        foreach (app(EncounterLootStationService::class)->getTemporarySlots($this->player) as $slot) {
+        $corpse = Character::where('uuid', $resolved['corpse_uuid'])->first();
+        $this->assertNotNull($corpse);
+        foreach (app(CorpseLootService::class)->getLootSlots($corpse) as $slot) {
             $this->assertFalse(
-                Resources::where('buffer_slot_uuid', $slot->uuid)->exists()
+                Resources::where('slot_uuid', $slot->uuid)->whereNull('buffer_slot_uuid')->exists()
             );
         }
     }
@@ -141,20 +141,9 @@ class EncounterApiTest extends TestCase
     public function test_claim_rejected_after_expiry(): void
     {
         $encounterService = app(EncounterService::class);
-        $resolved = null;
+        $resolved = $this->resolveWinningEncounter($encounterService, 'forest_wolf');
 
-        for ($attempt = 0; $attempt < 30; $attempt++) {
-            try {
-                $resolved = $encounterService->resolve($this->player, 'cave_rat');
-                if ($resolved['outcome'] === 'won') {
-                    break;
-                }
-            } catch (\RuntimeException) {
-                app(EncounterLootStationService::class)->clearAllLoot($this->player);
-            }
-        }
-
-        if (!$resolved || $resolved['outcome'] !== 'won') {
+        if (!$resolved) {
             $this->markTestSkipped('Could not get a winning combat outcome');
         }
 
@@ -173,8 +162,13 @@ class EncounterApiTest extends TestCase
 
     public function test_resolve_blocked_while_unclaimed_loot_exists(): void
     {
-        $lootStation = app(EncounterLootStationService::class);
-        $lootStation->depositLoot($this->player, ['wood' => 1], Carbon::now()->addHour());
+        app(CorpseLootService::class)->createCorpseWithLoot(
+            $this->player,
+            'forest_wolf',
+            'Лесной волк',
+            ['wood' => 1],
+            Carbon::now()->addHour(),
+        );
 
         $response = $this->withToken($this->token)
             ->postJson("/api/encounter/{$this->player->uuid}/resolve", [
@@ -183,5 +177,71 @@ class EncounterApiTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonPath('error', 'Сначала заберите добычу с прошлого боя');
+    }
+
+    public function test_refuse_makes_corpse_loot_public(): void
+    {
+        $encounterService = app(EncounterService::class);
+        $resolved = $this->resolveWinningEncounter($encounterService, 'forest_wolf');
+
+        if (!$resolved || empty($resolved['corpse_uuid'])) {
+            $this->markTestSkipped('Could not get a winning combat outcome with loot');
+        }
+
+        $refuseResponse = $this->withToken($this->token)
+            ->postJson("/api/encounter/{$this->player->uuid}/refuse", [
+                'correlation_uuid' => $resolved['correlation_uuid'],
+            ]);
+
+        $refuseResponse->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('corpse_uuid', $resolved['corpse_uuid']);
+
+        $corpse = Character::where('uuid', $resolved['corpse_uuid'])->firstOrFail();
+        foreach (app(CorpseLootService::class)->getLootSlots($corpse) as $slot) {
+            if (Resources::where('slot_uuid', $slot->uuid)->exists()) {
+                $this->assertNull($slot->fresh()->character_uuid);
+            }
+        }
+
+        $this->assertTrue(
+            GameEvent::where('event_type', 'encounter.refused')
+                ->where('actor_uuid', $this->player->uuid)
+                ->exists()
+        );
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function resolveWinningEncounter(EncounterService $encounterService, string $slug): ?array
+    {
+        for ($attempt = 0; $attempt < 30; $attempt++) {
+            try {
+                $resolved = $encounterService->resolve($this->player, $slug);
+                if ($resolved['outcome'] === 'won') {
+                    return $resolved;
+                }
+            } catch (\RuntimeException) {
+                $this->clearPlayerCorpseLoot();
+            }
+        }
+
+        return null;
+    }
+
+    private function clearPlayerCorpseLoot(): void
+    {
+        $corpseLoot = app(CorpseLootService::class);
+        foreach ($corpseLoot->getLootSlotsForClaimer($this->player) as $slot) {
+            $storage = Storage::where('uuid', $slot->storage_uuid)->first();
+            if (!$storage) {
+                continue;
+            }
+            $corpse = Character::where('uuid', $storage->characters_uuid)->first();
+            if ($corpse) {
+                $corpseLoot->clearCorpse($corpse);
+            }
+        }
     }
 }

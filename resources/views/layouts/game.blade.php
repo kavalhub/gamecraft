@@ -327,9 +327,65 @@
         }
         .encounter-list-item-name { font-weight: 600; font-size: 14px; }
         .encounter-list-item-desc { font-size: 11px; color: #999; margin-top: 4px; }
+        .encounter-combatants {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            gap: 16px;
+            margin-bottom: 10px;
+            padding: 10px 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            background: rgba(0,0,0,0.2);
+        }
+        .encounter-combatants--idle { opacity: 0.55; }
+        .encounter-combatant {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            min-width: 0;
+        }
+        .encounter-combatant--enemy { align-items: flex-start; }
+        .encounter-combatant--player { align-items: flex-end; }
+        .encounter-combatant-icon {
+            font-size: 36px;
+            line-height: 1;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+            cursor: help;
+        }
+        .encounter-list-item { cursor: pointer; }
+        .encounter-combatant-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: #ddd;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .encounter-hp-bar {
+            width: 100%;
+            max-width: 140px;
+            height: 10px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.08);
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.06);
+        }
+        .encounter-hp-bar-fill {
+            height: 100%;
+            width: 100%;
+            transition: width 0.35s ease;
+            border-radius: 999px;
+        }
+        .encounter-hp-bar-fill--enemy { background: linear-gradient(90deg, #b91c1c, #ef4444); }
+        .encounter-hp-bar-fill--player { background: linear-gradient(90deg, #1d4ed8, #60a5fa); }
+        .encounter-hp-text { font-size: 10px; color: #888; }
         .encounter-combat-log {
-            min-height: 280px;
-            max-height: 320px;
+            min-height: 220px;
+            max-height: 260px;
             overflow-y: auto;
             border: 1px solid rgba(255,255,255,0.08);
             border-radius: 8px;
@@ -344,12 +400,34 @@
         .encounter-log-line--player { color: #93c5fd; }
         .encounter-log-line--enemy { color: #fca5a5; }
         .encounter-log-line--system { color: #fbbf24; font-weight: 600; }
-        .encounter-actions { display: flex; gap: 8px; margin-top: 10px; }
+        .encounter-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+        .encounter-actions--fight { justify-content: center; }
+        .encounter-actions--loot { flex-direction: column; }
+        .encounter-actions--loot .workbench-btn { width: 100%; }
         .encounter-status { margin-top: 8px; font-size: 12px; color: #aaa; }
         .encounter-loot-grid {
             display: grid;
             grid-template-columns: repeat(4, var(--slot-size));
             gap: 6px;
+        }
+        .encounter-panel--duel .encounter-col--list,
+        .encounter-panel--duel .encounter-col--loot {
+            display: none;
+        }
+        .encounter-panel--duel .encounter-layout {
+            grid-template-columns: 1fr;
+        }
+        .duel-challenge-box {
+            padding: 12px;
+            border: 1px solid rgba(102, 126, 234, 0.35);
+            border-radius: 8px;
+            background: rgba(102, 126, 234, 0.08);
+            margin-bottom: 12px;
+        }
+        .duel-challenge-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
         }
 
         #window-quests, #window-quest {
@@ -1349,6 +1427,7 @@
 
 <div id="playerContextMenu" class="player-context-menu">
     <button type="button" data-action="trade">Предложить обмен</button>
+    <button type="button" data-action="duel">Вызвать на дуэль</button>
     <button type="button" data-action="friend">Добавить друга</button>
     <button type="button" data-action="guild">Пригласить в гильдию</button>
 </div>
@@ -1361,7 +1440,7 @@
 <div id="msg" class="msg"></div>
 <div id="itemTooltip" class="tooltip"></div>
 @include('partials.resource-quantity-modal')
-<script src="{{ asset('js/game/game.bundle.js') }}?v=20260702h"></script>
+<script src="{{ asset('js/game/game.bundle.js') }}?v=20260702m"></script>
 
 <script>
     window.GameApi = {
@@ -2512,6 +2591,22 @@
                     if (e.type === 'trade.completed') tradeCompleted = true;
                     if (e.type === 'trade.created') tradeCreated = true;
                 }
+                if (['duel.challenged', 'duel.cancelled'].includes(e.type)) {
+                    needsOnlineUpdate = true;
+                    if (e.type === 'duel.challenged' && e.payload
+                        && e.payload.opponent_uuid === GameState.characterUuid
+                        && typeof showMsg === 'function') {
+                        showMsg((e.payload.challenger_name || 'Игрок') + ' вызывает на дуэль', 'info');
+                    }
+                }
+                if (e.type === 'duel.resolved' && e.payload && e.payload.mode === 'duel') {
+                    setTimeout(function () {
+                        if (window.WindowManager) WindowManager.open('encounter');
+                        if (window.EncounterPanel && typeof EncounterPanel.playExternalBattle === 'function') {
+                            EncounterPanel.playExternalBattle(e.payload);
+                        }
+                    }, 100);
+                }
             });
 
             if (needsOnlineUpdate && WindowManager.isOpen('players')
@@ -2674,6 +2769,10 @@
 
         if (action === 'trade' && uuid) {
             startTrade(uuid);
+        } else if (action === 'duel' && uuid) {
+            if (typeof window.startDuel === 'function') {
+                window.startDuel(uuid);
+            }
         } else if (action === 'friend' || action === 'guild') {
             showMsg('Скоро', 'info');
         }

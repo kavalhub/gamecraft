@@ -19,7 +19,7 @@ class StorageLayoutService
         private CharacterStatsService $characterStatsService,
         private CraftStationService $craftStationService,
         private DisassembleStationService $disassembleStationService,
-        private EncounterLootStationService $encounterLootStationService,
+        private CorpseLootService $corpseLootService,
         private QuestStorageService $questStorageService,
         private SlotCellResolver $slotCellResolver,
     ) {}
@@ -27,7 +27,7 @@ class StorageLayoutService
     /**
      * @param  string[]|null  $include
      */
-    public function getCharacterLayout(Character $character, ?array $include = null): array
+    public function getCharacterLayout(Character $character, ?array $include = null, ?string $corpseUuid = null): array
     {
         $include = $include ?? ['inventory'];
         $this->provisioningService->consolidateInventoryResources($character);
@@ -106,10 +106,15 @@ class StorageLayoutService
             $result['storages'][] = $this->formatStationSlotGrid($character, $disassemble, $this->disassembleStationService);
         }
 
-        if (in_array('encounter_loot', $include, true)) {
-            $this->encounterLootStationService->clearExpiredLoot($character);
-            $lootStorage = $this->encounterLootStationService->ensureEncounterLootStorage($character);
-            $result['storages'][] = $this->formatEncounterLootGrid($character, $lootStorage);
+        if (in_array('corpse', $include, true) && $corpseUuid) {
+            $corpse = Character::where('uuid', $corpseUuid)
+                ->where('character_type', 'corpse')
+                ->first();
+            if ($corpse) {
+                $corpseStorage = $this->corpseLootService->ensureCorpseStorage($corpse);
+                $result['corpse_uuid'] = $corpseUuid;
+                $result['storages'][] = $this->formatCorpseGrid($corpse, $corpseStorage);
+            }
         }
 
         if (in_array('quest', $include, true)) {
@@ -316,9 +321,9 @@ class StorageLayoutService
         return ['item' => null, 'resource' => null];
     }
 
-    private function formatEncounterLootGrid(Character $character, Storage $storage): array
+    private function formatCorpseGrid(Character $corpse, Storage $storage): array
     {
-        $tempSlots = $this->encounterLootStationService->getTemporarySlots($character);
+        $tempSlots = $this->corpseLootService->getLootSlots($corpse);
         $cols = 4;
 
         if ($tempSlots->isEmpty()) {
@@ -345,6 +350,7 @@ class StorageLayoutService
                 'slot_type' => $tempSlot->slot_type,
                 'slot_index' => $tempSlot->slot_index,
                 'index' => $tempSlot->slot_index,
+                'character_uuid' => $tempSlot->character_uuid,
                 'timestamps_end' => $tempSlot->timestamps_end?->toIso8601String(),
                 'item' => $occ['item'],
                 'resource' => $occ['resource'],

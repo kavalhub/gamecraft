@@ -15,6 +15,43 @@ function tradeApiUrl(path) {
     return `/api/trade/${playersState.characterUuid}${path}`;
 }
 
+function duelApiUrl(path) {
+    return `/api/duel/${playersState.characterUuid}${path}`;
+}
+
+function renderDuelChallengeBox(duel) {
+    const content = document.getElementById('playersContent');
+    if (!content || !duel) return;
+
+    if (duel.is_challenger) {
+        content.innerHTML = `
+            <div class="duel-challenge-box" style="margin: 12px;">
+                <div style="font-weight: 600;">Ожидание ответа</div>
+                <div style="font-size: 12px; color: #aaa; margin-top: 6px;">
+                    Вызов на дуэль: ${duel.foe_name || 'игрок'}
+                </div>
+                <div class="duel-challenge-actions">
+                    <button type="button" class="workbench-btn" onclick="declineDuel('${duel.uuid}')">Отменить</button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    content.innerHTML = `
+        <div class="duel-challenge-box" style="margin: 12px;">
+            <div style="font-weight: 600;">Вызов на дуэль</div>
+            <div style="font-size: 12px; color: #aaa; margin-top: 6px;">
+                ${duel.challenger_name || 'Игрок'} вызывает вас на дуэль
+            </div>
+            <div class="duel-challenge-actions">
+                <button type="button" class="workbench-btn workbench-btn--craft" onclick="acceptDuel('${duel.uuid}')">Принять</button>
+                <button type="button" class="workbench-btn" onclick="declineDuel('${duel.uuid}')">Отклонить</button>
+            </div>
+        </div>
+    `;
+}
+
 function switchPlayersTab(tab) {
     playersState.activeTab = tab;
     document.querySelectorAll('#playersTabs .game-tab').forEach(btn => {
@@ -85,9 +122,21 @@ function renderTradeTabView() {
 
     resizePlayersWindow();
 
-    GameApi.fetch(tradeApiUrl('/current'))
+    GameApi.fetch(duelApiUrl('/current'))
         .then(r => r.json())
-        .then(data => {
+        .then(duelData => {
+            if (duelData.duel && duelData.duel.status === 'pending') {
+                renderDuelChallengeBox(duelData.duel);
+                return null;
+            }
+            return GameApi.fetch(tradeApiUrl('/current'));
+        })
+        .then(function (tradeResponse) {
+            if (!tradeResponse) return;
+            return tradeResponse.json();
+        })
+        .then(function (data) {
+            if (!data) return;
             if (data.trade) {
                 if (window.tradeState) {
                     window.tradeState.currentTrade = typeof mergeTradeSlots === 'function'
@@ -196,6 +245,60 @@ window.startTrade = function(partnerUuid) {
             }
         } else {
             showMsg(data.error || 'Ошибка создания обмена', 'error');
+        }
+    });
+};
+
+window.startDuel = function (opponentUuid) {
+    GameApi.fetch(duelApiUrl('/challenge'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ opponent_uuid: opponentUuid }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            if (typeof showMsg === 'function') showMsg('Вызов на дуэль отправлен', 'success');
+            if (typeof window.renderTradeTabView === 'function') window.renderTradeTabView();
+        } else {
+            showMsg(data.error || 'Ошибка вызова на дуэль', 'error');
+        }
+    });
+};
+
+window.acceptDuel = function (duelUuid) {
+    GameApi.fetch(duelApiUrl('/accept'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ duel_uuid: duelUuid }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) throw new Error(data.error || 'Ошибка принятия дуэли');
+        if (window.WindowManager) WindowManager.open('encounter');
+        if (window.EncounterPanel && typeof EncounterPanel.playExternalBattle === 'function') {
+            EncounterPanel.playExternalBattle(data);
+        }
+        if (typeof window.renderTradeTabView === 'function') window.renderTradeTabView();
+    })
+    .catch(function (e) {
+        if (typeof showMsg === 'function') showMsg(e.message, 'error');
+    });
+};
+
+window.declineDuel = function (duelUuid) {
+    GameApi.fetch(duelApiUrl('/decline'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ duel_uuid: duelUuid }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            if (typeof showMsg === 'function') showMsg('Дуэль отменена', 'info');
+            if (typeof window.renderTradeTabView === 'function') window.renderTradeTabView();
+        } else {
+            showMsg(data.error || 'Ошибка', 'error');
         }
     });
 };
