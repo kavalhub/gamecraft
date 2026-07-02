@@ -50,6 +50,7 @@
             slot_uuid: raw.slot_uuid || '',
             quest_slug: raw.quest_slug || '',
             is_resource: isResource,
+            materials_used: raw.materials_used && typeof raw.materials_used === 'object' ? raw.materials_used : null,
         };
     }
 
@@ -77,6 +78,7 @@
             'data-quest-slug': d.quest_slug || '',
             'data-locked': d.locked ? '1' : '0',
             'data-is-resource': d.is_resource ? '1' : '0',
+            'data-materials-used': d.materials_used ? JSON.stringify(d.materials_used) : '',
         };
     }
 
@@ -88,10 +90,18 @@
 
     function readDescriptorFromElement(el) {
         var stats = {};
+        var materialsUsed = null;
         try {
             stats = JSON.parse(el.dataset.stats || '{}');
         } catch (_) {
             stats = {};
+        }
+        if (el.dataset.materialsUsed) {
+            try {
+                materialsUsed = JSON.parse(el.dataset.materialsUsed);
+            } catch (_) {
+                materialsUsed = null;
+            }
         }
 
         return normalizeDescriptor({
@@ -107,6 +117,8 @@
             slot_type: el.dataset.slotType || '',
             quest_slug: el.dataset.questSlug || '',
             locked: el.dataset.locked === '1',
+            stats: stats,
+            materials_used: materialsUsed,
             is_resource: el.dataset.isResource === '1'
                 || (!el.dataset.recipeSlug && Boolean(el.dataset.templateSlug)
                     && el.dataset.stage !== 'blueprint' && el.dataset.stage !== 'item'),
@@ -294,6 +306,7 @@
                 description: t.description,
                 max_stack: t.max_stack,
                 base_stats: t.base_stats || {},
+                slot_type: t.slot_type || '',
                 stage: t.type === 'blueprint' ? 'blueprint' : (t.type === 'material' ? '' : 'item'),
                 quantity: quantity,
             });
@@ -451,68 +464,58 @@
         return slot.item || slot.resource || null;
     }
 
-    /**
-     * Подбор слота по правилам окна: сначала типизированные пустые, затем стак того же ресурса.
-     * @param {Array} slots
-     * @param {Object} item — нормализованный descriptor
-     * @param {Array<{slotTypes: string[]|null, accepts: function}>} rules — по приоритету
-     */
-    var WindowSlotPlacement = {
-        findBestSlot: function (slots, item, rules) {
-            if (!slots || !item || !rules) return null;
+    var DISABLED_SLOT_TYPE = 'disabled';
+    var CRAFT_CENTER_SLOT_INDEX = 0;
 
-            for (var i = 0; i < rules.length; i++) {
-                var rule = rules[i];
-                if (!rule.accepts(item)) continue;
+    function resolveDropTarget(element) {
+        if (!element) return null;
+        var cell = element.closest('.workbench-ingredient-cell');
+        if (cell) {
+            var cellSlot = cell.querySelector('.storage-slot[data-slot-uuid]');
+            if (cellSlot) return cellSlot;
+        }
+        return element.closest('.storage-slot');
+    }
 
-                var candidates = slots.filter(function (s) {
-                    if (rule.slotTypes === null) return true;
-                    return rule.slotTypes.indexOf(s.slot_type) >= 0;
-                });
-
-                var empty = candidates.find(function (s) { return !slotOccupant(s); });
-                if (empty) return empty;
-
-                if (item.template_slug) {
-                    var sameStack = candidates.find(function (s) {
-                        var occ = slotOccupant(s);
-                        return occ && occ.template_slug === item.template_slug;
-                    });
-                    if (sameStack) return sameStack;
-                }
+    /** Визуальная подсветка при drag: красным только недоступные типизированные пустые слоты. */
+    var DragHighlight = {
+        _styleEl: null,
+        _escapeAttr: function (value) {
+            return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        },
+        begin: function (slotType) {
+            var type = slotType || '';
+            document.body.setAttribute('data-drag-active', '1');
+            document.body.setAttribute('data-drag-slot-type', type);
+            if (!this._styleEl) {
+                this._styleEl = document.createElement('style');
+                this._styleEl.id = 'drag-slot-highlight-dynamic';
+                document.head.appendChild(this._styleEl);
             }
-
-            return null;
+            var escaped = this._escapeAttr(type);
+            var selector =
+                '.storage-slot--empty[data-slot-type]:not([data-slot-type=""])';
+            if (type) {
+                selector += ':not([data-slot-type="' + escaped + '"])';
+            }
+            this._styleEl.textContent =
+                'body[data-drag-active][data-drag-slot-type="' + escaped + '"] ' + selector +
+                '{border-color:rgba(220,70,70,0.75)!important;border-style:dashed!important}' +
+                'body[data-drag-active] .storage-slot[data-drop-policy="deny"]' +
+                '{border-color:rgba(220,70,70,0.75)!important;border-style:dashed!important}';
+        },
+        end: function () {
+            document.body.removeAttribute('data-drag-active');
+            document.body.removeAttribute('data-drag-slot-type');
+            if (this._styleEl) {
+                this._styleEl.textContent = '';
+            }
         },
     };
 
-    var CRAFT_SLOT_RULES = [
-        {
-            slotTypes: ['craft_material'],
-            accepts: function (item) {
-                return getCraftActions(item).some(function (a) { return a.mode === 'material'; });
-            },
-        },
-        {
-            slotTypes: ['craft_center'],
-            accepts: function (item) {
-                return getCraftActions(item).some(function (a) { return a.mode === 'center'; });
-            },
-        },
-    ];
-
-    var DISASSEMBLE_SLOT_RULES = [
-        {
-            slotTypes: ['disassemble_center'],
-            accepts: function (item) {
-                return getDisassembleActions(item).length > 0;
-            },
-        },
-    ];
-
     var STATION_STORAGE_INCLUDE = 'inventory,craft,disassemble';
 
-    function normalizeStationTargetSlot(mode) {
+    function normalizeStationMode(mode) {
         if (mode === 'center' || mode === 'blueprint_center' || mode === 'disassemble_center') {
             return 'center';
         }
@@ -521,8 +524,6 @@
         }
         return null;
     }
-
-    window.WindowSlotPlacement = WindowSlotPlacement;
 
     function getRecipes() {
         return (window.GameState && GameState.recipes) || [];
@@ -561,13 +562,6 @@
                     recipe_slug: recipe.slug,
                     label: label,
                 });
-                actions.push({
-                    window: 'craft',
-                    mode: 'material',
-                    target_slot: 'material',
-                    recipe_slug: recipe.slug,
-                    label: label,
-                });
             });
         }
 
@@ -598,7 +592,7 @@
         if (d.is_resource || (d.stage !== 'blueprint' && d.stage !== 'item')) {
             getRecipes().forEach(function (recipe) {
                 if (recipe.type !== 'resource' || !recipe.disassemble_formula) return;
-                if (recipe.result_template_slug !== d.template_slug) return;
+                if (recipe.slug !== d.template_slug) return;
                 if (!Object.keys(recipe.disassemble_formula).length) return;
                 actions.push({
                     window: 'disassemble',
@@ -663,7 +657,10 @@
                 });
                 html += '<div class="storage-slot special-slot' + classes + '" ' +
                     'data-slot-uuid="' + slot.uuid + '" ' +
-                    'data-slot-kind="regular" data-readonly="0">';
+                    'data-slot-kind="regular" ' +
+                    'data-slot-type="' + (slot.slot_type != null ? slot.slot_type : '') + '" ' +
+                    'data-storage-type="' + (storageData.storage_type || 'inventory') + '" ' +
+                    'data-readonly="0">';
                 if (occ && window.GameItemPresenter) {
                     html += GameItemPresenter.renderIcon(occ, 'storage-slot-item');
                 }
@@ -748,6 +745,10 @@
                 html += '<div class="storage-slot' + classes + '" ' +
                     'data-slot-uuid="' + slot.uuid + '" ' +
                     'data-slot-kind="' + (slot.kind || 'regular') + '" ' +
+                    'data-slot-type="' + (slot.slot_type != null ? slot.slot_type : '') + '" ' +
+                    'data-slot-index="' + (slot.slot_index != null ? slot.slot_index : '') + '" ' +
+                    'data-storage-type="' + (storageData.storage_type || '') + '" ' +
+                    (slot.drop_policy ? 'data-drop-policy="' + slot.drop_policy + '" ' : '') +
                     'data-readonly="' + (readonly ? '1' : '0') + '">';
 
                 if (occ && window.GameItemPresenter) {
@@ -885,6 +886,48 @@
             });
         },
 
+        quickMove: function (fromSlotUuid, intent, options) {
+            var self = this;
+            options = options || {};
+            var body = {
+                from_slot_uuid: fromSlotUuid,
+                intent: intent,
+            };
+            if (options.station_mode) body.station_mode = options.station_mode;
+            if (options.quantity != null) body.quantity = options.quantity;
+
+            return window.GameApi.fetch('/api/storage/' + self.characterUuid + '/quick-move', {
+                method: 'POST',
+                body: JSON.stringify(body),
+            }).then(function (res) {
+                return res.json().then(function (data) {
+                    if (!res.ok) {
+                        throw new Error(data.error || 'Ошибка быстрого перемещения');
+                    }
+                    if (data.layout) {
+                        self.applyLayout(data.layout);
+                        if (data.layout.gold != null) {
+                            var goldEl = document.getElementById('playerGold');
+                            if (goldEl && window.GoldChip && StorageManager.inventoryStorage) {
+                                GoldChip.mount(goldEl, StorageManager.inventoryStorage, data.layout.gold);
+                            } else if (goldEl) {
+                                goldEl.textContent = '💰 ' + data.layout.gold;
+                            }
+                        }
+                        if (data.layout.experience != null) {
+                            var xpEl = document.getElementById('playerExperience');
+                            if (xpEl && window.ExperienceChip && StorageManager.inventoryStorage) {
+                                ExperienceChip.mount(xpEl, StorageManager.inventoryStorage, data.layout.experience);
+                            } else if (xpEl) {
+                                xpEl.textContent = '⭐ ' + data.layout.experience;
+                            }
+                        }
+                    }
+                    return data;
+                });
+            });
+        },
+
         getGold: function () {
             if (this.layout && this.layout.gold != null) {
                 return this.layout.gold;
@@ -941,7 +984,9 @@
                     recipe_slug: occEl.dataset.recipeSlug,
                     quantity: occEl.dataset.quantity,
                     max_stack: occEl.dataset.maxStack,
-                    icon: occEl.dataset.icon
+                    icon: occEl.dataset.icon,
+                    slot_type: occEl.dataset.slotType || '',
+                    is_resource: occEl.dataset.isResource === '1',
                 });
             }
 
@@ -975,6 +1020,9 @@
             this.ghost.style.top = e.clientY + 'px';
             document.body.appendChild(this.ghost);
 
+            var dragSlotType = (occEl && occEl.dataset.slotType) || (descriptor && descriptor.slot_type) || '';
+            DragHighlight.begin(dragSlotType);
+
             if (this.active.fromSlot.setPointerCapture) {
                 try { this.active.fromSlot.setPointerCapture(e.pointerId); } catch (_) {}
             }
@@ -1003,8 +1051,9 @@
 
             var target = document.elementFromPoint(e.clientX, e.clientY);
             if (!target) return;
-            var dropSlot = target.closest('.storage-slot');
-            if (dropSlot && dropSlot.dataset.readonly !== '1' && dropSlot !== this.active.fromSlot) {
+            var dropSlot = resolveDropTarget(target);
+            if (dropSlot && dropSlot.dataset.readonly !== '1' && dropSlot !== this.active.fromSlot
+                && !dropSlot.classList.contains('storage-slot--readonly')) {
                 dropSlot.classList.add('storage-slot--drag-over');
             }
         },
@@ -1014,7 +1063,7 @@
 
             var wasDragging = this.active.dragging;
             var target = document.elementFromPoint(e.clientX, e.clientY);
-            var dropSlot = target ? target.closest('.storage-slot') : null;
+            var dropSlot = resolveDropTarget(target);
             var fromUuid = this.active.fromSlotUuid;
             var descriptor = this.active.descriptor;
 
@@ -1027,9 +1076,13 @@
                 el.classList.remove('storage-slot--drag-over');
             });
 
-            if (wasDragging && dropSlot && dropSlot.dataset.readonly !== '1'
+            DragHighlight.end();
+
+            var canDrop = wasDragging && dropSlot && dropSlot.dataset.readonly !== '1'
                 && !dropSlot.classList.contains('storage-slot--readonly')
-                && dropSlot.dataset.slotUuid !== fromUuid) {
+                && dropSlot.dataset.slotUuid !== fromUuid;
+
+            if (canDrop) {
                 var toUuid = dropSlot.dataset.slotUuid;
                 var isResource = descriptor.template_slug && !descriptor.stage;
                 var canSplit = isResource && descriptor.quantity > 1 && e.shiftKey && window.ResourceQuantityModal;
@@ -1372,162 +1425,65 @@
     window.PlayPanelManager = PlayPanelManager;
     window.PLAY_PANEL_ACTIONS = PLAY_PANEL_ACTIONS;
 
+    function refreshAfterStorageChange(options) {
+        options = options || {};
+        if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
+        if (typeof loadPlayerData === 'function') loadPlayerData();
+        if (options.craft && window.CraftPanel) CraftPanel.render();
+        if (options.disassemble && window.DisassemblePanel) DisassemblePanel.render();
+    }
+
+    function quickMoveWasNoop(data) {
+        return Boolean(data && data.move && data.move.noop);
+    }
+
     var StorageQuickActions = {
-        ensureStorages: function () {
+        ensureStorages: function (include) {
             if (!window.StorageManager || !window.GameState) {
                 return Promise.reject(new Error('StorageManager unavailable'));
             }
-            return StorageManager.load(GameState.characterUuid, 'inventory,equipment,stats');
+            return StorageManager.load(GameState.characterUuid, include || 'inventory,equipment,stats');
         },
 
-        isEquippable: function (item) {
-            var slotType = item && item.slot_type ? String(item.slot_type) : '';
-            return slotType.indexOf('equipment_') === 0;
-        },
+        quickMove: function (fromSlotUuid, intent, options) {
+            options = options || {};
+            var silent = options.silent === true;
+            if (!fromSlotUuid) return Promise.resolve({ noop: true });
 
-        findEquipSlot: function (item) {
-            var storage = StorageManager.equipmentStorage;
-            if (!storage || !item || !item.slot_type) return null;
-            var slots = storage.special_slots || storage.slots || [];
-            var targetType = item.slot_type;
-            if (targetType === 'equipment_ring') {
-                var ringSlots = slots.filter(function (s) { return s.slot_type === 'equipment_ring'; });
-                var emptyRing = ringSlots.find(function (s) { return !slotOccupant(s); });
-                return emptyRing || ringSlots[0] || null;
-            }
-            return slots.find(function (s) { return s.slot_type === targetType; }) || null;
-        },
-
-        findEmptyInventorySlot: function () {
-            var storage = StorageManager.inventoryStorage;
-            if (!storage) return null;
-            var slots = storage.grid_slots || storage.slots || [];
-            return slots.find(function (s) {
-                return !s.hidden && (s.slot_type == null || s.slot_type === '') && !slotOccupant(s);
-            }) || null;
+            return StorageManager.quickMove(fromSlotUuid, intent, options).then(function (data) {
+                var noop = quickMoveWasNoop(data);
+                if (!noop) {
+                    refreshAfterStorageChange({
+                        craft: intent === 'craft' || intent === 'station_return',
+                        disassemble: intent === 'disassemble' || intent === 'station_return',
+                    });
+                } else if (!silent && typeof showMsg === 'function') {
+                    showMsg('Нет подходящего слота', 'error');
+                }
+                return { noop: noop, data: data };
+            }).catch(function (err) {
+                if (!silent && typeof showMsg === 'function') showMsg(err.message, 'error');
+                throw err;
+            });
         },
 
         equipItem: function (item, fromSlotUuid, options) {
-            var self = this;
-            options = options || {};
-            var silent = options.silent === true;
-            if (!item || item.locked) return Promise.resolve();
-            return this.ensureStorages().then(function () {
-                if (!item.slot_type && StorageManager.inventoryStorage) {
-                    var invSlots = StorageManager.inventoryStorage.grid_slots || StorageManager.inventoryStorage.slots || [];
-                    invSlots.forEach(function (s) {
-                        var occ = s.item || s.resource;
-                        if (occ && occ.uuid === item.uuid) {
-                            if (occ.slot_type) item.slot_type = occ.slot_type;
-                            if (occ.slot_uuid) item.slot_uuid = occ.slot_uuid;
-                        }
-                    });
-                }
-                var toSlot = self.findEquipSlot(item);
-                if (!toSlot) {
-                    if (!silent && typeof showMsg === 'function') showMsg('Нет подходящего слота экипировки', 'error');
-                    return;
-                }
-                var fromUuid = fromSlotUuid || item.slot_uuid;
-                if (!fromUuid) return;
-                return StorageManager.move(fromUuid, toSlot.uuid).then(function () {
-                    if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
-                    if (typeof loadPlayerData === 'function') loadPlayerData();
-                }).catch(function (err) {
-                    if (!silent && typeof showMsg === 'function') showMsg(err.message, 'error');
-                });
-            });
+            return this.quickMove(fromSlotUuid || (item && item.slot_uuid), 'equip', options);
         },
 
         unequipFromSlot: function (fromSlotUuid) {
-            var self = this;
-            return this.ensureStorages().then(function () {
-                var toSlot = self.findEmptyInventorySlot();
-                if (!toSlot) {
-                    if (typeof showMsg === 'function') showMsg('Нет свободного места в инвентаре', 'error');
-                    return;
-                }
-                return StorageManager.move(fromSlotUuid, toSlot.uuid).then(function () {
-                    if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
-                    if (typeof loadPlayerData === 'function') loadPlayerData();
-                }).catch(function (err) {
-                    if (typeof showMsg === 'function') showMsg(err.message, 'error');
-                });
-            });
-        },
-
-        isWorkbenchResource: function (item) {
-            if (!item || item.locked) return false;
-            if (item.stage === 'blueprint' || item.stage === 'item') return false;
-            return Boolean(item.template_slug);
-        },
-
-        isWorkbenchBlueprint: function (item) {
-            if (!item || item.locked) return false;
-            return item.stage === 'blueprint' || item.stage === 'item';
-        },
-
-        findStationSlot: function (item, windowName, options) {
-            options = options || {};
-            var storage = windowName === 'disassemble'
-                ? StorageManager.disassembleStorage
-                : StorageManager.craftStorage;
-            if (!storage || !item) return null;
-            var slots = storage.slots || storage.special_slots || [];
-            var target = normalizeStationTargetSlot(options.targetSlot || options.mode);
-            var rules = windowName === 'disassemble' ? DISASSEMBLE_SLOT_RULES : CRAFT_SLOT_RULES;
-
-            if (target === 'center') {
-                var centerType = windowName === 'disassemble' ? 'disassemble_center' : 'craft_center';
-                var centerRule = rules.find(function (rule) {
-                    return rule.slotTypes && rule.slotTypes.indexOf(centerType) >= 0 && rule.accepts(item);
-                });
-                if (!centerRule) return null;
-                var centerSlot = slots.find(function (s) { return s.slot_type === centerType; });
-                if (!centerSlot) return null;
-                if (!slotOccupant(centerSlot)) return centerSlot;
-                if (item.template_slug) {
-                    var centerOcc = slotOccupant(centerSlot);
-                    if (centerOcc && centerOcc.template_slug === item.template_slug) return centerSlot;
-                }
-                return centerSlot;
-            }
-
-            if (target === 'material' && windowName === 'craft') {
-                var materialRule = rules.find(function (rule) {
-                    return rule.slotTypes && rule.slotTypes.indexOf('craft_material') >= 0 && rule.accepts(item);
-                });
-                if (!materialRule) return null;
-                return WindowSlotPlacement.findBestSlot(slots, item, [materialRule]);
-            }
-
-            return WindowSlotPlacement.findBestSlot(slots, item, rules);
+            return this.quickMove(fromSlotUuid, 'inventory');
         },
 
         placeOnStation: function (item, fromSlotUuid, options) {
-            var self = this;
             options = options || {};
-            var silent = options.silent !== false;
-            var windowName = options.window || 'craft';
+            var intent = options.window === 'disassemble' ? 'disassemble' : 'craft';
+            var stationMode = normalizeStationMode(options.mode || options.targetSlot);
+            var moveOptions = { silent: options.silent !== false };
+            if (stationMode) moveOptions.station_mode = stationMode;
 
-            if (!item || item.locked) return Promise.resolve();
             return StorageManager.load(GameState.characterUuid, STATION_STORAGE_INCLUDE).then(function () {
-                var toSlot = self.findStationSlot(item, windowName, options);
-                if (!toSlot) {
-                    return;
-                }
-                var fromUuid = fromSlotUuid || item.slot_uuid;
-                if (!fromUuid) return;
-                return StorageManager.move(fromUuid, toSlot.uuid).then(function () {
-                    if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
-                    if (windowName === 'disassemble' && window.DisassemblePanel) {
-                        DisassemblePanel.render();
-                    } else if (window.CraftPanel) {
-                        CraftPanel.render();
-                    }
-                }).catch(function (err) {
-                    if (!silent && typeof showMsg === 'function') showMsg(err.message, 'error');
-                });
+                return StorageQuickActions.quickMove(fromSlotUuid || item.slot_uuid, intent, moveOptions);
             });
         },
 
@@ -1536,27 +1492,8 @@
         },
 
         returnFromStation: function (tempSlotUuid) {
-            var storage = StorageManager.craftStorage;
-            var slots = storage ? (storage.slots || storage.special_slots || []) : [];
-            var slot = slots.find(function (s) { return s.uuid === tempSlotUuid; });
-            if (!slot && StorageManager.disassembleStorage) {
-                storage = StorageManager.disassembleStorage;
-                slots = storage.slots || storage.special_slots || [];
-                slot = slots.find(function (s) { return s.uuid === tempSlotUuid; });
-            }
-            if (!storage || !tempSlotUuid || !slot) return Promise.resolve();
-            var occ = slotOccupant(slot);
-            if (!occ || !occ.slot_uuid) return Promise.resolve();
-
             return StorageManager.load(GameState.characterUuid, STATION_STORAGE_INCLUDE).then(function () {
-                return StorageManager.move(tempSlotUuid, occ.slot_uuid).then(function () {
-                    if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
-                    if (window.CraftPanel) CraftPanel.render();
-                    if (window.DisassemblePanel) DisassemblePanel.render();
-                    if (typeof loadPlayerData === 'function') loadPlayerData();
-                }).catch(function (err) {
-                    if (typeof showMsg === 'function') showMsg(err.message, 'error');
-                });
+                return StorageQuickActions.quickMove(tempSlotUuid, 'station_return', { silent: true });
             });
         },
 
@@ -1571,12 +1508,24 @@
 
     var ItemDispatcher = {
         SINK_WINDOWS: ['craft', 'disassemble', 'trade', 'auction', 'quest'],
+        SINK_PRIORITY: ['trade', 'auction', 'craft', 'disassemble', 'quest'],
 
         getOpenSinks: function () {
             if (!window.WindowManager) return [];
             return this.SINK_WINDOWS.filter(function (name) {
                 return WindowManager.isOpen(name);
             });
+        },
+
+        pickOpenSink: function () {
+            if (!window.WindowManager) return null;
+            for (var i = 0; i < this.SINK_PRIORITY.length; i++) {
+                var name = this.SINK_PRIORITY[i];
+                if (WindowManager.isOpen(name)) {
+                    return name;
+                }
+            }
+            return null;
         },
 
         handleInventoryDblclick: function (item, sourceSlotUuid) {
@@ -1600,17 +1549,28 @@
                 return Promise.resolve();
             }
 
-            if (window.StorageQuickActions && StorageQuickActions.isEquippable(item)) {
-                if (window.WindowManager) WindowManager.open('character');
-                return StorageQuickActions.equipItem(item, sourceSlotUuid, { silent: true });
-            }
-
-            var sinks = this.getOpenSinks();
-            if (sinks.length !== 1) {
+            var self = this;
+            var fromUuid = sourceSlotUuid || item.slot_uuid;
+            if (!fromUuid || !window.StorageManager || !window.GameState) {
                 return Promise.resolve();
             }
 
-            return this.dispatchTo(sinks[0], item, sourceSlotUuid);
+            var openSink = self.pickOpenSink();
+            if (openSink) {
+                return self.dispatchTo(openSink, item, sourceSlotUuid, { silent: true });
+            }
+
+            return StorageManager.load(GameState.characterUuid, 'inventory,equipment').then(function () {
+                return StorageManager.quickMove(fromUuid, 'equip').then(function (data) {
+                    if (!quickMoveWasNoop(data)) {
+                        if (window.WindowManager) WindowManager.open('character');
+                        refreshAfterStorageChange();
+                    }
+                    return data;
+                });
+            }).catch(function (err) {
+                if (typeof showMsg === 'function') showMsg(err.message, 'error');
+            });
         },
 
         handleContextAction: function (action, item, sourceSlotUuid, extraOptions) {
@@ -1673,7 +1633,15 @@
                         recipeSlug: recipeSlug,
                         mode: mode,
                         targetSlot: mode,
+                        silent: false,
                     });
+                }).then(function () {
+                    if (winName === 'disassemble' && window.DisassemblePanel) {
+                        return DisassemblePanel.load();
+                    }
+                    if (winName === 'craft' && window.CraftPanel) {
+                        return CraftPanel.load();
+                    }
                 });
             }
 
@@ -1709,7 +1677,7 @@
             var qa = window.StorageQuickActions;
             if (!qa) return Promise.resolve();
             return qa.placeOnStation(item, sourceSlotUuid, {
-                silent: true,
+                silent: options.silent !== false,
                 window: 'craft',
                 mode: options.mode,
                 targetSlot: options.targetSlot || options.mode,
@@ -1721,7 +1689,7 @@
             var qa = window.StorageQuickActions;
             if (!qa) return Promise.resolve();
             return qa.placeOnStation(item, sourceSlotUuid, {
-                silent: true,
+                silent: options.silent === true,
                 window: 'disassemble',
                 mode: options.mode,
                 targetSlot: options.targetSlot || options.mode,
@@ -1948,12 +1916,16 @@
         return storage.slots || storage.special_slots || [];
     }
 
-    function craftGetSlot(slotType) {
-        return craftGetSlots().find(function (s) { return s.slot_type === slotType; }) || null;
+    function craftGetCenterSlot() {
+        return craftGetSlots().find(function (s) {
+            return s.slot_index === CRAFT_CENTER_SLOT_INDEX;
+        }) || null;
     }
 
-    function craftMaterialSlots() {
-        return craftGetSlots().filter(function (s) { return s.slot_type === 'craft_material'; });
+    function craftMaterialSlotList() {
+        return craftGetSlots().filter(function (s) {
+            return s.slot_index > CRAFT_CENTER_SLOT_INDEX;
+        });
     }
 
     function disassembleGetSlots() {
@@ -1962,8 +1934,16 @@
         return storage.slots || storage.special_slots || [];
     }
 
-    function disassembleGetSlot(slotType) {
-        return disassembleGetSlots().find(function (s) { return s.slot_type === slotType; }) || null;
+    function disassembleGetCenterSlot() {
+        return disassembleGetSlots().find(function (s) {
+            return s.slot_index === CRAFT_CENTER_SLOT_INDEX;
+        }) || null;
+    }
+
+    function disassembleOutputSlots() {
+        return disassembleGetSlots().filter(function (s) {
+            return s.slot_index > CRAFT_CENTER_SLOT_INDEX;
+        });
     }
 
     function stationOccupant(slot) {
@@ -1978,7 +1958,7 @@
 
     function craftSumMaterial(slug) {
         var total = 0;
-        craftMaterialSlots().forEach(function (slot) {
+        craftMaterialSlotList().forEach(function (slot) {
             var occ = stationOccupant(slot);
             if (occ && occ.template_slug === slug) {
                 total += parseInt(occ.quantity, 10) || 0;
@@ -2002,7 +1982,9 @@
         var totals = craftIngredientTotals();
         return getRecipes().find(function (recipe) {
             if (recipe.type !== 'resource' || !recipe.craft_formula) return false;
-            return Object.keys(recipe.craft_formula).every(function (slug) {
+            var keys = Object.keys(recipe.craft_formula);
+            if (!keys.length) return false;
+            return keys.every(function (slug) {
                 return (totals[slug] || 0) >= recipe.craft_formula[slug];
             });
         }) || null;
@@ -2014,7 +1996,14 @@
         var classes = 'storage-slot workbench-storage-slot';
         classes += occ ? ' storage-slot--draggable' : ' storage-slot--empty';
         var kind = slot.kind || 'temporary';
-        var html = '<div class="' + classes + '" data-slot-uuid="' + slot.uuid + '" data-slot-kind="' + kind + '" data-readonly="0">';
+        var storageType = options.storageType || '';
+        var html = '<div class="' + classes + '" ' +
+            'data-slot-uuid="' + slot.uuid + '" ' +
+            'data-slot-kind="' + kind + '" ' +
+            'data-slot-type="' + (slot.slot_type != null ? slot.slot_type : '') + '" ' +
+            'data-slot-index="' + (slot.slot_index != null ? slot.slot_index : '') + '" ' +
+            'data-storage-type="' + storageType + '" ' +
+            'data-readonly="0">';
         if (occ && window.GameItemPresenter) {
             html += GameItemPresenter.renderIcon(occ, 'storage-slot-item');
         }
@@ -2072,7 +2061,7 @@
 
     var CraftPanel = {
         resolveContext: function () {
-            var centerSlot = craftGetSlot('craft_center');
+            var centerSlot = craftGetCenterSlot();
             var center = stationOccupant(centerSlot);
             var recipes = getRecipes();
 
@@ -2116,7 +2105,7 @@
                 if (nameInput && ctx.recipe) {
                     var defaultName = ctx.recipe.name || '';
                     if (ctx.recipe.result_template_slug && GameItemPresenter.descriptorFromSlug) {
-                        var preview = GameItemPresenter.descriptorFromSlug(ctx.recipe.result_template_slug, 1);
+                        var preview = GameItemPresenter.descriptorFromSlug(ctx.recipe.result_template_slug, ctx.recipe.result_quantity || 1);
                         if (preview && preview.name) defaultName = preview.name;
                     }
                     nameInput.placeholder = defaultName;
@@ -2133,15 +2122,15 @@
                 emptyMode.style.display = 'block';
             }
 
-            var centerSlot = craftGetSlot('craft_center');
+            var centerSlot = craftGetCenterSlot();
             var centerOcc = stationOccupant(centerSlot);
             if (blueprintEl) {
                 if (centerSlot && centerOcc && getCraftActions(centerOcc).some(function (a) {
                     return a.mode === 'center';
                 })) {
-                    blueprintEl.innerHTML = stationRenderSlotElement(centerSlot);
+                    blueprintEl.innerHTML = stationRenderSlotElement(centerSlot, { storageType: 'craft' });
                 } else if (centerSlot && !centerOcc) {
-                    blueprintEl.innerHTML = stationRenderSlotElement(centerSlot);
+                    blueprintEl.innerHTML = stationRenderSlotElement(centerSlot, { storageType: 'craft' });
                 } else {
                     blueprintEl.innerHTML = '<div class="storage-slot storage-slot--empty workbench-storage-slot" data-readonly="1"><div class="workbench-placeholder">?</div></div>';
                 }
@@ -2149,27 +2138,31 @@
 
             if (materialsEl) {
                 var formula = (ctx.recipe && ctx.recipe.craft_formula) ? ctx.recipe.craft_formula : null;
-                materialsEl.innerHTML = craftMaterialSlots().map(function (slot, index) {
+                materialsEl.innerHTML = craftMaterialSlotList().map(function (slot, index) {
                     var occ = stationOccupant(slot);
                     var hint = '';
                     var hintClass = '';
-                    if (formula && !occ) {
+                    if (formula && !occ && slot.slot_type && slot.slot_type !== DISABLED_SLOT_TYPE) {
                         var entries = Object.entries(formula);
-                        if (entries[index]) {
-                            var slug = entries[index][0];
-                            var needed = entries[index][1];
+                        var typedSlots = craftMaterialSlotList().filter(function (s) {
+                            return s.slot_type && s.slot_type !== DISABLED_SLOT_TYPE;
+                        });
+                        var typedIndex = typedSlots.indexOf(slot);
+                        if (typedIndex >= 0 && entries[typedIndex]) {
+                            var slug = entries[typedIndex][0];
+                            var needed = entries[typedIndex][1];
                             var available = craftSumMaterial(slug);
                             hint = available + ' / ' + needed;
                             hintClass = available >= needed ? 'is-enough' : 'is-short';
                         }
                     }
-                    return stationRenderSlotElement(slot, { hint: hint, hintClass: hintClass });
+                    return stationRenderSlotElement(slot, { hint: hint, hintClass: hintClass, storageType: 'craft' });
                 }).join('');
             }
 
             if (resultEl) {
                 if ((ctx.mode === 'craft' || ctx.mode === 'resource') && ctx.recipe && ctx.recipe.result_template_slug && GameItemPresenter) {
-                    var full = GameItemPresenter.descriptorFromSlug(ctx.recipe.result_template_slug, 1);
+                    var full = GameItemPresenter.descriptorFromSlug(ctx.recipe.result_template_slug, ctx.recipe.result_quantity || 1);
                     resultEl.innerHTML = stationRenderLockedPreview(full, ctx.recipe.name);
                     stationRenderStats(statsEl, full);
                 } else {
@@ -2193,32 +2186,52 @@
         },
     };
 
-    function disassembleReturnPreviewCells(formula) {
-        var count = 8;
-        var cells = [];
-        for (var index = 0; index < count; index++) {
-            var hint = '';
-            var hintClass = '';
-            if (formula) {
-                var entries = Object.entries(formula);
-                if (entries[index]) {
-                    hint = '+' + entries[index][1];
-                    hintClass = 'is-return';
-                }
-            }
-            cells.push(
-                '<div class="workbench-ingredient-cell">' +
-                '<div class="storage-slot storage-slot--empty storage-slot--readonly workbench-storage-slot" data-readonly="1"></div>' +
-                (hint ? '<div class="workbench-formula-qty ' + hintClass + '">' + hint + '</div>' : '') +
-                '</div>'
-            );
+    function renderDisassembleOutputs(ctx) {
+        var outputSlots = disassembleOutputSlots();
+        if (!outputSlots.length) {
+            return '';
         }
-        return cells.join('');
+
+        var hasOccupants = outputSlots.some(function (slot) {
+            return Boolean(stationOccupant(slot));
+        });
+
+        if (hasOccupants) {
+            return outputSlots.map(function (slot) {
+                return '<div class="workbench-ingredient-cell">' + stationRenderSlotElement(slot, { storageType: 'disassemble' }) + '</div>';
+            }).join('');
+        }
+
+        var formula = null;
+        if (ctx.mode === 'disassemble' && ctx.center) {
+            var used = wbNormalizeMaterialsUsed(ctx.center.materials_used);
+            if (used && Object.keys(used).length) {
+                formula = used;
+            } else if (ctx.recipe && ctx.recipe.disassemble_formula) {
+                formula = ctx.recipe.disassemble_formula;
+            }
+        }
+
+        var entries = formula ? Object.entries(formula) : [];
+
+        return outputSlots.map(function (slot, index) {
+            if (entries[index] && window.GameItemPresenter) {
+                var slug = entries[index][0];
+                var qty = entries[index][1];
+                var preview = GameItemPresenter.descriptorFromSlug(slug, qty);
+                return '<div class="workbench-ingredient-cell">' +
+                    stationRenderLockedPreview(preview) +
+                    '<div class="workbench-formula-qty is-return">' + qty + '</div>' +
+                    '</div>';
+            }
+
+            return '<div class="workbench-ingredient-cell">' + stationRenderSlotElement(slot, { storageType: 'disassemble' }) + '</div>';
+        }).join('');
     }
 
     var DisassemblePanel = {
         resolveContext: function () {
-            var centerSlot = disassembleGetSlot('disassemble_center');
+            var centerSlot = disassembleGetCenterSlot();
             var center = stationOccupant(centerSlot);
             if (center) {
                 var actions = getDisassembleActions(center);
@@ -2235,7 +2248,7 @@
         render: function () {
             var ctx = this.resolveContext();
             var itemEl = document.getElementById('disassembleItemSlot');
-            var returnsEl = document.getElementById('disassembleReturns');
+            var outputsEl = document.getElementById('disassembleOutputs');
             var statsEl = document.getElementById('disassembleStatsBody');
             var actionMode = document.getElementById('disassembleActionMode');
             var emptyMode = document.getElementById('disassembleEmptyMode');
@@ -2252,29 +2265,20 @@
                 }
             }
 
-            var centerSlot = disassembleGetSlot('disassemble_center');
+            var centerSlot = disassembleGetCenterSlot();
             var centerOcc = stationOccupant(centerSlot);
             if (itemEl) {
                 if (centerSlot && centerOcc && getDisassembleActions(centerOcc).length) {
-                    itemEl.innerHTML = stationRenderSlotElement(centerSlot);
+                    itemEl.innerHTML = stationRenderSlotElement(centerSlot, { storageType: 'disassemble' });
                 } else if (centerSlot && !centerOcc) {
-                    itemEl.innerHTML = stationRenderSlotElement(centerSlot);
+                    itemEl.innerHTML = stationRenderSlotElement(centerSlot, { storageType: 'disassemble' });
                 } else {
                     itemEl.innerHTML = '<div class="storage-slot storage-slot--empty workbench-storage-slot" data-readonly="1"><div class="workbench-placeholder">?</div></div>';
                 }
             }
 
-            if (returnsEl) {
-                var disFormula = null;
-                if (ctx.mode === 'disassemble' && ctx.center) {
-                    var used = wbNormalizeMaterialsUsed(ctx.center.materials_used);
-                    if (used && Object.keys(used).length) {
-                        disFormula = used;
-                    } else if (ctx.recipe && ctx.recipe.disassemble_formula) {
-                        disFormula = ctx.recipe.disassemble_formula;
-                    }
-                }
-                returnsEl.innerHTML = disassembleReturnPreviewCells(disFormula);
+            if (outputsEl) {
+                outputsEl.innerHTML = renderDisassembleOutputs(ctx);
             }
 
             if (statsEl) {
@@ -2288,7 +2292,7 @@
             stationBindDblclick('.disassemble-panel');
             if (window.DragEngine) {
                 DragEngine.registerGrid(document.getElementById('disassembleItemSlot'));
-                DragEngine.registerGrid(document.getElementById('disassembleReturns'));
+                DragEngine.registerGrid(document.getElementById('disassembleOutputs'));
             }
         },
 

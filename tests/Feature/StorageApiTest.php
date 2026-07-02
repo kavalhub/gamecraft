@@ -51,27 +51,41 @@ class StorageApiTest extends TestCase
         $response->assertJsonPath('gold', 1000);
     }
 
-    public function test_storage_shows_locked_item_in_source_slot(): void
+    public function test_trade_item_not_shown_in_inventory_when_in_trade(): void
     {
         $inventoryService = app(InventoryService::class);
         $provisioning = app(StorageProvisioningService::class);
+        $tradeService = app(\App\Services\TradeService::class);
         $inventoryService->addResource($this->player, 'wood', 10);
         $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->player);
 
-        $provisioning->ensureTradeStorage($this->player);
-        $tempSlot = $provisioning->findFreeTradeTemporarySlot($this->player);
-        $item->update(['temporary_slot_uuid' => $tempSlot->uuid]);
+        $user2 = User::create([
+            'name' => 'Trader',
+            'email' => 'trader2@example.com',
+            'password' => bcrypt('password'),
+        ]);
+        $partner = Character::create([
+            'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+            'user_uuid' => $user2->uuid,
+            'character_type' => 'player',
+            'name' => 'Trader',
+            'active' => true,
+        ]);
+        app(StorageProvisioningService::class)->provisionDefaults($partner);
+
+        $trade = $tradeService->createTrade($this->player, $partner);
+        $tradeService->addItemToTrade($this->player, $trade, $item->uuid);
 
         $response = $this->withToken($this->token)
-            ->getJson("/api/storage/{$this->player->uuid}?include=inventory");
+            ->getJson("/api/storage/{$this->player->uuid}?include=inventory,trade");
 
         $response->assertOk();
         $inventory = collect($response->json('storages'))->firstWhere('storage_type', 'inventory');
         $occupiedSlot = collect($inventory['grid_slots'] ?? $inventory['slots'])
             ->first(fn ($s) => ($s['item']['uuid'] ?? null) === $item->uuid);
 
-        $this->assertNotNull($occupiedSlot);
-        $this->assertTrue($occupiedSlot['item']['locked']);
+        $this->assertNull($occupiedSlot);
+        $this->assertCount(6, $response->json('my_trade_slots.slots'));
     }
 
     public function test_craft_overlay_shows_unlocked_item(): void
@@ -91,8 +105,9 @@ class StorageApiTest extends TestCase
 
         $craft = collect($inventoryResponse->json('storages'))->firstWhere('storage_type', 'craft');
         $centerSlot = collect($craft['slots'] ?? [])
-            ->first(fn ($s) => ($s['slot_type'] ?? null) === 'craft_center');
+            ->first(fn ($s) => ($s['slot_index'] ?? null) === 0);
         $this->assertNotNull($centerSlot);
+        $this->assertNull($centerSlot['slot_type']);
         $this->assertFalse($centerSlot['item']['locked']);
     }
 
@@ -147,7 +162,9 @@ class StorageApiTest extends TestCase
             ->getJson("/api/storage/{$this->player->uuid}?include=inventory,trade");
 
         $response->assertOk();
-        $this->assertCount(20, $response->json('my_trade_slots.slots'));
-        $this->assertEquals(4, $response->json('my_trade_slots.cols'));
+        $this->assertCount(6, $response->json('my_trade_slots.slots'));
+        $this->assertEquals(3, $response->json('my_trade_slots.cols'));
+        $this->assertArrayNotHasKey('drop_policy', $response->json('my_trade_slots.slots.0'));
+        $this->assertEquals('deny', $response->json('partner_trade_slots.slots.0.drop_policy'));
     }
 }

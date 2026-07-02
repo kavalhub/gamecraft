@@ -48,18 +48,29 @@ class CraftingService
                     'label' => $this->craftingActionResolver->actionLabelForFormula($disassembleFormula),
                 ] : null,
                 'result_template_slug' => $this->resolveResultTemplateSlug($recipe),
+                'result_quantity' => $this->resolveResultQuantity($recipe),
             ];
         });
     }
 
+    public function resolveResultQuantity(Recipe $recipe): int
+    {
+        if ($recipe->result_quantity && $recipe->result_quantity > 0) {
+            return (int) $recipe->result_quantity;
+        }
+
+        return 1;
+    }
+
     public function resolveResultTemplateSlug(Recipe $recipe): ?string
     {
+        if ($recipe->result_template_slug) {
+            return $recipe->result_template_slug;
+        }
+
         try {
             if ($recipe->type === 'blueprint') {
                 return $this->getResultTemplateSlug($recipe->slug);
-            }
-            if ($recipe->type === 'resource') {
-                return $this->determineResourceResult($recipe->slug);
             }
         } catch (\Throwable) {
             return null;
@@ -82,6 +93,10 @@ class CraftingService
             }
 
             $inputs = $formula->formula;
+            if ($inputs === []) {
+                throw new \RuntimeException("У рецепта {$recipeSlug} не задана формула преобразования");
+            }
+
             $available = $this->craftStationService->getCombinedIngredientQuantities($character);
 
             foreach ($inputs as $templateSlug => $quantity) {
@@ -98,8 +113,11 @@ class CraftingService
                 $this->craftStationService->removeIngredients($character, $templateSlug, $quantity * $times);
             }
 
-            $resultTemplateSlug = $this->determineResourceResult($recipeSlug);
-            $resultQuantity = $this->determineResourceResultQuantity($recipeSlug) * $times;
+            $resultTemplateSlug = $this->resolveResultTemplateSlug($recipe);
+            if (!$resultTemplateSlug) {
+                throw new \RuntimeException("У рецепта {$recipeSlug} не задан результат преобразования");
+            }
+            $resultQuantity = $this->resolveResultQuantity($recipe) * $times;
 
             $result = $this->inventoryService->addResource(
                 $character,
@@ -129,6 +147,8 @@ class CraftingService
                 'result_template_slug' => $resultTemplateSlug,
                 'times' => $times,
             ]);
+
+            $this->craftStationService->finalizeAfterCraft($character);
 
             return [
                 'recipe' => $recipe,
@@ -220,6 +240,8 @@ class CraftingService
                 'item_template_slug' => $itemTemplateSlug,
             ]);
 
+            $this->craftStationService->finalizeAfterCraft($character);
+
             return $blueprint->fresh();
         });
     }
@@ -263,9 +285,10 @@ class CraftingService
 
             $returnedResources = [];
             foreach ($formula->formula as $templateSlug => $quantity) {
-                $this->inventoryService->addResource($character, $templateSlug, $quantity);
                 $returnedResources[$templateSlug] = $quantity;
             }
+
+            $this->disassembleStationService->depositOutputs($character, $returnedResources);
 
             $correlationUuid = Str::uuid()->toString();
 
@@ -314,8 +337,7 @@ class CraftingService
 
             $this->disassembleStationService->assertResourceOnStation($resource, $character);
 
-            $expectedTemplateSlug = $this->determineResourceResult($recipeSlug);
-            if ($resource->template_slug !== $expectedTemplateSlug) {
+            if ($resource->template_slug !== $recipe->slug) {
                 throw new \RuntimeException('Ресурс на станции разбора не соответствует рецепту разбора');
             }
 
@@ -334,9 +356,10 @@ class CraftingService
             $returnedResources = [];
             foreach ($formula->formula as $templateSlug => $quantity) {
                 $total = $quantity * $times;
-                $this->inventoryService->addResource($character, $templateSlug, $total);
                 $returnedResources[$templateSlug] = $total;
             }
+
+            $this->disassembleStationService->depositOutputs($character, $returnedResources);
 
             $correlationUuid = Str::uuid()->toString();
 
@@ -347,13 +370,19 @@ class CraftingService
                 [
                     'recipe_slug' => $recipeSlug,
                     'times' => $times,
-                    'source_template_slug' => $expectedTemplateSlug,
+                    'source_template_slug' => $recipe->slug,
                     'returned_resources' => $returnedResources,
                     'formula_description' => $formula->description,
                 ],
                 $character->uuid,
                 $correlationUuid
             );
+
+            $this->questService->handleGameEvent($character, 'resource.disassembled', [
+                'recipe_slug' => $recipeSlug,
+                'returned_resources' => $returnedResources,
+                'times' => $times,
+            ]);
 
             return [
                 'recipe' => $recipe,
@@ -394,26 +423,6 @@ class CraftingService
         }
 
         return null;
-    }
-
-    private function determineResourceResult(string $recipeSlug): string
-    {
-        $mapping = [
-            'craft_wooden_plank' => 'wooden_plank',
-            'craft_iron_ingot' => 'iron_ingot',
-        ];
-
-        return $mapping[$recipeSlug] ?? throw new \RuntimeException("Неизвестный ресурсный рецепт: {$recipeSlug}");
-    }
-
-    private function determineResourceResultQuantity(string $recipeSlug): int
-    {
-        $mapping = [
-            'craft_wooden_plank' => 5,
-            'craft_iron_ingot' => 2,
-        ];
-
-        return $mapping[$recipeSlug] ?? 1;
     }
 
     private function getBlueprintTemplateSlug(string $recipeSlug): string

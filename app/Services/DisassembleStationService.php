@@ -7,16 +7,21 @@ namespace App\Services;
 use App\Models\Character;
 use App\Models\Item;
 use App\Models\Resources;
+use App\Models\Slot;
 use App\Models\Storage;
 use App\Models\TemporarySlot;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 
 class DisassembleStationService
 {
     public const CENTER_SLOT_INDEX = 0;
 
+    public const OUTPUT_SLOT_COUNT = 8;
+
     public function __construct(
         private StorageProvisioningService $provisioningService,
+        private SlotDepositService $slotDepositService,
     ) {}
 
     public function ensureDisassembleStorage(Character $character): Storage
@@ -37,12 +42,13 @@ class DisassembleStationService
             ->where('character_uuid', $character->uuid)
             ->count();
 
-        if ($existing < 1) {
+        $needed = 1 + self::OUTPUT_SLOT_COUNT;
+        for ($i = $existing; $i < $needed; $i++) {
             TemporarySlot::create([
-                'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+                'uuid' => Str::uuid()->toString(),
                 'storage_uuid' => $storage->uuid,
                 'character_uuid' => $character->uuid,
-                'slot_index' => self::CENTER_SLOT_INDEX,
+                'slot_index' => $i,
                 'active' => true,
             ]);
         }
@@ -71,6 +77,17 @@ class DisassembleStationService
         return $slot;
     }
 
+    /**
+     * @return Collection<int, TemporarySlot>
+     */
+    public function getOutputTemporarySlots(Character $character): Collection
+    {
+        return $this->getTemporarySlots($character)
+            ->filter(fn (TemporarySlot $slot) => $slot->slot_index >= 1
+                && $slot->slot_index <= self::OUTPUT_SLOT_COUNT)
+            ->values();
+    }
+
     public function isDisassembleTemporarySlot(TemporarySlot $slot): bool
     {
         $storage = Storage::where('uuid', $slot->storage_uuid)->first();
@@ -80,20 +97,92 @@ class DisassembleStationService
 
     public function slotRole(TemporarySlot $slot): string
     {
-        return 'disassemble_center';
+        if ($slot->slot_index === self::CENTER_SLOT_INDEX) {
+            return 'disassemble_center';
+        }
+
+        if ($slot->slot_index >= 1 && $slot->slot_index <= self::OUTPUT_SLOT_COUNT) {
+            return 'disassemble_output';
+        }
+
+        return 'disassemble_output';
+    }
+
+    public function isOutputSlot(TemporarySlot $slot): bool
+    {
+        return $slot->slot_index >= 1 && $slot->slot_index <= self::OUTPUT_SLOT_COUNT;
+    }
+
+    /**
+     * @param  array<string, int>  $outputs
+     * @return array<string, int>
+     */
+    public function depositOutputs(Character $character, array $outputs): array
+    {
+        $scope = $this->slotDepositService->scopeForDisassembleOutputs($character, $this);
+
+        return $this->slotDepositService->depositMany($character, $outputs, $scope, recordEvents: false);
+    }
+
+    public function returnAllToInventory(Character $character): int
+    {
+        $moveService = app(StorageMoveService::class);
+        $inventoryService = app(InventoryService::class);
+        $moved = 0;
+
+        foreach ($this->getTemporarySlots($character) as $tempSlot) {
+            $item = Item::where('temporary_slot_uuid', $tempSlot->uuid)->first();
+            if ($item) {
+                $backingSlot = Slot::where('uuid', $item->slot_uuid)->first();
+                $backingStorage = $backingSlot
+                    ? Storage::where('uuid', $backingSlot->storage_uuid)->first()
+                    : null;
+                if ($backingStorage?->storage_type === 'inventory') {
+                    $moveService->move($character, $tempSlot->uuid, $item->slot_uuid);
+                } else {
+                    $inventoryService->addItem(
+                        $character,
+                        $item->template_slug,
+                        $item->stage,
+                        $item->custom_name,
+                        $item->recipe_slug,
+                        $item->materials_used,
+                        $item->stats,
+                        'inventory'
+                    );
+                    $item->delete();
+                }
+                $moved++;
+
+                continue;
+            }
+
+            $resource = Resources::where('temporary_slot_uuid', $tempSlot->uuid)->first();
+            if (!$resource) {
+                continue;
+            }
+
+            $backingSlot = Slot::where('uuid', $resource->slot_uuid)->first();
+            $backingStorage = $backingSlot
+                ? Storage::where('uuid', $backingSlot->storage_uuid)->first()
+                : null;
+            if ($backingStorage?->storage_type === 'inventory') {
+                $moveService->move($character, $tempSlot->uuid, $resource->slot_uuid);
+            } else {
+                $templateSlug = $resource->template_slug;
+                $quantity = $resource->quantity;
+                $resource->delete();
+                $inventoryService->addResource($character, $templateSlug, $quantity);
+            }
+            $moved++;
+        }
+
+        return $moved;
     }
 
     public function clearOverlays(Character $character): int
     {
-        $tempUuids = $this->getTemporarySlots($character)->pluck('uuid');
-
-        $itemsCleared = Item::whereIn('temporary_slot_uuid', $tempUuids)
-            ->update(['temporary_slot_uuid' => null]);
-
-        $resourcesCleared = Resources::whereIn('temporary_slot_uuid', $tempUuids)
-            ->update(['temporary_slot_uuid' => null]);
-
-        return $itemsCleared + $resourcesCleared;
+        return $this->returnAllToInventory($character);
     }
 
     public function assertItemOnStation(Item $item, Character $character): void

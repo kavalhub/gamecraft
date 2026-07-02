@@ -11,6 +11,7 @@ use App\Services\DisassembleStationService;
 use App\Services\QuestStorageService;
 use App\Services\StorageLayoutService;
 use App\Services\StorageMoveService;
+use App\Services\StorageQuickMoveService;
 use App\Services\WorldStorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,6 +21,7 @@ class StorageController extends Controller
     public function __construct(
         private StorageLayoutService $layoutService,
         private StorageMoveService $moveService,
+        private StorageQuickMoveService $quickMoveService,
         private CraftStationService $craftStationService,
         private DisassembleStationService $disassembleStationService,
         private QuestStorageService $questStorageService,
@@ -58,6 +60,43 @@ class StorageController extends Controller
                 $request->from_slot_uuid,
                 $request->to_slot_uuid,
                 $request->quantity ? (int) $request->quantity : null
+            );
+
+            $layout = $this->layoutService->getCharacterLayout($character, ['inventory', 'trade', 'equipment', 'craft', 'disassemble', 'quest', 'stats']);
+
+            return response()->json([
+                'success' => true,
+                'move' => $result,
+                'layout' => $layout,
+            ]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 400);
+        }
+    }
+
+    public function quickMove(Request $request, string $characterUuid): JsonResponse
+    {
+        $request->validate([
+            'from_slot_uuid' => 'required|string',
+            'intent' => 'required|string|in:equip,inventory,craft,disassemble,station_return',
+            'station_mode' => 'nullable|string|in:center,material',
+            'quantity' => 'nullable|integer|min:1',
+        ]);
+
+        /** @var Character $character */
+        $character = $request->attributes->get('character');
+
+        if ($character->uuid !== $characterUuid) {
+            return response()->json(['error' => 'Несоответствие персонажа'], 403);
+        }
+
+        try {
+            $result = $this->quickMoveService->quickMove(
+                $character,
+                $request->from_slot_uuid,
+                $request->intent,
+                $request->station_mode,
+                $request->quantity ? (int) $request->quantity : null,
             );
 
             $layout = $this->layoutService->getCharacterLayout($character, ['inventory', 'trade', 'equipment', 'craft', 'disassemble', 'quest', 'stats']);

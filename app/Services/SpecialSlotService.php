@@ -16,7 +16,7 @@ use Illuminate\Support\Str;
 class SpecialSlotService
 {
     /**
-     * @return array<int, array{slot_type: ?string, count: int, hidden: bool, priority_fill: bool, auto_reclaim: bool}>
+     * @return array<int, array{slot_type: ?string, count: int, hidden: bool}>
      */
     public function getSlotDefinitions(Storage $storage): array
     {
@@ -31,8 +31,6 @@ class SpecialSlotService
                 'slot_type' => $def['slot_type'] ?? null,
                 'count' => (int) ($def['count'] ?? 0),
                 'hidden' => (bool) ($def['hidden'] ?? false),
-                'priority_fill' => (bool) ($def['priority_fill'] ?? false),
-                'auto_reclaim' => (bool) ($def['auto_reclaim'] ?? false),
             ];
         }
 
@@ -225,177 +223,7 @@ class SpecialSlotService
         int $quantity,
         string $storageType = 'inventory'
     ): Resources {
-        $template = ItemTemplate::where('slug', $templateSlug)->firstOrFail();
-        $storage = $character->storages()->where('storage_type', $storageType)->firstOrFail();
-        $maxStack = $template->max_stack;
-
-        $remaining = $quantity;
-        $lastResource = null;
-
-        $priorityDefs = collect($this->getSlotDefinitions($storage))
-            ->filter(fn (array $d) => $d['priority_fill'] && $d['slot_type'] !== null);
-
-        foreach ($priorityDefs as $def) {
-            if ($remaining <= 0) {
-                break;
-            }
-            if (!$this->resourceMatchesSlotType($template, $def['slot_type'])) {
-                continue;
-            }
-
-            [$remaining, $lastResource] = $this->fillSlots(
-                $storage,
-                $storage->slots()->where('slot_type', $def['slot_type'])->orderBy('id')->get(),
-                $template,
-                $templateSlug,
-                $maxStack,
-                $remaining,
-                $character,
-                $lastResource
-            );
-        }
-
-        while ($remaining > 0) {
-            $existingResource = $this->findPartialStack($storage, $templateSlug, $maxStack, $this->getGridSlots($storage));
-
-            if ($existingResource) {
-                $space = $maxStack === null ? $remaining : $maxStack - $existingResource->quantity;
-                $toAdd = min($remaining, $space);
-                $existingResource->quantity += $toAdd;
-                $existingResource->save();
-                $remaining -= $toAdd;
-                $lastResource = $existingResource;
-                app(EventStore::class)->recordResourceEvent(
-                    'resources.received',
-                    $existingResource->uuid,
-                    ['quantity' => $toAdd, 'new_quantity' => $existingResource->quantity, 'template_slug' => $templateSlug],
-                    $character->uuid
-                );
-                continue;
-            }
-
-            $slot = app(InventoryService::class)->findFreeSlot($storage);
-            if (!$slot) {
-                throw new \RuntimeException("Нет свободных слотов в хранилище {$storageType}");
-            }
-
-            $toAdd = $maxStack === null ? $remaining : min($remaining, $maxStack);
-            $lastResource = Resources::create([
-                'uuid' => Str::uuid()->toString(),
-                'slot_uuid' => $slot->uuid,
-                'recipe_slug' => $templateSlug,
-                'template_slug' => $templateSlug,
-                'slot_type' => $template->slot_type,
-                'max_stack' => $maxStack,
-                'quantity' => $toAdd,
-            ]);
-            $remaining -= $toAdd;
-
-            app(EventStore::class)->recordResourceEvent(
-                'resources.received',
-                $lastResource->uuid,
-                ['quantity' => $toAdd, 'new_quantity' => $toAdd, 'template_slug' => $templateSlug],
-                $character->uuid
-            );
-        }
-
-        if (!$lastResource) {
-            throw new \RuntimeException("Не удалось добавить ресурс {$templateSlug}");
-        }
-
-        return $lastResource;
-    }
-
-  /**
-     * @return array{0: int, 1: ?Resources}
-     */
-    private function fillSlots(
-        Storage $storage,
-        Collection $slots,
-        ItemTemplate $template,
-        string $templateSlug,
-        ?int $maxStack,
-        int $remaining,
-        Character $character,
-        ?Resources $lastResource
-    ): array {
-        while ($remaining > 0) {
-            $existingResource = $this->findPartialStack($storage, $templateSlug, $maxStack, $slots);
-
-            if ($existingResource) {
-                $space = $maxStack === null ? $remaining : $maxStack - $existingResource->quantity;
-                $toAdd = min($remaining, $space);
-                $existingResource->quantity += $toAdd;
-                $existingResource->save();
-                $remaining -= $toAdd;
-                $lastResource = $existingResource;
-                app(EventStore::class)->recordResourceEvent(
-                    'resources.received',
-                    $existingResource->uuid,
-                    ['quantity' => $toAdd, 'new_quantity' => $existingResource->quantity, 'template_slug' => $templateSlug],
-                    $character->uuid
-                );
-                continue;
-            }
-
-            $freeSlot = $this->findEmptySlotIn($slots);
-            if (!$freeSlot) {
-                break;
-            }
-
-            $toAdd = $maxStack === null ? $remaining : min($remaining, $maxStack);
-            $lastResource = Resources::create([
-                'uuid' => Str::uuid()->toString(),
-                'slot_uuid' => $freeSlot->uuid,
-                'recipe_slug' => $templateSlug,
-                'template_slug' => $templateSlug,
-                'slot_type' => $template->slot_type,
-                'max_stack' => $maxStack,
-                'quantity' => $toAdd,
-            ]);
-            $remaining -= $toAdd;
-
-            app(EventStore::class)->recordResourceEvent(
-                'resources.received',
-                $lastResource->uuid,
-                ['quantity' => $toAdd, 'new_quantity' => $toAdd, 'template_slug' => $templateSlug],
-                $character->uuid
-            );
-        }
-
-        return [$remaining, $lastResource];
-    }
-
-    private function findPartialStack(
-        Storage $storage,
-        string $templateSlug,
-        ?int $maxStack,
-        Collection $slots
-    ): ?Resources {
-        if ($maxStack !== null && $maxStack < 1) {
-            return null;
-        }
-
-        $slotUuids = $slots->pluck('uuid');
-        $query = Resources::whereIn('slot_uuid', $slotUuids)
-            ->where('template_slug', $templateSlug)
-            ->whereNull('temporary_slot_uuid');
-
-        if ($maxStack !== null) {
-            $query->where('quantity', '<', $maxStack);
-        }
-
-        return $query->first();
-    }
-
-    private function findEmptySlotIn(Collection $slots): ?Slot
-    {
-        $slotUuids = $slots->pluck('uuid');
-        $occupied = Resources::whereIn('slot_uuid', $slotUuids)->pluck('slot_uuid')
-            ->merge(\App\Models\Item::whereIn('slot_uuid', $slotUuids)->pluck('slot_uuid'))
-            ->unique();
-
-        return $slots->first(fn (Slot $s) => !$occupied->contains($s->uuid));
+        return app(SlotDepositService::class)->depositToInventory($character, $templateSlug, $quantity, $storageType);
     }
 
     private function sumResourceInStorage(Storage $storage, string $templateSlug): int
@@ -406,44 +234,5 @@ class SpecialSlotService
             ->where('template_slug', $templateSlug)
             ->whereNull('temporary_slot_uuid')
             ->sum('quantity');
-    }
-
-    public function shouldAutoReclaim(Storage $storage, Slot $targetSlot, string $templateSlug): bool
-    {
-        if ($targetSlot->slot_type !== null) {
-            return false;
-        }
-
-        $template = ItemTemplate::where('slug', $templateSlug)->first();
-        if (!$template) {
-            return false;
-        }
-
-        foreach ($this->getSlotDefinitions($storage) as $def) {
-            if (!$def['auto_reclaim'] || $def['slot_type'] === null) {
-                continue;
-            }
-            if ($this->resourceMatchesSlotType($template, $def['slot_type'])) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    public function resolveAutoReclaimTarget(Storage $storage, string $templateSlug): ?Slot
-    {
-        $template = ItemTemplate::where('slug', $templateSlug)->firstOrFail();
-
-        foreach ($this->getSlotDefinitions($storage) as $def) {
-            if (!$def['auto_reclaim'] || $def['slot_type'] === null) {
-                continue;
-            }
-            if ($this->resourceMatchesSlotType($template, $def['slot_type'])) {
-                return $storage->slots()->where('slot_type', $def['slot_type'])->orderBy('id')->first();
-            }
-        }
-
-        return null;
     }
 }

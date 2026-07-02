@@ -27,6 +27,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/inventory/{characterUuid}', [InventoryController::class, 'index']);
         Route::get('/storage/{characterUuid}', [StorageController::class, 'show']);
         Route::post('/storage/{characterUuid}/move', [StorageController::class, 'move']);
+        Route::post('/storage/{characterUuid}/quick-move', [StorageController::class, 'quickMove']);
         Route::post('/storage/{characterUuid}/clear-craft-station', [StorageController::class, 'clearCraftStation']);
         Route::post('/storage/{characterUuid}/clear-disassemble-station', [StorageController::class, 'clearDisassembleStation']);
         Route::post('/storage/{characterUuid}/clear-quest', [StorageController::class, 'clearQuest']);

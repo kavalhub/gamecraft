@@ -19,6 +19,7 @@ use App\Services\SpecialSlotService;
 use App\Services\WorldStorageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
+use Tests\Support\DisassembleStationHelper;
 use Tests\Support\WorkbenchHelper;
 use Tests\TestCase;
 
@@ -79,8 +80,9 @@ class QuestServiceTest extends TestCase
     {
         $this->questService->accept($this->character, 'tutorial_planks');
 
-        WorkbenchHelper::placeMaterials($this->character, ['wood' => 2]);
-        $this->craftingService->craftResource($this->character, 'craft_wooden_plank');
+        $this->inventoryService->addResource($this->character, 'wood', 2);
+        DisassembleStationHelper::placeResource($this->character, 'wood', 1);
+        $this->craftingService->disassembleResource($this->character, 'wood');
 
         $quests = $this->questService->listForCharacter($this->character);
         $this->assertCount(1, $quests['active']);
@@ -91,8 +93,9 @@ class QuestServiceTest extends TestCase
     public function test_turn_in_grants_rewards_to_inventory(): void
     {
         $this->questService->accept($this->character, 'tutorial_planks');
-        WorkbenchHelper::placeMaterials($this->character, ['wood' => 2]);
-        $this->craftingService->craftResource($this->character, 'craft_wooden_plank');
+        $this->inventoryService->addResource($this->character, 'wood', 2);
+        DisassembleStationHelper::placeResource($this->character, 'wood', 1);
+        $this->craftingService->disassembleResource($this->character, 'wood');
 
         $woodBefore = $this->inventoryService->getResourceQuantity($this->character, 'wood');
         $this->questService->turnIn($this->character, 'tutorial_planks');
@@ -157,8 +160,9 @@ class QuestServiceTest extends TestCase
         $this->assertNotContains('tutorial_sword', array_column($quests['available'], 'slug'));
 
         $this->questService->accept($this->character, 'tutorial_planks');
-        WorkbenchHelper::placeMaterials($this->character, ['wood' => 2]);
-        $this->craftingService->craftResource($this->character, 'craft_wooden_plank');
+        $this->inventoryService->addResource($this->character, 'wood', 2);
+        DisassembleStationHelper::placeResource($this->character, 'wood', 1);
+        $this->craftingService->disassembleResource($this->character, 'wood');
         $this->questService->turnIn($this->character, 'tutorial_planks');
 
         $quests = $this->questService->listForCharacter($this->character);

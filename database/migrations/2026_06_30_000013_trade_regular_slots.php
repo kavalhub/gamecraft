@@ -1,16 +1,17 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
     public function up(): void
     {
-        DB::table('storages_type')->where('type', 'inventory')->update([
-            'metadata' => json_encode(['grid_cols' => 4, 'grid_rows' => 9]),
-            'updated_at' => now(),
-        ]);
+        Schema::table('trade_items', function (Blueprint $table) {
+            $table->uuid('origin_slot_uuid')->nullable()->after('resource_uuid');
+        });
 
         DB::table('storages_type')->where('type', 'trade')->update([
             'allowed_types' => json_encode(['slots' => [['slot_type' => null, 'count' => 6]]]),
@@ -21,13 +22,13 @@ return new class extends Migration
 
     public function down(): void
     {
-        DB::table('storages_type')->where('type', 'inventory')->update([
-            'metadata' => json_encode(['grid_cols' => 6]),
-            'updated_at' => now(),
-        ]);
+        Schema::table('trade_items', function (Blueprint $table) {
+            $table->dropColumn('origin_slot_uuid');
+        });
 
         DB::table('storages_type')->where('type', 'trade')->update([
-            'metadata' => json_encode(['grid_cols' => 5, 'temporary_slot_count' => 20]),
+            'allowed_types' => null,
+            'metadata' => json_encode(['grid_cols' => 4, 'grid_rows' => 5, 'temporary_slot_count' => 20]),
             'updated_at' => now(),
         ]);
     }

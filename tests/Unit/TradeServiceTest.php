@@ -85,10 +85,10 @@ class TradeServiceTest extends TestCase
         $this->assertEquals($this->player1->uuid, $tradeItem->character_uuid);
 
         $item->refresh();
-        $player1Inventory = $this->player1->storages()->where('storage_type', 'inventory')->first();
-        $this->assertEquals($player1Inventory->uuid, $item->slot->storage_uuid);
-        $this->assertNotNull($item->temporary_slot_uuid);
-        $this->assertDatabaseHas('temporary_slots', ['uuid' => $item->temporary_slot_uuid]);
+        $player1Trade = $this->player1->storages()->where('storage_type', 'trade')->first();
+        $this->assertEquals($player1Trade->uuid, $item->slot->storage_uuid);
+        $this->assertNull($item->temporary_slot_uuid);
+        $this->assertNotNull($tradeItem->origin_slot_uuid);
     }
 
     public function test_add_resource_to_trade(): void
@@ -141,6 +141,23 @@ class TradeServiceTest extends TestCase
 
         $player2Gold = $this->inventoryService->getResourceQuantity($this->player2, 'gold');
         $this->assertEquals(900, $player2Gold); // 1000 - 100
+
+        $p1Inventory = $this->player1->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $p1GoldSlot = app(\App\Services\SpecialSlotService::class)->getGoldSlot($p1Inventory);
+        $this->assertNotNull($p1GoldSlot);
+        $this->assertEquals(
+            0,
+            \App\Models\Resources::whereIn(
+                'slot_uuid',
+                app(\App\Services\SpecialSlotService::class)->getGridSlots($p1Inventory)->pluck('uuid')
+            )->where('template_slug', 'gold')->count()
+        );
+        $this->assertEquals(
+            1100,
+            (int) \App\Models\Resources::where('slot_uuid', $p1GoldSlot->uuid)
+                ->where('template_slug', 'gold')
+                ->value('quantity')
+        );
     }
 
     public function test_cancel_trade(): void
@@ -172,5 +189,71 @@ class TradeServiceTest extends TestCase
         $trades = $this->tradeService->getCharacterTrades($this->player1);
 
         $this->assertGreaterThanOrEqual(2, $trades->count());
+    }
+
+    public function test_trade_swap_preserves_slot_positions(): void
+    {
+        $this->inventoryService->addResource($this->player1, 'wood', 1);
+        $this->inventoryService->addResource($this->player2, 'iron_ore', 1);
+
+        $p1Inv = $this->player1->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $p2Inv = $this->player2->storages()->where('storage_type', 'inventory')->firstOrFail();
+
+        $p1WoodSlot = \App\Models\Resources::whereIn('slot_uuid', $p1Inv->slots()->pluck('uuid'))
+            ->where('template_slug', 'wood')
+            ->value('slot_uuid');
+        $p2OreSlot = \App\Models\Resources::whereIn('slot_uuid', $p2Inv->slots()->pluck('uuid'))
+            ->where('template_slug', 'iron_ore')
+            ->value('slot_uuid');
+
+        $trade = $this->tradeService->createTrade($this->player1, $this->player2);
+        $this->tradeService->addResourceToTrade($this->player1, $trade, 'wood', 1);
+        $this->tradeService->addResourceToTrade($this->player2, $trade, 'iron_ore', 1);
+
+        $trade = $this->tradeService->confirmTrade($this->player1, $trade);
+        $trade = $this->tradeService->confirmTrade($this->player2, $trade);
+
+        $this->assertEquals('completed', $trade->status);
+
+        $p1OreSlot = \App\Models\Resources::whereIn('slot_uuid', $p1Inv->slots()->pluck('uuid'))
+            ->where('template_slug', 'iron_ore')
+            ->value('slot_uuid');
+        $p2WoodSlot = \App\Models\Resources::whereIn('slot_uuid', $p2Inv->slots()->pluck('uuid'))
+            ->where('template_slug', 'wood')
+            ->value('slot_uuid');
+
+        $this->assertEquals($p1WoodSlot, $p1OreSlot);
+        $this->assertEquals($p2OreSlot, $p2WoodSlot);
+    }
+
+    public function test_trade_fails_when_recipient_has_no_room(): void
+    {
+        $inventory = $this->player1->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $gridSlots = app(\App\Services\SpecialSlotService::class)->getGridSlots($inventory);
+
+        foreach ($gridSlots->take(35) as $slot) {
+            \App\Models\Resources::create([
+                'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+                'slot_uuid' => $slot->uuid,
+                'recipe_slug' => 'wooden_plank',
+                'template_slug' => 'wooden_plank',
+                'slot_type' => 'material',
+                'max_stack' => 20,
+                'quantity' => 1,
+            ]);
+        }
+
+        $this->inventoryService->addResource($this->player1, 'wood', 2);
+        $this->inventoryService->addResource($this->player2, 'iron_ore', 2);
+
+        $trade = $this->tradeService->createTrade($this->player1, $this->player2);
+        $this->tradeService->addResourceToTrade($this->player1, $trade, 'wood', 1);
+        $this->tradeService->addResourceToTrade($this->player2, $trade, 'iron_ore', 2);
+
+        $this->tradeService->confirmTrade($this->player1, $trade);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Недостаточно места в инвентаре для завершения обмена');
+        $this->tradeService->confirmTrade($this->player2, $trade);
     }
 }

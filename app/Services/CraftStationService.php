@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\Character;
 use App\Models\Item;
 use App\Models\Resources;
+use App\Models\Slot;
 use App\Models\Storage;
 use App\Models\TemporarySlot;
 use Illuminate\Support\Collection;
@@ -15,6 +16,7 @@ class CraftStationService
 {
     public const CENTER_SLOT_INDEX = 0;
     public const MATERIAL_SLOT_COUNT = 8;
+    public const DISABLED_SLOT_TYPE = 'disabled';
 
     public function __construct(
         private StorageProvisioningService $provisioningService,
@@ -45,6 +47,7 @@ class CraftStationService
                 'storage_uuid' => $storage->uuid,
                 'character_uuid' => $character->uuid,
                 'slot_index' => $i,
+                'slot_type' => $i === self::CENTER_SLOT_INDEX ? null : self::DISABLED_SLOT_TYPE,
                 'active' => true,
             ]);
         }
@@ -54,11 +57,45 @@ class CraftStationService
     {
         $storage = $this->ensureCraftStorage($character);
 
-        return TemporarySlot::where('storage_uuid', $storage->uuid)
+        $slots = TemporarySlot::where('storage_uuid', $storage->uuid)
             ->where('character_uuid', $character->uuid)
             ->where('active', true)
             ->orderBy('slot_index')
             ->get();
+
+        $this->normalizeMaterialSlotTypes($character, $slots);
+
+        return $slots;
+    }
+
+    private function normalizeMaterialSlotTypes(Character $character, Collection $tempSlots): void
+    {
+        $center = $tempSlots->firstWhere('slot_index', self::CENTER_SLOT_INDEX);
+        if (!$center) {
+            return;
+        }
+
+        $hasCenterOccupant = Item::where('temporary_slot_uuid', $center->uuid)->exists()
+            || Resources::where('temporary_slot_uuid', $center->uuid)->exists();
+
+        if ($hasCenterOccupant) {
+            return;
+        }
+
+        foreach ($tempSlots as $slot) {
+            if ($slot->slot_index === self::CENTER_SLOT_INDEX) {
+                if ($slot->slot_type !== null) {
+                    $slot->update(['slot_type' => null]);
+                    $slot->slot_type = null;
+                }
+                continue;
+            }
+
+            if ($slot->slot_type === null) {
+                $slot->update(['slot_type' => self::DISABLED_SLOT_TYPE]);
+                $slot->slot_type = self::DISABLED_SLOT_TYPE;
+            }
+        }
     }
 
     public function getCenterTemporarySlot(Character $character): TemporarySlot
@@ -88,9 +125,106 @@ class CraftStationService
 
     public function slotRole(TemporarySlot $slot): string
     {
-        return $slot->slot_index === self::CENTER_SLOT_INDEX
-            ? 'craft_center'
-            : 'craft_material';
+        if ($slot->slot_index === self::CENTER_SLOT_INDEX) {
+            return 'center';
+        }
+
+        return 'material';
+    }
+
+    public function syncMaterialSlotTypes(Character $character): void
+    {
+        $types = app(SlotFitService::class)->ingredientSlotTypesForCraftCenter($character);
+
+        foreach ($this->getMaterialTemporarySlots($character)->values() as $index => $slot) {
+            $slot->update(['slot_type' => $types[$index] ?? self::DISABLED_SLOT_TYPE]);
+        }
+    }
+
+    public function clearMaterialSlotTypes(Character $character): void
+    {
+        foreach ($this->getMaterialTemporarySlots($character) as $slot) {
+            $slot->update(['slot_type' => self::DISABLED_SLOT_TYPE]);
+        }
+    }
+
+    public function syncAfterCenterChange(Character $character): void
+    {
+        $hasCenterOccupant = $this->getCenterItem($character) !== null
+            || $this->getCenterResource($character) !== null;
+
+        if ($hasCenterOccupant) {
+            $this->syncMaterialSlotTypes($character);
+        } else {
+            $this->clearMaterialSlotTypes($character);
+        }
+    }
+
+    public function finalizeAfterCraft(Character $character): void
+    {
+        $moveService = app(StorageMoveService::class);
+        $inventoryService = app(InventoryService::class);
+
+        foreach ($this->getTemporarySlots($character) as $tempSlot) {
+            $this->returnTemporarySlotOccupantToInventory(
+                $character,
+                $tempSlot,
+                $moveService,
+                $inventoryService,
+            );
+        }
+
+        $this->syncAfterCenterChange($character);
+    }
+
+    private function returnTemporarySlotOccupantToInventory(
+        Character $character,
+        TemporarySlot $tempSlot,
+        StorageMoveService $moveService,
+        InventoryService $inventoryService,
+    ): void {
+        $item = Item::where('temporary_slot_uuid', $tempSlot->uuid)->first();
+        if ($item) {
+            $backingSlot = Slot::where('uuid', $item->slot_uuid)->first();
+            $backingStorage = $backingSlot
+                ? Storage::where('uuid', $backingSlot->storage_uuid)->first()
+                : null;
+            if ($backingStorage?->storage_type === 'inventory') {
+                $moveService->move($character, $tempSlot->uuid, $item->slot_uuid);
+            } else {
+                $inventoryService->addItem(
+                    $character,
+                    $item->template_slug,
+                    $item->stage,
+                    $item->custom_name,
+                    $item->recipe_slug,
+                    $item->materials_used,
+                    $item->stats,
+                    'inventory'
+                );
+                $item->delete();
+            }
+
+            return;
+        }
+
+        $resource = Resources::where('temporary_slot_uuid', $tempSlot->uuid)->first();
+        if (!$resource) {
+            return;
+        }
+
+        $backingSlot = Slot::where('uuid', $resource->slot_uuid)->first();
+        $backingStorage = $backingSlot
+            ? Storage::where('uuid', $backingSlot->storage_uuid)->first()
+            : null;
+        if ($backingStorage?->storage_type === 'inventory') {
+            $moveService->move($character, $tempSlot->uuid, $resource->slot_uuid);
+        } else {
+            $templateSlug = $resource->template_slug;
+            $quantity = $resource->quantity;
+            $resource->delete();
+            $inventoryService->addResource($character, $templateSlug, $quantity);
+        }
     }
 
     public function clearOverlays(Character $character): int

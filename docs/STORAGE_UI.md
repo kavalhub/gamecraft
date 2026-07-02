@@ -74,7 +74,8 @@ POST /api/storage/{characterUuid}/move
 ### Обмен
 
 - 20 overlay-слотов на персонажа (lazy при первом обмене)
-- Dblclick из инвентаря при единственном открытом `trade` → `handleTradeDrop`
+- Dblclick из инвентаря: если открыто sink-окно — по приоритету `trade` → `auction` → `craft` → `disassemble` → `quest` (`ItemDispatcher.pickOpenSink`); иначе экипировка + открытие `character`
+- Слоты партнёра в layout: `drop_policy: deny` (подсветка при drag); свои — общие правила слотов без `drop_policy`
 
 ### Экипировка
 

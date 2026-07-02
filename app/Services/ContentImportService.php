@@ -124,6 +124,8 @@ class ContentImportService
                 'type' => $data['type'],
                 'name' => $data['name'],
                 'description' => $data['description'] ?? null,
+                'result_template_slug' => $data['result_template_slug'] ?? null,
+                'result_quantity' => $data['result_quantity'] ?? 1,
             ]
         );
 

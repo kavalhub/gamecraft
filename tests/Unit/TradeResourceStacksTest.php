@@ -55,18 +55,18 @@ class TradeResourceStacksTest extends TestCase
 
     public function test_add_resource_creates_correct_stack_count(): void
     {
-        $this->inventoryService->addResource($this->player1, 'wood', 400);
+        $this->inventoryService->addResource($this->player1, 'wood', 120);
         $trade = $this->tradeService->createTrade($this->player1, $this->player2);
 
-        $this->tradeService->addResourceToTrade($this->player1, $trade, 'wood', 400);
+        $this->tradeService->addResourceToTrade($this->player1, $trade, 'wood', 120);
 
         $tradeItems = TradeItem::where('trade_uuid', $trade->uuid)
             ->where('character_uuid', $this->player1->uuid)
             ->where('template_slug', 'wood')
             ->get();
 
-        $this->assertCount(20, $tradeItems);
-        $this->assertEquals(array_fill(0, 20, 20), $tradeItems->pluck('quantity')->sort()->values()->all());
+        $this->assertCount(6, $tradeItems);
+        $this->assertEquals(120, $tradeItems->sum('quantity'));
     }
 
     public function test_add_resource_reduces_sender_total(): void
@@ -81,28 +81,40 @@ class TradeResourceStacksTest extends TestCase
 
     public function test_execute_trade_transfers_full_quantity(): void
     {
-        $this->inventoryService->addResource($this->player1, 'wood', 400);
+        $this->inventoryService->addResource($this->player1, 'wood', 120);
         $trade = $this->tradeService->createTrade($this->player1, $this->player2);
-        $this->tradeService->addResourceToTrade($this->player1, $trade, 'wood', 400);
+        $this->tradeService->addResourceToTrade($this->player1, $trade, 'wood', 120);
 
         $trade = $this->tradeService->confirmTrade($this->player1, $trade);
         $trade = $this->tradeService->confirmTrade($this->player2, $trade);
 
         $this->assertEquals('completed', $trade->status);
-        $this->assertEquals(400, $this->inventoryService->getResourceQuantity($this->player2, 'wood'));
+        $this->assertEquals(120, $this->inventoryService->getResourceQuantity($this->player2, 'wood'));
+    }
+
+    public function test_add_resource_fails_when_trade_window_full(): void
+    {
+        $this->inventoryService->addResource($this->player1, 'wood', 200);
+        $trade = $this->tradeService->createTrade($this->player1, $this->player2);
+
+        $this->tradeService->addResourceToTrade($this->player1, $trade, 'wood', 120);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Нет свободных слотов в обмене');
+        $this->tradeService->addResourceToTrade($this->player1, $trade, 'wood', 20);
     }
 
     public function test_cancel_trade_restores_all_stacks(): void
     {
-        $this->inventoryService->addResource($this->player1, 'wood', 400);
+        $this->inventoryService->addResource($this->player1, 'wood', 120);
         $trade = $this->tradeService->createTrade($this->player1, $this->player2);
-        $this->tradeService->addResourceToTrade($this->player1, $trade, 'wood', 400);
+        $this->tradeService->addResourceToTrade($this->player1, $trade, 'wood', 120);
 
         $this->assertEquals(0, $this->inventoryService->getResourceQuantity($this->player1, 'wood'));
 
         $this->tradeService->cancelTrade($this->player1, $trade);
 
-        $this->assertEquals(400, $this->inventoryService->getResourceQuantity($this->player1, 'wood'));
+        $this->assertEquals(120, $this->inventoryService->getResourceQuantity($this->player1, 'wood'));
     }
 
     public function test_add_resource_incrementally_adds_more_stacks(): void

@@ -29,6 +29,7 @@ class QuestStorageService
         private InventoryService $inventoryService,
         private WorldStorageService $worldStorageService,
         private EventStore $eventStore,
+        private SlotDepositService $slotDepositService,
     ) {}
 
     public function ensureQuestStorage(Character $character): Storage
@@ -330,19 +331,29 @@ class QuestStorageService
             }
         }
 
+        $resourceGrants = [];
+        $grantTempUuids = $grantSlots->pluck('uuid');
         foreach ($grants['resources'] ?? [] as $templateSlug => $quantity) {
             $qty = (int) $quantity;
             if ($qty <= 0) {
                 continue;
             }
-            if ($slotIndex >= $grantSlots->count()) {
-                throw new \RuntimeException('Недостаточно слотов выдачи квеста');
+
+            $already = (int) Resources::whereIn('temporary_slot_uuid', $grantTempUuids)
+                ->where('template_slug', (string) $templateSlug)
+                ->sum('quantity');
+            $needed = $qty - $already;
+            if ($needed > 0) {
+                $resourceGrants[(string) $templateSlug] = $needed;
             }
-            $tempSlot = $grantSlots[$slotIndex++];
-            if ($this->provisioningService->getOccupantForTemporarySlot($tempSlot)) {
-                continue;
-            }
-            $this->spawnResourceOnTemporarySlot($character, $tempSlot, (string) $templateSlug, $qty);
+        }
+
+        if ($resourceGrants !== []) {
+            $scope = $this->slotDepositService->scopeForQuestTemporarySlots(
+                $this->ensureQuestStorage($character),
+                $grantSlots
+            );
+            $this->slotDepositService->depositMany($character, $resourceGrants, $scope, recordEvents: false);
         }
     }
 
@@ -352,19 +363,29 @@ class QuestStorageService
         $rewardSlots = $this->getSlotsByRole($character, $quest->slug, self::SLOT_ROLE_REWARD);
         $slotIndex = 0;
 
+        $resourceRewards = [];
+        $rewardTempUuids = $rewardSlots->pluck('uuid');
         foreach ($rewards['resources'] ?? [] as $templateSlug => $quantity) {
             $qty = (int) $quantity;
             if ($qty <= 0) {
                 continue;
             }
-            if ($slotIndex >= $rewardSlots->count()) {
-                throw new \RuntimeException('Недостаточно слотов награды квеста');
+
+            $already = (int) Resources::whereIn('temporary_slot_uuid', $rewardTempUuids)
+                ->where('template_slug', (string) $templateSlug)
+                ->sum('quantity');
+            $needed = $qty - $already;
+            if ($needed > 0) {
+                $resourceRewards[(string) $templateSlug] = $needed;
             }
-            $tempSlot = $rewardSlots[$slotIndex++];
-            if ($this->provisioningService->getOccupantForTemporarySlot($tempSlot)) {
-                continue;
-            }
-            $this->spawnResourceOnTemporarySlot($character, $tempSlot, (string) $templateSlug, $qty);
+        }
+
+        if ($resourceRewards !== []) {
+            $scope = $this->slotDepositService->scopeForQuestTemporarySlots(
+                $this->ensureQuestStorage($character),
+                $rewardSlots
+            );
+            $this->slotDepositService->depositMany($character, $resourceRewards, $scope, recordEvents: false);
         }
 
         foreach ($rewards['items'] ?? [] as $itemReward) {
@@ -711,27 +732,6 @@ class QuestStorageService
             'durability' => 100,
             'materials_used' => $materialsUsed,
             'stats' => $stats ?? $template->base_stats,
-        ]);
-    }
-
-    private function spawnResourceOnTemporarySlot(
-        Character $character,
-        TemporarySlot $tempSlot,
-        string $templateSlug,
-        int $quantity,
-    ): Resources {
-        $template = ItemTemplate::where('slug', $templateSlug)->firstOrFail();
-        $backingSlot = $this->allocateBackingSlot($character);
-
-        return Resources::create([
-            'uuid' => Str::uuid()->toString(),
-            'slot_uuid' => $backingSlot->uuid,
-            'temporary_slot_uuid' => $tempSlot->uuid,
-            'recipe_slug' => $templateSlug,
-            'template_slug' => $templateSlug,
-            'slot_type' => $template->slot_type,
-            'max_stack' => $template->max_stack,
-            'quantity' => $quantity,
         ]);
     }
 

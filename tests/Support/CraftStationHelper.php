@@ -72,7 +72,18 @@ final class CraftStationHelper
                 throw new \RuntimeException("Resource {$templateSlug} not found in inventory");
             }
 
-            $targetSlot = $materialSlots->first(function ($tempSlot) use ($templateSlug) {
+            $template = \App\Models\ItemTemplate::where('slug', $templateSlug)->firstOrFail();
+            $specialSlots = app(\App\Services\SpecialSlotService::class);
+
+            $targetSlot = $materialSlots->first(function ($tempSlot) use ($specialSlots, $template, $templateSlug) {
+                if (!$tempSlot->slot_type || $tempSlot->slot_type === \App\Services\CraftStationService::DISABLED_SLOT_TYPE) {
+                    return false;
+                }
+
+                if (!$specialSlots->resourceMatchesSlotType($template, $tempSlot->slot_type)) {
+                    return false;
+                }
+
                 $occupant = Resources::where('temporary_slot_uuid', $tempSlot->uuid)->first();
 
                 return !$occupant
@@ -90,19 +101,19 @@ final class CraftStationHelper
 
     public static function prepareCraft(Character $character, Item $blueprint, array $materials): void
     {
-        self::placeMaterials($character, $materials);
         self::placeOnCenterSlot($character, $blueprint, 'craft');
+        self::placeMaterials($character, $materials);
     }
 
     public static function craftWoodenSwordFromInventory(Character $character, ?Item $blueprint = null): Item
     {
         $crafting = app(\App\Services\CraftingService::class);
         $blueprint = $blueprint ?? $crafting->createBlueprint($character, 'craft_wooden_sword');
-        self::moveMaterialsToCraftStation($character, ['wood' => 5]);
         self::placeOnCenterSlot($character, $blueprint, 'craft');
+        self::moveMaterialsToCraftStation($character, ['wood' => 5]);
 
         $item = $crafting->craftItem($character, 'craft_wooden_sword', $blueprint->uuid);
 
-        return WorkbenchHelper::moveCraftedItemToInventory($character, $item);
+        return $item->fresh();
     }
 }

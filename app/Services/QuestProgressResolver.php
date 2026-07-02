@@ -102,7 +102,7 @@ class QuestProgressResolver
         return match ($objective->type) {
             'craft_item' => $eventType === 'item.crafted'
                 && ($payload['recipe_slug'] ?? null) === ($objective->config['recipe_slug'] ?? null),
-            'craft_resource' => $eventType === 'resource.crafted'
+            'craft_resource' => in_array($eventType, ['resource.crafted', 'resource.disassembled'], true)
                 && ($payload['recipe_slug'] ?? null) === ($objective->config['recipe_slug'] ?? null),
             'collect_resource' => in_array($eventType, ['resource.crafted', 'resource.received'], true)
                 && ($payload['template_slug'] ?? $payload['result_template_slug'] ?? null)

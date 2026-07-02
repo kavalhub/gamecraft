@@ -81,7 +81,7 @@ class CraftingActionResolver
         $actions = collect();
 
         foreach (Recipe::where('type', 'resource')->get() as $recipe) {
-            if ($this->resolveResultTemplateSlug($recipe) !== $resource->template_slug) {
+            if ($recipe->slug !== $resource->template_slug) {
                 continue;
             }
 
@@ -180,10 +180,5 @@ class CraftingActionResolver
     private function defaultLabelForType(string $type): string
     {
         return $type === 'disassemble' ? 'Разобрать' : 'Создать';
-    }
-
-    private function resolveResultTemplateSlug(Recipe $recipe): ?string
-    {
-        return app(CraftingService::class)->resolveResultTemplateSlug($recipe);
     }
 }

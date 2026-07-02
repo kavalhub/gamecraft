@@ -304,6 +304,16 @@
           "chance": 100,
           "formula": {},
           "description": "Базовый ресурс"
+        },
+        {
+          "type": "disassemble",
+          "action_slug": "saw",
+          "priority": 100,
+          "chance": 100,
+          "formula": {
+            "wooden_plank": 5
+          },
+          "description": "Распил дерева"
         }
       ]
     },
@@ -312,13 +322,18 @@
       "type": "resource",
       "name": "Железная руда",
       "description": "Базовый материал",
+      "result_template_slug": "iron_ingot",
+      "result_quantity": 2,
       "formulas": [
         {
           "type": "craft",
+          "action_slug": "smelt",
           "priority": 100,
           "chance": 100,
-          "formula": {},
-          "description": "Базовый ресурс"
+          "formula": {
+            "iron_ore": 10
+          },
+          "description": "Плавка железного слитка"
         }
       ]
     },
@@ -349,6 +364,15 @@
           "chance": 100,
           "formula": {},
           "description": "Базовый ресурс"
+        },
+        {
+          "type": "disassemble",
+          "priority": 100,
+          "chance": 100,
+          "formula": {
+            "iron_ore": 5
+          },
+          "description": "Разделить слиток на руду"
         }
       ]
     },
@@ -373,58 +397,6 @@
           "chance": 100,
           "formula": {
             "wood": 2
-          },
-          "description": "Обычный разбор"
-        }
-      ]
-    },
-    {
-      "slug": "craft_wooden_plank",
-      "type": "resource",
-      "name": "Распил дерева",
-      "description": "Из одного бревна получается пять брусков",
-      "formulas": [
-        {
-          "type": "craft",
-          "priority": 100,
-          "chance": 100,
-          "formula": {
-            "wood": 1
-          },
-          "description": "Обычный крафт"
-        },
-        {
-          "type": "disassemble",
-          "priority": 100,
-          "chance": 100,
-          "formula": {
-            "wood": 1
-          },
-          "description": "Обычный разбор"
-        }
-      ]
-    },
-    {
-      "slug": "craft_iron_ingot",
-      "type": "resource",
-      "name": "Плавка железного слитка",
-      "description": "Из десяти кусков руды выплавляется два слитка",
-      "formulas": [
-        {
-          "type": "craft",
-          "priority": 100,
-          "chance": 100,
-          "formula": {
-            "iron_ore": 10
-          },
-          "description": "Обычный крафт"
-        },
-        {
-          "type": "disassemble",
-          "priority": 100,
-          "chance": 100,
-          "formula": {
-            "iron_ore": 5
           },
           "description": "Обычный разбор"
         }
