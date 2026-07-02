@@ -11,6 +11,8 @@ use App\Services\DisassembleStationService;
 use App\Services\CraftingService;
 use App\Services\InventoryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\CraftStationHelper;
+use Tests\Support\DisassembleStationHelper;
 use Tests\Support\WorkbenchHelper;
 use Tests\TestCase;
 
@@ -37,33 +39,109 @@ class CraftingServiceTest extends TestCase
     {
         $recipes = $this->service->getAvailableRecipes($this->character);
         $this->assertGreaterThan(0, $recipes->count());
+
+        $wood = $recipes->firstWhere('slug', 'wood');
+        $this->assertNotNull($wood);
+        $this->assertEquals(['wooden_plank' => 5], $wood['disassemble_formula']);
+        $this->assertEquals('saw', $wood['disassemble_action']['slug']);
+        $this->assertEquals('Распилить', $wood['disassemble_action']['label']);
+
+        $ironOre = $recipes->firstWhere('slug', 'iron_ore');
+        $this->assertNotNull($ironOre);
+        $this->assertEquals('iron_ingot', $ironOre['result_template_slug']);
+        $this->assertEquals(2, $ironOre['result_quantity']);
+        $this->assertEquals('smelt', $ironOre['craft_action']['slug']);
     }
 
-    public function test_craft_resource_wood_to_planks(): void
+    public function test_disassemble_resource_wood_to_planks(): void
     {
-        WorkbenchHelper::placeMaterials($this->character, ['wood' => 10]);
-        $result = $this->service->craftResource($this->character, 'craft_wooden_plank');
+        $this->inventoryService->addResource($this->character, 'wood', 10);
+        $wood = DisassembleStationHelper::placeResource($this->character, 'wood', 1);
 
-        $this->assertEquals('wooden_plank', $result['result_template_slug']);
-        $this->assertEquals(5, $result['result_quantity']);
-        $this->assertEquals(9, app(CraftStationService::class)->getMaterialQuantities($this->character)['wood'] ?? 0);
+        $result = $this->service->disassembleResource($this->character, 'wood');
+
+        $this->assertEquals(['wooden_plank' => 5], $result['returned_resources']);
+        $wood->refresh();
+        $this->assertEquals(9, $wood->quantity);
+        $this->assertEquals(0, $this->inventoryService->getResourceQuantity($this->character, 'wooden_plank'));
+        $this->assertEquals(5, $this->disassembleOutputQuantity('wooden_plank'));
+    }
+
+    public function test_disassemble_resource_wood_fails_if_not_on_station(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->service->disassembleResource($this->character, 'wood');
+    }
+
+    public function test_disassemble_resource_wood_multiple_times(): void
+    {
+        $this->inventoryService->addResource($this->character, 'wood', 10);
+        $wood = DisassembleStationHelper::placeResource($this->character, 'wood', 2);
+
+        $result = $this->service->disassembleResource($this->character, 'wood', 2);
+
+        $this->assertEquals(['wooden_plank' => 10], $result['returned_resources']);
+        $wood->refresh();
+        $this->assertEquals(8, $wood->quantity);
+        $this->assertEquals(0, $this->inventoryService->getResourceQuantity($this->character, 'wooden_plank'));
+        $this->assertEquals(10, $this->disassembleOutputQuantity('wooden_plank'));
+    }
+
+    public function test_disassemble_resource_wood_stacks_output_across_separate_runs(): void
+    {
+        $this->inventoryService->addResource($this->character, 'wood', 1);
+        DisassembleStationHelper::placeResource($this->character, 'wood', 1);
+        $this->service->disassembleResource($this->character, 'wood');
+
+        $this->inventoryService->addResource($this->character, 'wood', 1);
+        DisassembleStationHelper::placeResource($this->character, 'wood', 1);
+        $this->service->disassembleResource($this->character, 'wood');
+
+        $outputSlots = app(DisassembleStationService::class)->getOutputTemporarySlots($this->character);
+        $stacks = \App\Models\Resources::whereIn('temporary_slot_uuid', $outputSlots->pluck('uuid'))
+            ->where('template_slug', 'wooden_plank')
+            ->get();
+
+        $this->assertCount(1, $stacks);
+        $this->assertEquals(10, $stacks->first()->quantity);
+        $this->assertEquals(10, $this->disassembleOutputQuantity('wooden_plank'));
+    }
+
+    public function test_disassemble_station_return_all_to_inventory(): void
+    {
+        $this->inventoryService->addResource($this->character, 'wood', 2);
+        DisassembleStationHelper::placeResource($this->character, 'wood', 1);
+        $this->service->disassembleResource($this->character, 'wood');
+
+        $this->assertEquals(5, $this->disassembleOutputQuantity('wooden_plank'));
+        $this->assertEquals(0, $this->inventoryService->getResourceQuantity($this->character, 'wooden_plank'));
+
+        app(DisassembleStationService::class)->returnAllToInventory($this->character);
+
+        $this->assertEquals(0, $this->disassembleOutputQuantity('wooden_plank'));
         $this->assertEquals(5, $this->inventoryService->getResourceQuantity($this->character, 'wooden_plank'));
     }
 
-    public function test_craft_resource_fails_if_not_enough(): void
+    public function test_craft_resource_iron_ore_to_ingots(): void
     {
-        $this->expectException(\RuntimeException::class);
-        $this->service->craftResource($this->character, 'craft_wooden_plank');
-    }
+        $this->inventoryService->addResource($this->character, 'iron_ore', 20);
+        WorkbenchHelper::ensureWorkbench($this->character);
 
-    public function test_craft_resource_multiple_times(): void
-    {
-        WorkbenchHelper::placeMaterials($this->character, ['wood' => 10]);
-        $result = $this->service->craftResource($this->character, 'craft_wooden_plank', 2);
+        $inventory = $this->character->storages()->where('storage_type', 'inventory')->firstOrFail();
+        $ore = \App\Models\Resources::whereIn('slot_uuid', $inventory->slots()->pluck('uuid'))
+            ->where('template_slug', 'iron_ore')
+            ->whereNull('temporary_slot_uuid')
+            ->firstOrFail();
+        $center = app(CraftStationService::class)->getCenterTemporarySlot($this->character);
+        app(\App\Services\StorageMoveService::class)->move($this->character, $ore->slot_uuid, $center->uuid, 20);
 
-        $this->assertEquals(10, $result['result_quantity']);
-        $this->assertEquals(8, app(CraftStationService::class)->getMaterialQuantities($this->character)['wood'] ?? 0);
-        $this->assertEquals(10, $this->inventoryService->getResourceQuantity($this->character, 'wooden_plank'));
+        $result = $this->service->craftResource($this->character, 'iron_ore');
+
+        $this->assertEquals('iron_ingot', $result['result_template_slug']);
+        $this->assertEquals(2, $result['result_quantity']);
+        $this->assertNull(\App\Models\Resources::where('temporary_slot_uuid', $center->uuid)->first());
+        $this->assertEquals(10, $this->inventoryService->getResourceQuantity($this->character, 'iron_ore'));
+        $this->assertEquals(2, $this->inventoryService->getResourceQuantity($this->character, 'iron_ingot'));
     }
 
     public function test_create_blueprint(): void
@@ -90,6 +168,7 @@ class CraftingServiceTest extends TestCase
         $this->assertEquals('item', $item->stage);
         $this->assertEquals('wooden_sword', $item->template_slug);
         $this->assertEquals('Мой первый меч', $item->custom_name);
+        $this->assertNull($item->temporary_slot_uuid);
         $this->assertEquals(['wood' => 5], \App\Support\ItemMaterialsUsed::resources($item->materials_used));
         $this->assertEquals($this->character->uuid, $item->materials_used['crafter']['character_uuid'] ?? null);
         $this->assertNotNull($item->stats);
@@ -98,8 +177,6 @@ class CraftingServiceTest extends TestCase
 
     public function test_craft_item_fails_without_blueprint(): void
     {
-        WorkbenchHelper::placeMaterials($this->character, ['wood' => 10]);
-
         $this->expectException(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
         $this->service->craftItem($this->character, 'craft_wooden_sword', 'non-existent-uuid');
     }
@@ -120,7 +197,7 @@ class CraftingServiceTest extends TestCase
         $item = $this->service->craftItem($this->character, 'craft_wooden_sword', $blueprint->uuid);
 
         $disSlot = app(DisassembleStationService::class)->getCenterTemporarySlot($this->character);
-        app(\App\Services\StorageMoveService::class)->move($this->character, $item->temporary_slot_uuid, $disSlot->uuid);
+        app(\App\Services\StorageMoveService::class)->move($this->character, $item->slot_uuid, $disSlot->uuid);
         $item->refresh();
 
         $result = $this->service->disassembleItem($this->character, $item->uuid);
@@ -130,6 +207,7 @@ class CraftingServiceTest extends TestCase
         $this->assertNull($result['item']->custom_name);
         $this->assertNull($result['item']->materials_used);
         $this->assertEquals(['wood' => 2], $result['returned_resources']);
+        $this->assertEquals(2, $this->disassembleOutputQuantity('wood'));
     }
 
     public function test_blueprint_can_be_recrafted(): void
@@ -139,42 +217,23 @@ class CraftingServiceTest extends TestCase
         $item = $this->service->craftItem($this->character, 'craft_wooden_sword', $blueprint->uuid);
 
         $disSlot = app(DisassembleStationService::class)->getCenterTemporarySlot($this->character);
-        app(\App\Services\StorageMoveService::class)->move($this->character, $item->temporary_slot_uuid, $disSlot->uuid);
+        app(\App\Services\StorageMoveService::class)->move($this->character, $item->slot_uuid, $disSlot->uuid);
         $item->refresh();
 
         $this->service->disassembleItem($this->character, $item->uuid);
         $item->refresh();
 
         $craftCenter = app(CraftStationService::class)->getCenterTemporarySlot($this->character);
-        app(\App\Services\StorageMoveService::class)->move($this->character, $item->temporary_slot_uuid, $craftCenter->uuid);
+        $disCenter = app(DisassembleStationService::class)->getCenterTemporarySlot($this->character);
+        app(\App\Services\StorageMoveService::class)->move($this->character, $disCenter->uuid, $craftCenter->uuid);
         $item->refresh();
 
+        $this->inventoryService->addResource($this->character, 'wood', 5);
         WorkbenchHelper::placeMaterials($this->character, ['wood' => 5]);
         $item2 = $this->service->craftItem($this->character, 'craft_wooden_sword', $item->uuid);
 
         $this->assertEquals('item', $item2->stage);
         $this->assertEquals('wooden_sword', $item2->template_slug);
-    }
-
-    public function test_disassemble_resource_planks_to_wood(): void
-    {
-        $this->inventoryService->addResource($this->character, 'wooden_plank', 3);
-        $inventory = $this->character->storages()->where('storage_type', 'inventory')->firstOrFail();
-        $planks = \App\Models\Resources::whereIn('slot_uuid', $inventory->slots()->pluck('uuid'))
-            ->where('template_slug', 'wooden_plank')
-            ->firstOrFail();
-
-        WorkbenchHelper::ensureWorkbench($this->character);
-        $centerSlot = app(DisassembleStationService::class)->getCenterTemporarySlot($this->character);
-        $planks->update(['temporary_slot_uuid' => $centerSlot->uuid]);
-
-        $result = $this->service->disassembleResource($this->character, 'craft_wooden_plank', 2);
-
-        $this->assertEquals(['wood' => 2], $result['returned_resources']);
-        $planks->refresh();
-        $this->assertEquals(1, $planks->quantity);
-        $this->assertEquals($centerSlot->uuid, $planks->temporary_slot_uuid);
-        $this->assertEquals(2, $this->inventoryService->getResourceQuantity($this->character, 'wood'));
     }
 
     public function test_disassemble_iron_sword_can_trigger_easter_egg(): void
@@ -188,14 +247,14 @@ class CraftingServiceTest extends TestCase
         for ($i = 0; $i < 30; $i++) {
             app(CraftStationService::class)->clearOverlays($this->character);
             app(DisassembleStationService::class)->clearOverlays($this->character);
+            WorkbenchHelper::placeOnBlueprintSlot($this->character, $blueprint);
             WorkbenchHelper::moveMaterialsToWorkbench($this->character, [
                 'wooden_plank' => 3,
                 'iron_ingot' => 2,
             ]);
-            WorkbenchHelper::placeOnBlueprintSlot($this->character, $blueprint);
             $item = $this->service->craftItem($this->character, 'craft_iron_sword', $blueprint->uuid);
             $disSlot = app(DisassembleStationService::class)->getCenterTemporarySlot($this->character);
-            app(\App\Services\StorageMoveService::class)->move($this->character, $item->temporary_slot_uuid, $disSlot->uuid);
+            app(\App\Services\StorageMoveService::class)->move($this->character, $item->slot_uuid, $disSlot->uuid);
             $item->refresh();
             $result = $this->service->disassembleItem($this->character, $item->uuid);
 
@@ -207,5 +266,41 @@ class CraftingServiceTest extends TestCase
         }
 
         $this->assertTrue($easterEggTriggered, 'Пасхальная разборка не сработала за 30 попыток');
+    }
+
+    public function test_craft_resource_rejects_empty_formula(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('не задана формула преобразования');
+
+        $this->service->craftResource($this->character, 'gold');
+    }
+
+    public function test_craft_item_clears_station_and_returns_leftovers(): void
+    {
+        $blueprint = $this->service->createBlueprint($this->character, 'craft_wooden_sword');
+        WorkbenchHelper::placeOnBlueprintSlot($this->character, $blueprint);
+        $this->inventoryService->addResource($this->character, 'wood', 10);
+        CraftStationHelper::moveMaterialsToCraftStation($this->character, ['wood' => 10]);
+
+        $this->service->craftItem($this->character, 'craft_wooden_sword', $blueprint->uuid);
+
+        $this->assertEquals(5, $this->inventoryService->getResourceQuantity($this->character, 'wood'));
+        $this->assertNull(app(CraftStationService::class)->getCenterItem($this->character));
+        $this->assertSame([], app(CraftStationService::class)->getMaterialQuantities($this->character));
+
+        $materialSlots = app(CraftStationService::class)->getMaterialTemporarySlots($this->character);
+        foreach ($materialSlots as $slot) {
+            $this->assertEquals(CraftStationService::DISABLED_SLOT_TYPE, $slot->fresh()->slot_type);
+        }
+    }
+
+    private function disassembleOutputQuantity(string $templateSlug): int
+    {
+        $outputSlots = app(DisassembleStationService::class)->getOutputTemporarySlots($this->character);
+
+        return (int) \App\Models\Resources::whereIn('temporary_slot_uuid', $outputSlots->pluck('uuid'))
+            ->where('template_slug', $templateSlug)
+            ->sum('quantity');
     }
 }

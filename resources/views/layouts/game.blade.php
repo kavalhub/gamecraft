@@ -292,10 +292,6 @@
             padding: 16px;
         }
 
-        .workbench-grid--disassemble {
-            grid-template-columns: 1fr 1.2fr 1fr;
-        }
-
         #window-quests, #window-quest {
             width: 360px;
             max-height: 70vh;
@@ -1290,7 +1286,7 @@
 <div id="msg" class="msg"></div>
 <div id="itemTooltip" class="tooltip"></div>
 @include('partials.resource-quantity-modal')
-<script src="{{ asset('js/game/game.bundle.js') }}?v=20260630j"></script>
+<script src="{{ asset('js/game/game.bundle.js') }}?v=20260702g"></script>
 
 <script>
     window.GameApi = {

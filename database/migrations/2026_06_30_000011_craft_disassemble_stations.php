@@ -52,6 +52,22 @@ return new class extends Migration
                 'created_at' => $now,
                 'updated_at' => $now,
             ],
+            [
+                'type' => 'disassemble_output',
+                'parent_type' => 'disassemble',
+                'name' => 'Результат разбора',
+                'description' => null,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            [
+                'type' => 'disassemble_backing',
+                'parent_type' => 'disassemble',
+                'name' => 'Служебный слот разбора',
+                'description' => null,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
         ]);
 
         DB::table('storages_type')->insertOrIgnore([
@@ -74,9 +90,10 @@ return new class extends Migration
                 'allowed_types' => json_encode([
                     'slots' => [
                         ['slot_type' => 'disassemble_center', 'count' => 1],
+                        ['slot_type' => 'disassemble_output', 'count' => 8],
                     ],
                 ]),
-                'metadata' => json_encode(['grid_cols' => 1]),
+                'metadata' => json_encode(['grid_cols' => 4]),
                 'created_at' => $now,
                 'updated_at' => $now,
             ],
@@ -163,15 +180,27 @@ return new class extends Migration
                         'updated_at' => $now,
                     ]);
 
-                    DB::table('temporary_slots')->insert([
-                        'uuid' => (string) \Illuminate\Support\Str::uuid(),
-                        'storage_uuid' => $storageUuid,
-                        'character_uuid' => $characterUuid,
-                        'slot_index' => 0,
-                        'active' => true,
-                        'created_at' => $now,
-                        'updated_at' => $now,
-                    ]);
+                    for ($i = 0; $i < 8; $i++) {
+                        DB::table('slots')->insert([
+                            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                            'storage_uuid' => $storageUuid,
+                            'slot_type' => 'disassemble_output',
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ]);
+                    }
+
+                    for ($i = 0; $i < 9; $i++) {
+                        DB::table('temporary_slots')->insert([
+                            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                            'storage_uuid' => $storageUuid,
+                            'character_uuid' => $characterUuid,
+                            'slot_index' => $i,
+                            'active' => true,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ]);
+                    }
                 }
             }
         }

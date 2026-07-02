@@ -37,25 +37,6 @@ return new class extends Migration
             $table->foreign('action_slug')->references('slug')->on('slug_actions')->nullOnDelete();
         });
 
-        DB::table('formulas')->where('type', 'craft')->whereIn('recipe_slug', [
-            'craft_wooden_plank',
-        ])->update(['action_slug' => 'saw']);
-
-        DB::table('formulas')->where('type', 'craft')->whereIn('recipe_slug', [
-            'craft_iron_ingot',
-        ])->update(['action_slug' => 'smelt']);
-
-        DB::table('formulas')->where('type', 'craft')->whereNotIn('recipe_slug', [
-            'craft_wooden_plank',
-            'craft_iron_ingot',
-            'gold',
-            'wood',
-            'iron_ore',
-            'wooden_plank',
-            'iron_ingot',
-            'experience',
-        ])->update(['action_slug' => 'create']);
-
         DB::table('formulas')->where('type', 'disassemble')->update(['action_slug' => 'disassemble']);
     }
 

@@ -80,7 +80,7 @@ class StorageLayoutService
                 if ($partner) {
                     $partnerTradeStorage = $partner->storages()->where('storage_type', 'trade')->first();
                     $result['partner_trade_slots'] = $partnerTradeStorage
-                        ? $this->formatTradeSlotGrid($partner, $partnerTradeStorage)
+                        ? $this->formatTradeSlotGrid($partner, $partnerTradeStorage, 'deny')
                         : $this->emptyTradeSlotGrid();
                 }
             }
@@ -126,7 +126,7 @@ class StorageLayoutService
 
         if ($partner) {
             $partnerStorage = $this->provisioningService->ensureTradeStorage($partner);
-            $result['partner_trade_slots'] = $this->formatTradeSlotGrid($partner, $partnerStorage);
+            $result['partner_trade_slots'] = $this->formatTradeSlotGrid($partner, $partnerStorage, 'deny');
         }
 
         return $result;
@@ -183,46 +183,54 @@ class StorageLayoutService
         ];
     }
 
-    private function formatTradeSlotGrid(Character $character, Storage $tradeStorage): array
+    private function formatTradeSlotGrid(Character $character, Storage $tradeStorage, ?string $dropPolicy = null): array
     {
-        $tempSlots = TemporarySlot::where('storage_uuid', $tradeStorage->uuid)
-            ->where('character_uuid', $character->uuid)
-            ->orderBy('slot_index')
+        $slots = $tradeStorage->slots()
+            ->whereNull('slot_type')
+            ->orderBy('id')
             ->get();
 
-        if ($tempSlots->isEmpty()) {
+        if ($slots->isEmpty()) {
             return $this->emptyTradeSlotGrid();
         }
 
-        $tempUuids = $tempSlots->pluck('uuid');
+        $slotUuids = $slots->pluck('uuid');
 
-        $items = Item::whereIn('temporary_slot_uuid', $tempUuids)
+        $items = Item::whereIn('slot_uuid', $slotUuids)
+            ->whereNull('temporary_slot_uuid')
             ->with('template')
             ->get()
-            ->keyBy('temporary_slot_uuid');
+            ->keyBy('slot_uuid');
 
-        $resources = Resources::whereIn('temporary_slot_uuid', $tempUuids)
+        $resources = Resources::whereIn('slot_uuid', $slotUuids)
+            ->whereNull('temporary_slot_uuid')
             ->with('template')
             ->get()
-            ->keyBy('temporary_slot_uuid');
+            ->keyBy('slot_uuid');
 
         return [
             'uuid' => $tradeStorage->uuid,
             'storage_type' => 'trade',
             'name' => $tradeStorage->name,
             'cols' => $this->provisioningService->getGridCols('trade'),
-            'slots' => $tempSlots->map(function (TemporarySlot $tempSlot) use ($items, $resources) {
-                $item = $items->get($tempSlot->uuid);
-                $resource = $resources->get($tempSlot->uuid);
+            'slots' => $slots->map(function (Slot $slot, int $index) use ($items, $resources, $dropPolicy) {
+                $item = $items->get($slot->uuid);
+                $resource = $resources->get($slot->uuid);
 
-                return [
-                    'uuid' => $tempSlot->uuid,
-                    'kind' => 'temporary',
-                    'slot_index' => $tempSlot->slot_index,
-                    'index' => $tempSlot->slot_index,
-                    'item' => $item ? $this->formatItem($item, true) : null,
-                    'resource' => $resource ? $this->formatResource($resource, true) : null,
+                $formatted = [
+                    'uuid' => $slot->uuid,
+                    'kind' => 'regular',
+                    'slot_index' => $index,
+                    'index' => $index,
+                    'item' => $item ? $this->formatItem($item) : null,
+                    'resource' => $resource ? $this->formatResource($resource) : null,
                 ];
+
+                if ($dropPolicy !== null) {
+                    $formatted['drop_policy'] = $dropPolicy;
+                }
+
+                return $formatted;
             })->values()->all(),
         ];
     }
@@ -241,7 +249,7 @@ class StorageLayoutService
     private function formatStationSlotGrid(Character $character, Storage $storage, CraftStationService|DisassembleStationService $stationService): array
     {
         $tempSlots = $stationService->getTemporarySlots($character);
-        $cols = $storage->storage_type === 'disassemble' ? 1 : 4;
+        $cols = 4;
 
         if ($tempSlots->isEmpty()) {
             return [
@@ -269,12 +277,11 @@ class StorageLayoutService
         $slots = $tempSlots->map(function (TemporarySlot $tempSlot) use ($items, $resources, $stationService) {
             $item = $items->get($tempSlot->uuid);
             $resource = $resources->get($tempSlot->uuid);
-            $slotType = $stationService->slotRole($tempSlot);
 
             return [
                 'uuid' => $tempSlot->uuid,
                 'kind' => 'temporary',
-                'slot_type' => $slotType,
+                'slot_type' => $tempSlot->slot_type,
                 'slot_index' => $tempSlot->slot_index,
                 'index' => $tempSlot->slot_index,
                 'item' => $item ? $this->formatItem($item, true) : null,
@@ -393,6 +400,7 @@ class StorageLayoutService
             'description' => $resource->template?->description,
             'quantity' => $resource->quantity,
             'max_stack' => $resource->max_stack ?? $resource->template?->max_stack,
+            'slot_type' => $resource->slot_type ?? $resource->template?->slot_type,
             'slot_uuid' => $resource->slot_uuid,
             'temporary_slot_uuid' => $resource->temporary_slot_uuid,
             'is_resource' => true,

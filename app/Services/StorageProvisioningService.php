@@ -15,7 +15,7 @@ use Illuminate\Support\Str;
 class StorageProvisioningService
 {
     public const INVENTORY_SLOT_COUNT = 36;
-    public const TRADE_TEMPORARY_SLOT_COUNT = 20;
+    public const TRADE_SLOT_COUNT = 6;
 
     public function __construct(
         private EventStore $eventStore,
@@ -93,11 +93,31 @@ class StorageProvisioningService
             ]
         );
 
-        if ($storageType !== 'trade') {
+        if ($storageType === 'trade') {
+            $this->provisionTradeSlots($storage);
+        } else {
             $this->provisionStorageSlots($storage);
         }
 
         return $storage;
+    }
+
+    public function provisionTradeSlots(Storage $storage): void
+    {
+        if ($storage->storage_type !== 'trade') {
+            return;
+        }
+
+        $existing = $storage->slots()->whereNull('slot_type')->count();
+        for ($i = $existing; $i < self::TRADE_SLOT_COUNT; $i++) {
+            Slot::create([
+                'uuid' => Str::uuid()->toString(),
+                'storage_uuid' => $storage->uuid,
+                'slot_type' => null,
+            ]);
+        }
+
+        $this->trimExcessSlots($storage);
     }
 
     public function provisionStorageSlots(Storage $storage): void
@@ -168,23 +188,7 @@ class StorageProvisioningService
         return DB::transaction(function () use ($character) {
             $storage = $this->grantStorage($character, 'trade');
 
-            $existingCount = TemporarySlot::where('character_uuid', $character->uuid)
-                ->where('storage_uuid', $storage->uuid)
-                ->count();
-
-            if ($existingCount >= self::TRADE_TEMPORARY_SLOT_COUNT) {
-                return $storage;
-            }
-
-            for ($i = $existingCount; $i < self::TRADE_TEMPORARY_SLOT_COUNT; $i++) {
-                TemporarySlot::create([
-                    'uuid' => Str::uuid()->toString(),
-                    'storage_uuid' => $storage->uuid,
-                    'character_uuid' => $character->uuid,
-                    'slot_index' => $i,
-                    'active' => true,
-                ]);
-            }
+            $existingCount = $storage->slots()->whereNull('slot_type')->count();
 
             if ($existingCount === 0) {
                 $this->eventStore->record(
@@ -193,7 +197,7 @@ class StorageProvisioningService
                     $storage->uuid,
                     [
                         'character_uuid' => $character->uuid,
-                        'temporary_slot_count' => self::TRADE_TEMPORARY_SLOT_COUNT,
+                        'slot_count' => self::TRADE_SLOT_COUNT,
                     ],
                     $character->uuid
                 );
@@ -203,7 +207,7 @@ class StorageProvisioningService
         });
     }
 
-    public function findFreeTradeTemporarySlot(Character $character): ?TemporarySlot
+    public function findFreeTradeSlot(Character $character): ?Slot
     {
         $storage = Storage::where('characters_uuid', $character->uuid)
             ->where('storage_type', 'trade')
@@ -213,19 +217,51 @@ class StorageProvisioningService
             return null;
         }
 
-        $tempSlots = TemporarySlot::where('storage_uuid', $storage->uuid)
-            ->where('character_uuid', $character->uuid)
-            ->where('active', true)
-            ->orderBy('slot_index')
-            ->get();
-
-        foreach ($tempSlots as $tempSlot) {
-            if ($this->isTemporarySlotEmpty($tempSlot)) {
-                return $tempSlot;
+        foreach ($this->getTradeSlots($character) as $slot) {
+            if ($this->isRegularSlotEmpty($slot)) {
+                return $slot;
             }
         }
 
         return null;
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<int, Slot>
+     */
+    public function getTradeSlots(Character $character): \Illuminate\Support\Collection
+    {
+        $storage = Storage::where('characters_uuid', $character->uuid)
+            ->where('storage_type', 'trade')
+            ->first();
+
+        if (!$storage) {
+            return collect();
+        }
+
+        return $storage->slots()
+            ->whereNull('slot_type')
+            ->orderBy('id')
+            ->get();
+    }
+
+    public function isRegularSlotEmpty(Slot $slot): bool
+    {
+        return !$this->getOccupantForRegularSlot($slot);
+    }
+
+    public function getOccupantForRegularSlot(Slot $slot): ?object
+    {
+        $item = \App\Models\Item::where('slot_uuid', $slot->uuid)
+            ->whereNull('temporary_slot_uuid')
+            ->first();
+        if ($item) {
+            return $item;
+        }
+
+        return \App\Models\Resources::where('slot_uuid', $slot->uuid)
+            ->whereNull('temporary_slot_uuid')
+            ->first();
     }
 
     public function isTemporarySlotEmpty(TemporarySlot $temporarySlot): bool
@@ -254,7 +290,7 @@ class StorageProvisioningService
 
         return match ($storageType) {
             'inventory' => 4,
-            'trade' => 4,
+            'trade' => 3,
             'play_panel' => 12,
             default => 4,
         };

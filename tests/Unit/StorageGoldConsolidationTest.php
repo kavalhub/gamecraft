@@ -147,9 +147,9 @@ class StorageGoldConsolidationTest extends TestCase
 
         $moveService = app(StorageMoveService::class);
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Валюту нельзя перемещать вручную');
-        $moveService->move($character, $goldSlot->uuid, $gridSlot->uuid);
+        $result = $moveService->move($character, $goldSlot->uuid, $gridSlot->uuid);
+
+        $this->assertTrue($result['noop'] ?? false);
     }
 
     public function test_cannot_duplicate_gold_by_moving_from_special_slot_to_same_slot_via_grid(): void
@@ -167,12 +167,9 @@ class StorageGoldConsolidationTest extends TestCase
 
         $moveService = app(StorageMoveService::class);
 
-        try {
-            $moveService->move($character, $goldSlot->uuid, $gridSlot->uuid);
-            $this->fail('Expected gold move to be blocked');
-        } catch (\RuntimeException $e) {
-            $this->assertStringContainsString('Валюту нельзя перемещать', $e->getMessage());
-        }
+        $result = $moveService->move($character, $goldSlot->uuid, $gridSlot->uuid);
+
+        $this->assertTrue($result['noop'] ?? false);
 
         $after = app(StorageProvisioningService::class)->getInventoryGoldQuantity($character);
         $this->assertEquals($before, $after);

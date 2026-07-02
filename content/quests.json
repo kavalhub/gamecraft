@@ -44,7 +44,7 @@
         {
           "key": "craft_planks",
           "type": "craft_resource",
-          "recipe_slug": "craft_wooden_plank",
+          "recipe_slug": "wood",
           "count": 1
         }
       ],

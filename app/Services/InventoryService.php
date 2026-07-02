@@ -18,7 +18,8 @@ class InventoryService
 {
     public function __construct(
         private EventStore $eventStore,
-        private SpecialSlotService $specialSlotService
+        private SpecialSlotService $specialSlotService,
+        private InventoryResourcePlacementService $placementService,
     ) {}
 
     public function addResource(
@@ -59,35 +60,9 @@ class InventoryService
         ?string $storageType = 'inventory'
     ): int {
         $template = ItemTemplate::where('slug', $templateSlug)->firstOrFail();
-        $maxStack = $template->max_stack;
         $storage = $character->storages()->where('storage_type', $storageType)->firstOrFail();
-        $storageSlotUuids = $storage->slots()->pluck('uuid');
 
-        if ($maxStack === null) {
-            $existing = Resources::whereIn('slot_uuid', $storageSlotUuids)
-                ->where('template_slug', $templateSlug)
-                ->exists();
-
-            if ($existing) {
-                return PHP_INT_MAX;
-            }
-
-            return $this->countFreeSlotsInStorage($storage) > 0 ? PHP_INT_MAX : 0;
-        }
-
-        $capacity = 0;
-
-        $resources = Resources::whereIn('slot_uuid', $storageSlotUuids)
-            ->where('template_slug', $templateSlug)
-            ->get();
-
-        foreach ($resources as $resource) {
-            $capacity += max(0, $maxStack - $resource->quantity);
-        }
-
-        $capacity += $this->countFreeSlotsInStorage($storage) * $maxStack;
-
-        return $capacity;
+        return $this->placementService->calculateCapacity($storage, $templateSlug);
     }
 
     public function removeResource(
@@ -144,7 +119,7 @@ class InventoryService
 
     public function getResourceQuantity(Character $character, string $templateSlug): int
     {
-        $storageUuids = $character->storages()->pluck('uuid');
+        $storageUuids = $character->storages()->where('storage_type', 'inventory')->pluck('uuid');
         $slotUuids = Slot::whereIn('storage_uuid', $storageUuids)->pluck('uuid');
 
         return (int) Resources::whereIn('slot_uuid', $slotUuids)

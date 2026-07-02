@@ -10,7 +10,7 @@ class Recipe extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['slug', 'type', 'name', 'description'];
+    protected $fillable = ['slug', 'type', 'name', 'description', 'result_template_slug', 'result_quantity'];
 
     public function formulas(): HasMany
     {

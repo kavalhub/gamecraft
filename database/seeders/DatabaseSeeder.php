@@ -88,8 +88,8 @@ class DatabaseSeeder extends Seeder
     {
         $types = [
             ['type' => 'inventory', 'name' => 'Инвентарь', 'allowed_types' => ['slots' => [
-                ['slot_type' => 'gold', 'count' => 1, 'hidden' => true, 'priority_fill' => true, 'auto_reclaim' => true],
-                ['slot_type' => 'experience', 'count' => 1, 'hidden' => true, 'priority_fill' => true, 'auto_reclaim' => true],
+                ['slot_type' => 'gold', 'count' => 1, 'hidden' => true],
+                ['slot_type' => 'experience', 'count' => 1, 'hidden' => true],
                 ['slot_type' => null, 'count' => 36],
             ]]],
             ['type' => 'equipment', 'name' => 'Экипировка', 'allowed_types' => ['slots' => [

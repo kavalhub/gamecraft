@@ -9,7 +9,15 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class TradeItem extends Model
 {
-    protected $fillable = ['trade_uuid', 'character_uuid', 'item_uuid', 'resource_uuid', 'template_slug', 'quantity'];
+    protected $fillable = [
+        'trade_uuid',
+        'character_uuid',
+        'item_uuid',
+        'resource_uuid',
+        'origin_slot_uuid',
+        'template_slug',
+        'quantity',
+    ];
     protected $casts = ['quantity' => 'integer'];
 
     public function trade(): BelongsTo { return $this->belongsTo(TradeOffer::class, 'trade_uuid', 'uuid'); }
