@@ -21,6 +21,7 @@ class PlayPanelService
         'encounter',
         'auction',
         'players',
+        'bank',
         'settings',
     ];
 
@@ -33,6 +34,7 @@ class PlayPanelService
         'encounter',
         'auction',
         'players',
+        'bank',
         'settings',
     ];
 

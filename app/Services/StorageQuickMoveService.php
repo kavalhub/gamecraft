@@ -18,6 +18,7 @@ class StorageQuickMoveService
         private DisassembleStationService $disassembleStationService,
         private SpecialSlotService $specialSlotService,
         private StorageProvisioningService $provisioningService,
+        private GuildService $guildService,
     ) {}
 
     /**
@@ -44,6 +45,8 @@ class StorageQuickMoveService
         $toSlotUuid = match ($intent) {
             'equip' => $this->resolveEquipTarget($character, $occupant),
             'inventory' => $this->resolveInventoryTarget($character),
+            'bank' => $this->resolveStorageGridTarget($character, 'bank'),
+            'guild_bank' => $this->resolveGuildBankTarget($character),
             'craft' => $this->resolveCraftTarget($character, $occupant, $stationMode),
             'disassemble' => $this->resolveDisassembleTarget($character, $occupant),
             default => null,
@@ -126,12 +129,44 @@ class StorageQuickMoveService
 
     private function resolveInventoryTarget(Character $character): ?string
     {
-        $inventory = $character->storages()->where('storage_type', 'inventory')->first();
-        if (!$inventory) {
+        return $this->resolveStorageGridTarget($character, 'inventory');
+    }
+
+    private function resolveStorageGridTarget(Character $character, string $storageType): ?string
+    {
+        $storage = $character->storages()->where('storage_type', $storageType)->first();
+        if (!$storage) {
             return null;
         }
 
-        foreach ($this->specialSlotService->getGridSlots($inventory) as $slot) {
+        foreach ($this->specialSlotService->getGridSlots($storage) as $slot) {
+            if (Item::where('slot_uuid', $slot->uuid)->exists()) {
+                continue;
+            }
+
+            if (Resources::where('slot_uuid', $slot->uuid)->whereNull('buffer_slot_uuid')->exists()) {
+                continue;
+            }
+
+            return $slot->uuid;
+        }
+
+        return null;
+    }
+
+    private function resolveGuildBankTarget(Character $character): ?string
+    {
+        $guild = $this->guildService->getGuildForPlayer($character);
+        if (!$guild) {
+            return null;
+        }
+
+        $guildBank = $guild->storages()->where('storage_type', 'guild_bank')->first();
+        if (!$guildBank) {
+            return null;
+        }
+
+        foreach ($this->specialSlotService->getGridSlots($guildBank) as $slot) {
             if (Item::where('slot_uuid', $slot->uuid)->exists()) {
                 continue;
             }

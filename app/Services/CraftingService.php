@@ -427,22 +427,31 @@ class CraftingService
 
     private function getBlueprintTemplateSlug(string $recipeSlug): string
     {
-        $mapping = [
-            'craft_wooden_sword' => 'recipe_wooden_sword',
-            'craft_iron_sword' => 'recipe_iron_sword',
-        ];
+        if (str_starts_with($recipeSlug, 'craft_')) {
+            $candidate = 'recipe_' . substr($recipeSlug, strlen('craft_'));
+            if (ItemTemplate::where('slug', $candidate)->exists()) {
+                return $candidate;
+            }
+        }
 
-        return $mapping[$recipeSlug] ?? throw new \RuntimeException("Неизвестный blueprint рецепт: {$recipeSlug}");
+        throw new \RuntimeException("Неизвестный blueprint рецепт: {$recipeSlug}");
     }
 
     private function getResultTemplateSlug(string $recipeSlug): string
     {
-        $mapping = [
-            'craft_wooden_sword' => 'wooden_sword',
-            'craft_iron_sword' => 'iron_sword',
-        ];
+        $recipe = Recipe::where('slug', $recipeSlug)->first();
+        if ($recipe?->result_template_slug) {
+            return $recipe->result_template_slug;
+        }
 
-        return $mapping[$recipeSlug] ?? throw new \RuntimeException("Неизвестный результат для рецепта: {$recipeSlug}");
+        if (str_starts_with($recipeSlug, 'craft_')) {
+            $candidate = substr($recipeSlug, strlen('craft_'));
+            if (ItemTemplate::where('slug', $candidate)->exists()) {
+                return $candidate;
+            }
+        }
+
+        throw new \RuntimeException("Неизвестный результат для рецепта: {$recipeSlug}");
     }
 
     private function generateItemName(Recipe $recipe, array $materialsUsed): string

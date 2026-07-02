@@ -24,6 +24,7 @@ class ItemTemplateController extends Controller
                 'max_stack' => $t->max_stack,
                 'base_stats' => $t->base_stats,
                 'slot_type' => $t->slot_type,
+                'recipe_slug' => $t->recipe_slug,
             ]),
         ]);
     }

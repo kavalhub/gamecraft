@@ -86,6 +86,12 @@
       "description": "Амулеты, ожерелья"
     },
     {
+      "type": "equipment_shoulders",
+      "parent_type": "equipment",
+      "name": "Плечи",
+      "description": "Наплечники"
+    },
+    {
       "type": "blueprint",
       "parent_type": null,
       "name": "Чертёж",
@@ -274,6 +280,221 @@
       "description": "Обучает крафту железного меча",
       "slot_type": "blueprint",
       "recipe_slug": "craft_iron_sword"
+    },
+    {
+      "slug": "leather",
+      "name": "Кожа",
+      "type": "material",
+      "icon": "🟤",
+      "is_stackable": true,
+      "max_stack": 20,
+      "description": "Заготовленная кожа",
+      "slot_type": "material"
+    },
+    {
+      "slug": "cloth",
+      "name": "Ткань",
+      "type": "material",
+      "icon": "🧵",
+      "is_stackable": true,
+      "max_stack": 20,
+      "description": "Прочная ткань",
+      "slot_type": "material"
+    },
+    {
+      "slug": "copper_ore",
+      "name": "Медная руда",
+      "type": "material",
+      "icon": "🪨",
+      "is_stackable": true,
+      "max_stack": 20,
+      "description": "Необработанная медная руда",
+      "slot_type": "ore"
+    },
+    {
+      "slug": "copper_ingot",
+      "name": "Медный слиток",
+      "type": "material",
+      "icon": "🟠",
+      "is_stackable": true,
+      "max_stack": 20,
+      "description": "Очищенный медный слиток",
+      "slot_type": "ingot"
+    },
+    {
+      "slug": "herb",
+      "name": "Трава",
+      "type": "material",
+      "icon": "🌿",
+      "is_stackable": true,
+      "max_stack": 20,
+      "description": "Лечебная трава",
+      "slot_type": "material"
+    },
+    {
+      "slug": "iron_helmet",
+      "name": "Железный шлем",
+      "type": "equipment",
+      "icon": "⛑️",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Защищает голову",
+      "base_stats": { "defense": { "min": 5, "max": 8 }, "health": { "min": 10, "max": 15 } },
+      "slot_type": "equipment_head"
+    },
+    {
+      "slug": "iron_pauldrons",
+      "name": "Железные наплечники",
+      "type": "equipment",
+      "icon": "🦺",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Защита плеч",
+      "base_stats": { "defense": { "min": 4, "max": 7 }, "strength": { "min": 2, "max": 4 } },
+      "slot_type": "equipment_shoulders"
+    },
+    {
+      "slug": "iron_chestplate",
+      "name": "Железный нагрудник",
+      "type": "equipment",
+      "icon": "🛡️",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Основная защита туловища",
+      "base_stats": { "defense": { "min": 10, "max": 15 }, "health": { "min": 20, "max": 30 } },
+      "slot_type": "equipment_chest"
+    },
+    {
+      "slug": "iron_greaves",
+      "name": "Железные поножи",
+      "type": "equipment",
+      "icon": "👖",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Защита ног",
+      "base_stats": { "defense": { "min": 6, "max": 10 }, "health": { "min": 12, "max": 18 } },
+      "slot_type": "equipment_legs"
+    },
+    {
+      "slug": "iron_shield",
+      "name": "Железный щит",
+      "type": "equipment",
+      "icon": "🛡️",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Дополнительная защита",
+      "base_stats": { "defense": { "min": 8, "max": 12 }, "block": { "min": 3, "max": 5 } },
+      "slot_type": "equipment_offhand"
+    },
+    {
+      "slug": "iron_ring",
+      "name": "Железное кольцо",
+      "type": "equipment",
+      "icon": "💍",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Простое кольцо",
+      "base_stats": { "strength": { "min": 2, "max": 4 }, "crit_chance": { "min": 1, "max": 3 } },
+      "slot_type": "equipment_ring"
+    },
+    {
+      "slug": "iron_amulet",
+      "name": "Железный амулет",
+      "type": "equipment",
+      "icon": "📿",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Амулет с руной",
+      "base_stats": { "health": { "min": 15, "max": 25 }, "mana": { "min": 5, "max": 10 } },
+      "slot_type": "equipment_amulet"
+    },
+    {
+      "slug": "recipe_iron_helmet",
+      "name": "Чертёж: Железный шлем",
+      "type": "blueprint",
+      "icon": "📜",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Обучает крафту железного шлема",
+      "slot_type": "blueprint",
+      "recipe_slug": "craft_iron_helmet"
+    },
+    {
+      "slug": "recipe_iron_pauldrons",
+      "name": "Чертёж: Наплечники",
+      "type": "blueprint",
+      "icon": "📜",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Обучает крафту наплечников",
+      "slot_type": "blueprint",
+      "recipe_slug": "craft_iron_pauldrons"
+    },
+    {
+      "slug": "recipe_iron_chestplate",
+      "name": "Чертёж: Нагрудник",
+      "type": "blueprint",
+      "icon": "📜",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Обучает крафту нагрудника",
+      "slot_type": "blueprint",
+      "recipe_slug": "craft_iron_chestplate"
+    },
+    {
+      "slug": "recipe_iron_greaves",
+      "name": "Чертёж: Поножи",
+      "type": "blueprint",
+      "icon": "📜",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Обучает крафту поножей",
+      "slot_type": "blueprint",
+      "recipe_slug": "craft_iron_greaves"
+    },
+    {
+      "slug": "recipe_iron_shield",
+      "name": "Чертёж: Щит",
+      "type": "blueprint",
+      "icon": "📜",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Обучает крафту щита",
+      "slot_type": "blueprint",
+      "recipe_slug": "craft_iron_shield"
+    },
+    {
+      "slug": "recipe_iron_ring",
+      "name": "Чертёж: Кольцо",
+      "type": "blueprint",
+      "icon": "📜",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Обучает крафту кольца",
+      "slot_type": "blueprint",
+      "recipe_slug": "craft_iron_ring"
+    },
+    {
+      "slug": "recipe_iron_amulet",
+      "name": "Чертёж: Амулет",
+      "type": "blueprint",
+      "icon": "📜",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Обучает крафту амулета",
+      "slot_type": "blueprint",
+      "recipe_slug": "craft_iron_amulet"
+    },
+    {
+      "slug": "recipe_copper_ingot",
+      "name": "Чертёж: Медный слиток",
+      "type": "blueprint",
+      "icon": "📜",
+      "is_stackable": false,
+      "max_stack": 1,
+      "description": "Обучает плавке меди",
+      "slot_type": "blueprint",
+      "recipe_slug": "craft_copper_ingot"
     }
   ],
   "recipes": [
@@ -381,6 +602,7 @@
       "type": "blueprint",
       "name": "Изготовление деревянного меча",
       "description": "Создаёт простой деревянный меч из пяти брёвен",
+      "result_template_slug": "wooden_sword",
       "formulas": [
         {
           "type": "craft",
@@ -407,6 +629,7 @@
       "type": "blueprint",
       "name": "Ковка железного меча",
       "description": "Создаёт крепкий железный меч из бруска и двух слитков",
+      "result_template_slug": "iron_sword",
       "formulas": [
         {
           "type": "craft",
@@ -438,6 +661,139 @@
           },
           "description": "Обычный разбор"
         }
+      ]
+    },
+    {
+      "slug": "leather",
+      "type": "resource",
+      "name": "Кожа",
+      "description": "Материал для доспехов",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": {}, "description": "Базовый ресурс" }
+      ]
+    },
+    {
+      "slug": "cloth",
+      "type": "resource",
+      "name": "Ткань",
+      "description": "Материал для крафта",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": {}, "description": "Базовый ресурс" }
+      ]
+    },
+    {
+      "slug": "copper_ore",
+      "type": "resource",
+      "name": "Медная руда",
+      "description": "Руда для плавки",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": {}, "description": "Базовый ресурс" }
+      ]
+    },
+    {
+      "slug": "copper_ingot",
+      "type": "resource",
+      "name": "Медный слиток",
+      "description": "Плавленая медь",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": { "copper_ore": 3 }, "description": "Плавка меди" },
+        { "type": "disassemble", "priority": 100, "chance": 100, "formula": { "copper_ore": 2 }, "description": "Разделить слиток" }
+      ]
+    },
+    {
+      "slug": "herb",
+      "type": "resource",
+      "name": "Трава",
+      "description": "Алхимический компонент",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": {}, "description": "Базовый ресурс" }
+      ]
+    },
+    {
+      "slug": "craft_copper_ingot",
+      "type": "blueprint",
+      "name": "Плавка медного слитка",
+      "description": "Плавит медную руду",
+      "result_template_slug": "copper_ingot",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": { "copper_ore": 3 }, "description": "Плавка" }
+      ]
+    },
+    {
+      "slug": "craft_iron_helmet",
+      "type": "blueprint",
+      "name": "Ковка железного шлема",
+      "description": "Создаёт железный шлем",
+      "result_template_slug": "iron_helmet",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": { "iron_ingot": 2, "leather": 1 }, "description": "Ковка" },
+        { "type": "disassemble", "priority": 100, "chance": 100, "formula": { "iron_ingot": 1 }, "description": "Разбор" }
+      ]
+    },
+    {
+      "slug": "craft_iron_pauldrons",
+      "type": "blueprint",
+      "name": "Ковка наплечников",
+      "description": "Создаёт железные наплечники",
+      "result_template_slug": "iron_pauldrons",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": { "iron_ingot": 2, "leather": 2 }, "description": "Ковка" },
+        { "type": "disassemble", "priority": 100, "chance": 100, "formula": { "iron_ingot": 1 }, "description": "Разбор" }
+      ]
+    },
+    {
+      "slug": "craft_iron_chestplate",
+      "type": "blueprint",
+      "name": "Ковка нагрудника",
+      "description": "Создаёт железный нагрудник",
+      "result_template_slug": "iron_chestplate",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": { "iron_ingot": 4, "leather": 2 }, "description": "Ковка" },
+        { "type": "disassemble", "priority": 100, "chance": 100, "formula": { "iron_ingot": 2 }, "description": "Разбор" }
+      ]
+    },
+    {
+      "slug": "craft_iron_greaves",
+      "type": "blueprint",
+      "name": "Ковка поножей",
+      "description": "Создаёт железные поножи",
+      "result_template_slug": "iron_greaves",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": { "iron_ingot": 3, "leather": 2 }, "description": "Ковка" },
+        { "type": "disassemble", "priority": 100, "chance": 100, "formula": { "iron_ingot": 1 }, "description": "Разбор" }
+      ]
+    },
+    {
+      "slug": "craft_iron_shield",
+      "type": "blueprint",
+      "name": "Ковка щита",
+      "description": "Создаёт железный щит",
+      "result_template_slug": "iron_shield",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": { "iron_ingot": 2, "wooden_plank": 2 }, "description": "Ковка" },
+        { "type": "disassemble", "priority": 100, "chance": 100, "formula": { "iron_ingot": 1, "wooden_plank": 1 }, "description": "Разбор" }
+      ]
+    },
+    {
+      "slug": "craft_iron_ring",
+      "type": "blueprint",
+      "name": "Ковка кольца",
+      "description": "Создаёт железное кольцо",
+      "result_template_slug": "iron_ring",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": { "iron_ingot": 1, "copper_ingot": 1 }, "description": "Ковка" },
+        { "type": "disassemble", "priority": 100, "chance": 100, "formula": { "iron_ingot": 1 }, "description": "Разбор" }
+      ]
+    },
+    {
+      "slug": "craft_iron_amulet",
+      "type": "blueprint",
+      "name": "Ковка амулета",
+      "description": "Создаёт железный амулет",
+      "result_template_slug": "iron_amulet",
+      "formulas": [
+        { "type": "craft", "priority": 100, "chance": 100, "formula": { "iron_ingot": 1, "herb": 2, "cloth": 1 }, "description": "Ковка" },
+        { "type": "disassemble", "priority": 100, "chance": 100, "formula": { "iron_ingot": 1 }, "description": "Разбор" }
       ]
     }
   ],
@@ -485,6 +841,42 @@
       "template_slug": "recipe_iron_sword",
       "quantity": 1,
       "price": 10
+    },
+    {
+      "character_name": "Wulfric Goldsmyth",
+      "template_slug": "leather",
+      "quantity": 1,
+      "price": 2
+    },
+    {
+      "character_name": "Wulfric Goldsmyth",
+      "template_slug": "cloth",
+      "quantity": 1,
+      "price": 2
+    },
+    {
+      "character_name": "Wulfric Goldsmyth",
+      "template_slug": "copper_ore",
+      "quantity": 1,
+      "price": 2
+    },
+    {
+      "character_name": "Wulfric Goldsmyth",
+      "template_slug": "herb",
+      "quantity": 1,
+      "price": 1
+    },
+    {
+      "character_name": "Wulfric Goldsmyth",
+      "template_slug": "recipe_iron_helmet",
+      "quantity": 1,
+      "price": 15
+    },
+    {
+      "character_name": "Wulfric Goldsmyth",
+      "template_slug": "recipe_iron_chestplate",
+      "quantity": 1,
+      "price": 20
     },
     {
       "character_name": "Wulfric Goldsmyth",

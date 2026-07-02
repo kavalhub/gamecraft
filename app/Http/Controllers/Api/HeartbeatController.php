@@ -29,6 +29,8 @@ class HeartbeatController extends Controller
             'characters' => $online->map(fn($c) => [
                 'uuid' => $c->uuid,
                 'name' => $c->name,
+                'avatar' => $c->avatar ?? 'warrior',
+                'avatar_icon' => method_exists($c, 'avatarIcon') ? $c->avatarIcon() : '🧙',
             ]),
         ]);
     }

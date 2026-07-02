@@ -219,6 +219,7 @@ class DuelService
         array $basePayload,
     ): void {
         $payload = array_merge($basePayload, [
+            'viewer_uuid' => $actor->uuid,
             'outcome' => $view['outcome'],
             'combat_log' => $view['combat_log'],
             'combat_ui' => $view['combat_ui'],
@@ -263,6 +264,7 @@ class DuelService
         return [
             'success' => true,
             'mode' => 'duel',
+            'viewer_uuid' => $actor->uuid,
             'outcome' => $view['outcome'],
             'duel_uuid' => $duel->uuid,
             'correlation_uuid' => $basePayload['correlation_uuid'],

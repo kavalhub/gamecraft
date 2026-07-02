@@ -35,6 +35,8 @@ class StorageLayoutService
         $result = [
             'character_uuid' => $character->uuid,
             'character_name' => $character->name,
+            'character_avatar' => $character->avatar,
+            'character_avatar_icon' => $character->avatarIcon(),
             'gold' => $this->specialSlotService->getGoldQuantity($character),
             'experience' => $this->specialSlotService->getExperienceQuantity($character),
             'storages' => [],
@@ -93,6 +95,29 @@ class StorageLayoutService
             if ($equipment) {
                 $this->provisioningService->provisionStorageSlots($equipment);
                 $result['storages'][] = $this->formatRegularStorage($equipment);
+            }
+        }
+
+        if (in_array('bank', $include, true)) {
+            $bank = $character->storages()->where('storage_type', 'bank')->first();
+            if ($bank) {
+                $this->provisioningService->provisionStorageSlots($bank);
+                $result['storages'][] = $this->formatRegularStorage($bank);
+            }
+        }
+
+        if (in_array('guild_bank', $include, true)) {
+            $guild = app(GuildService::class)->getGuildForPlayer($character);
+            if ($guild) {
+                $guildBank = $guild->storages()->where('storage_type', 'guild_bank')->first();
+                if ($guildBank) {
+                    $this->provisioningService->provisionStorageSlots($guildBank);
+                    $formatted = $this->formatRegularStorage($guildBank);
+                    $formatted['guild_uuid'] = $guild->uuid;
+                    $formatted['guild_name'] = $guild->name;
+                    $result['guild_bank'] = $formatted;
+                    $result['storages'][] = $formatted;
+                }
             }
         }
 

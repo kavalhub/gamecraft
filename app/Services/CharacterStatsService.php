@@ -25,6 +25,7 @@ class CharacterStatsService
             ['character_uuid' => $character->uuid],
             [
                 'level' => 1,
+                'base_damage' => random_int(3, 5),
                 'strength' => 10,
                 'agility' => 10,
                 'intellect' => 10,
@@ -95,6 +96,8 @@ class CharacterStatsService
 
         $equipmentBonus = $this->sumEquipmentBonuses($character);
         $baseHealth = 50;
+        $totalStrength = $base->strength + ($equipmentBonus['strength'] ?? 0);
+        $equipmentDamage = (int) ($equipmentBonus['damage'] ?? 0);
 
         return [
             'level' => $level,
@@ -107,19 +110,34 @@ class CharacterStatsService
                 'stamina' => $base->stamina,
                 'spirit' => $base->spirit,
                 'health' => $baseHealth,
+                'base_damage' => (int) $base->base_damage,
             ],
             'equipment_bonus' => $equipmentBonus,
             'total' => [
-                'strength' => $base->strength + ($equipmentBonus['strength'] ?? 0),
+                'strength' => $totalStrength,
                 'agility' => $base->agility + ($equipmentBonus['agility'] ?? 0),
                 'intellect' => $base->intellect + ($equipmentBonus['intellect'] ?? 0),
                 'stamina' => $base->stamina + ($equipmentBonus['stamina'] ?? 0),
                 'spirit' => $base->spirit + ($equipmentBonus['spirit'] ?? 0),
-                'damage' => $equipmentBonus['damage'] ?? 0,
+                'damage' => $this->computeMeleeDamage($equipmentDamage, (int) $base->base_damage, $level),
                 'defense' => $equipmentBonus['defense'] ?? 0,
                 'health' => $baseHealth + ($equipmentBonus['health'] ?? 0),
             ],
         ];
+    }
+
+    /**
+     * Без оружия: base_damage (3–5) × уровень. С оружием — урон экипировки.
+     */
+    private function computeMeleeDamage(int $equipmentDamage, int $baseDamage, int $level): int
+    {
+        if ($equipmentDamage >= 1) {
+            return $equipmentDamage;
+        }
+
+        $baseDamage = max(3, min(5, $baseDamage));
+
+        return max(1, $baseDamage * max(1, $level));
     }
 
     /**

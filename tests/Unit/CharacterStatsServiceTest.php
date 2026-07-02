@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use App\Models\Character;
+use App\Models\CharacterStat;
 use App\Models\User;
 use App\Services\CharacterStatsService;
 use App\Services\InventoryService;
@@ -37,7 +38,14 @@ class CharacterStatsServiceTest extends TestCase
         $this->assertSame(1, $profile['level']);
         $this->assertSame(10, $profile['base']['strength']);
         $this->assertSame(50, $profile['base']['health']);
+        $this->assertSame(10, $profile['base']['strength']);
         $this->assertSame(10, $profile['total']['strength']);
+        $this->assertGreaterThanOrEqual(3, $profile['base']['base_damage']);
+        $this->assertLessThanOrEqual(5, $profile['base']['base_damage']);
+        $this->assertSame(
+            $profile['base']['base_damage'] * $profile['level'],
+            $profile['total']['damage']
+        );
         $this->assertSame(50, $profile['total']['health']);
     }
 
@@ -56,6 +64,17 @@ class CharacterStatsServiceTest extends TestCase
         $profile = $this->service->ensureFor($this->player);
 
         $this->assertGreaterThan(0, $profile['total']['damage'] ?? 0);
+    }
+
+    public function test_melee_damage_scales_with_level(): void
+    {
+        CharacterStat::where('character_uuid', $this->player->uuid)->update(['base_damage' => 4]);
+        app(\App\Services\ExperienceService::class)->credit($this->player, 10, 'test', []);
+
+        $profile = $this->service->ensureFor($this->player);
+
+        $this->assertSame(2, $profile['level']);
+        $this->assertSame(8, $profile['total']['damage']);
     }
 
     public function test_level_from_experience_uses_thresholds(): void

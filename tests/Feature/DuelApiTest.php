@@ -101,6 +101,23 @@ class DuelApiTest extends TestCase
                 ->where('actor_uuid', $this->player2->uuid)
                 ->exists()
         );
+
+        $challengerEvent = GameEvent::where('event_type', 'duel.resolved')
+            ->where('actor_uuid', $this->player1->uuid)
+            ->firstOrFail();
+        $opponentEvent = GameEvent::where('event_type', 'duel.resolved')
+            ->where('actor_uuid', $this->player2->uuid)
+            ->firstOrFail();
+
+        $this->assertSame($this->player1->uuid, $challengerEvent->payload['viewer_uuid']);
+        $this->assertSame($this->player2->uuid, $opponentEvent->payload['viewer_uuid']);
+        $this->assertNotSame($challengerEvent->payload['outcome'], $opponentEvent->payload['outcome']);
+
+        $player1Events = app(\App\Services\EventQueryService::class)->getEventsAfter($this->player1->uuid, 0);
+        $player2Events = app(\App\Services\EventQueryService::class)->getEventsAfter($this->player2->uuid, 0);
+
+        $this->assertCount(1, $player1Events->where('event_type', 'duel.resolved'));
+        $this->assertCount(1, $player2Events->where('event_type', 'duel.resolved'));
     }
 
     public function test_decline_cancels_duel(): void

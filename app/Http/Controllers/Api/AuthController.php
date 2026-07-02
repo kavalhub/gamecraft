@@ -42,6 +42,7 @@ class AuthController extends Controller
                     'user_uuid' => $user->uuid,
                     'character_type' => 'player',
                     'name' => $request->username,
+                    'avatar' => $request->input('avatar', 'warrior'),
                     'active' => true,
                 ]);
 
@@ -113,6 +114,8 @@ class AuthController extends Controller
             'characters' => $characters->map(fn ($c) => [
                 'uuid' => $c->uuid,
                 'name' => $c->name,
+                'avatar' => $c->avatar,
+                'avatar_icon' => $c->avatarIcon(),
             ]),
         ]);
     }

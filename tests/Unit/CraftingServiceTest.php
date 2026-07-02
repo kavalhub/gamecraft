@@ -153,6 +153,15 @@ class CraftingServiceTest extends TestCase
         $this->assertEquals('craft_wooden_sword', $blueprint->recipe_slug);
     }
 
+    public function test_create_blueprint_for_iron_armor_recipes(): void
+    {
+        foreach (['craft_iron_helmet', 'craft_iron_chestplate'] as $recipeSlug) {
+            $blueprint = $this->service->createBlueprint($this->character, $recipeSlug);
+            $this->assertEquals('blueprint', $blueprint->stage);
+            $this->assertEquals($recipeSlug, $blueprint->recipe_slug);
+        }
+    }
+
     public function test_craft_item_from_blueprint(): void
     {
         $blueprint = $this->service->createBlueprint($this->character, 'craft_wooden_sword');
