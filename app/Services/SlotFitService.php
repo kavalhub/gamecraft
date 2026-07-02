@@ -84,7 +84,7 @@ class SlotFitService
                 return true;
             }
 
-            if ($storage?->storage_type === 'encounter_loot') {
+            if ($storage?->storage_type === 'corpse') {
                 return true;
             }
         }
@@ -170,7 +170,7 @@ class SlotFitService
             return true;
         }
 
-        if ($storage->storage_type === 'encounter_loot') {
+        if ($storage->storage_type === 'corpse') {
             return false;
         }
 

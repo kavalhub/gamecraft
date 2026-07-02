@@ -34,7 +34,10 @@ class StorageController extends Controller
         $include = $request->query('include', 'inventory');
         $includeList = array_filter(array_map('trim', explode(',', $include)));
 
-        $layout = $this->layoutService->getCharacterLayout($character, $includeList);
+        $corpseUuid = $request->query('corpse_uuid');
+        $corpseUuid = is_string($corpseUuid) && $corpseUuid !== '' ? $corpseUuid : null;
+
+        $layout = $this->layoutService->getCharacterLayout($character, $includeList, $corpseUuid);
 
         return response()->json($layout);
     }

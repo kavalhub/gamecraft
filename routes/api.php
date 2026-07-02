@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\InventoryController;
 use App\Http\Controllers\Api\ChatController;
 use App\Http\Controllers\Api\CraftingController;
 use App\Http\Controllers\Api\EncounterController;
+use App\Http\Controllers\Api\DuelController;
 use App\Http\Controllers\Api\AuctionController;
 use App\Http\Controllers\Api\TradeController;
 use App\Http\Controllers\Api\SettingsController;
@@ -43,6 +44,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/encounter/{characterUuid}/catalog', [EncounterController::class, 'catalog']);
         Route::post('/encounter/{characterUuid}/resolve', [EncounterController::class, 'resolve']);
         Route::post('/encounter/{characterUuid}/claim', [EncounterController::class, 'claim']);
+        Route::post('/encounter/{characterUuid}/refuse', [EncounterController::class, 'refuse']);
+
+        Route::get('/duel/{characterUuid}/current', [DuelController::class, 'current']);
+        Route::post('/duel/{characterUuid}/challenge', [DuelController::class, 'challenge']);
+        Route::post('/duel/{characterUuid}/accept', [DuelController::class, 'accept']);
+        Route::post('/duel/{characterUuid}/decline', [DuelController::class, 'decline']);
 
         Route::get('/quests/{characterUuid}', [QuestController::class, 'index']);
         Route::get('/quests/{characterUuid}/{questSlug}', [QuestController::class, 'show']);

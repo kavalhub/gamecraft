@@ -18,6 +18,7 @@ class PlayPanelService
         'inventory',
         'character',
         'quests',
+        'encounter',
         'auction',
         'players',
         'settings',
@@ -29,6 +30,7 @@ class PlayPanelService
         'inventory',
         'character',
         'quests',
+        'encounter',
         'auction',
         'players',
         'settings',
@@ -114,7 +116,7 @@ class PlayPanelService
      */
     private function ensureRequiredActions($slots, array $layout): array
     {
-        foreach (['character', 'players'] as $action) {
+        foreach (['character', 'players', 'encounter'] as $action) {
             if (in_array($action, $layout, true)) {
                 continue;
             }

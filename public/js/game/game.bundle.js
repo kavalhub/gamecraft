@@ -220,6 +220,25 @@
             this._el.classList.add('visible');
             this.move(e);
         },
+        showStats: function (e, opts) {
+            if (!this._el) this.init();
+            if (!this._el || !opts) return;
+            var rows = opts.stats || [];
+            var statsHtml = rows.map(function (row) {
+                return '<div class="tooltip-stat"><span class="tooltip-stat-label">' + row[0] +
+                    '</span><span class="tooltip-stat-value">' + row[1] + '</span></div>';
+            }).join('');
+            var desc = opts.description
+                ? '<div class="tooltip-description">' + opts.description + '</div>'
+                : '';
+            this._el.innerHTML = '<div class="tooltip-header">' +
+                '<div class="tooltip-icon">' + (opts.icon || 'ℹ️') + '</div>' +
+                '<div><div class="tooltip-name">' + (opts.name || '') + '</div></div></div>' +
+                desc +
+                (statsHtml ? '<div class="tooltip-stats">' + statsHtml + '</div>' : '');
+            this._el.classList.add('visible');
+            this.move(e);
+        },
         hide: function () {
             if (!this._el) this.init();
             if (this._el) this._el.classList.remove('visible');
@@ -513,8 +532,8 @@
         },
     };
 
-    var STATION_STORAGE_INCLUDE = 'inventory,craft,disassemble,encounter_loot';
-    var ENCOUNTER_STORAGE_INCLUDE = 'inventory,encounter_loot,stats';
+    var STATION_STORAGE_INCLUDE = 'inventory,craft,disassemble';
+    var ENCOUNTER_STORAGE_INCLUDE = 'inventory,corpse,stats';
 
     function normalizeStationMode(mode) {
         if (mode === 'center' || mode === 'blueprint_center' || mode === 'disassemble_center') {
@@ -784,21 +803,28 @@
         craftStorage: null,
         disassembleStorage: null,
         encounterLootStorage: null,
+        corpseStorage: null,
         questStorage: null,
         characterStats: null,
         myTradeSlots: null,
         partnerTradeSlots: null,
 
-        load: function (characterUuid, include) {
+        load: function (characterUuid, include, extraQuery) {
             var self = this;
             include = include || 'inventory';
             self.characterUuid = characterUuid;
+            self._requestedCorpse = include.indexOf('corpse') !== -1;
 
             if (!window.GameApi) {
                 return Promise.reject(new Error('GameApi unavailable'));
             }
 
-            return window.GameApi.fetch('/api/storage/' + characterUuid + '?include=' + include)
+            var url = '/api/storage/' + characterUuid + '?include=' + include;
+            if (extraQuery && extraQuery.corpse_uuid) {
+                url += '&corpse_uuid=' + encodeURIComponent(extraQuery.corpse_uuid);
+            }
+
+            return window.GameApi.fetch(url)
                 .then(function (res) {
                     if (!res.ok) {
                         return res.json().then(function (err) {
@@ -829,9 +855,13 @@
             this.disassembleStorage = storages.find(function (s) {
                 return s.storage_type === 'disassemble';
             }) || this.disassembleStorage;
-            this.encounterLootStorage = storages.find(function (s) {
-                return s.storage_type === 'encounter_loot';
-            }) || this.encounterLootStorage;
+            if (this._requestedCorpse) {
+                var corpseStorage = storages.find(function (s) {
+                    return s.storage_type === 'corpse';
+                }) || null;
+                this.encounterLootStorage = corpseStorage;
+                this.corpseStorage = corpseStorage;
+            }
             this.questStorage = layout.quest_storage || this.questStorage;
             this.characterStats = layout.character_stats || this.characterStats;
             this.myTradeSlots = layout.my_trade_slots || this.myTradeSlots;
@@ -1226,7 +1256,7 @@
         },
 
         renderSkeleton: function () {
-            var defaults = ['journal', 'inventory', 'character', 'quests', 'auction', 'players', 'settings'];
+            var defaults = ['journal', 'inventory', 'character', 'quests', 'encounter', 'auction', 'players', 'settings'];
             this.cols = 12;
             this.slots = [];
             this.layout = {};
@@ -2398,13 +2428,73 @@
     window.initCraftStation = initCraftStation;
     window.initDisassembleStation = initDisassembleStation;
 
+    var ENCOUNTER_ICONS = {
+        forest_wolf: '🐺',
+        cave_rat: '🐀',
+    };
+
     var EncounterPanel = {
+        mode: 'pve',
         encounters: [],
-        timing: { combat_log_line_ms: 800, combat_claim_grace_ms: 60000 },
+        timing: { combat_log_line_ms: 500, combat_claim_grace_ms: 60000 },
         selectedSlug: null,
         pendingBattle: null,
         playbackTimer: null,
         isPlaying: false,
+        combatUi: null,
+
+        storageQuery: function () {
+            var query = {};
+            if (EncounterPanel.pendingBattle && EncounterPanel.pendingBattle.corpse_uuid) {
+                query.corpse_uuid = EncounterPanel.pendingBattle.corpse_uuid;
+            }
+            return query;
+        },
+
+        loadStorage: function () {
+            var include = EncounterPanel.mode === 'duel' ? 'inventory,stats' : ENCOUNTER_STORAGE_INCLUDE;
+            return StorageManager.load(
+                GameState.characterUuid,
+                include,
+                EncounterPanel.storageQuery()
+            );
+        },
+
+        enterDuelMode: function () {
+            var panel = document.querySelector('.encounter-panel');
+            if (panel) panel.classList.add('encounter-panel--duel');
+            var fightBtn = document.getElementById('btnEncounterFight');
+            if (fightBtn) fightBtn.style.display = 'none';
+            this.setLootButtons(false, false);
+        },
+
+        exitDuelMode: function () {
+            var panel = document.querySelector('.encounter-panel');
+            if (panel) panel.classList.remove('encounter-panel--duel');
+            var fightBtn = document.getElementById('btnEncounterFight');
+            if (fightBtn) fightBtn.style.display = '';
+            this.mode = 'pve';
+        },
+
+        playExternalBattle: function (battle) {
+            battle = battle || {};
+            battle.mode = battle.mode || 'duel';
+            battle.encounter_name = battle.encounter_name || battle.foe_name || battle.opponent_name || 'Противник';
+            this.mode = battle.mode;
+            this.enterDuelMode();
+            this.pendingBattle = battle;
+            this.clearPlayback();
+            var logEl = document.getElementById('encounterCombatLog');
+            if (logEl) logEl.innerHTML = '';
+            if (battle.combat_log_line_ms) {
+                this.timing.combat_log_line_ms = battle.combat_log_line_ms;
+            }
+            return this.loadStorage().then(function () {
+                EncounterPanel.setupCombatants(battle);
+                EncounterPanel.renderLoot();
+                EncounterPanel.playCombatLog(battle);
+            });
+        },
 
         loadCatalog: function () {
             if (!GameState.characterUuid) return Promise.resolve();
@@ -2436,6 +2526,16 @@
                     EncounterPanel.selectedSlug = btn.dataset.slug;
                     EncounterPanel.renderList();
                 });
+                EncounterPanel.bindStatsTooltip(btn, function () {
+                    var enc = null;
+                    for (var i = 0; i < EncounterPanel.encounters.length; i++) {
+                        if (EncounterPanel.encounters[i].slug === btn.dataset.slug) {
+                            enc = EncounterPanel.encounters[i];
+                            break;
+                        }
+                    }
+                    return EncounterPanel.enemyTooltipOpts(enc);
+                });
             });
         },
 
@@ -2454,6 +2554,181 @@
                 compact: true,
             });
             if (window.DragEngine) DragEngine.registerGrid(gridEl);
+        },
+
+        setLootButtons: function (claimEnabled, refuseEnabled) {
+            if (refuseEnabled === undefined) {
+                refuseEnabled = claimEnabled;
+            }
+            var claimBtn = document.getElementById('btnEncounterClaim');
+            var refuseBtn = document.getElementById('btnEncounterRefuse');
+            if (claimBtn) claimBtn.disabled = !claimEnabled;
+            if (refuseBtn) refuseBtn.disabled = !refuseEnabled;
+        },
+
+        hasCorpseLoot: function () {
+            var storage = StorageManager.encounterLootStorage;
+            if (!storage || !storage.slots || !storage.slots.length) {
+                return !!(this.pendingBattle && this.pendingBattle.corpse_uuid
+                    && this.pendingBattle.loot && Object.keys(this.pendingBattle.loot).length);
+            }
+            return storage.slots.some(function (slot) {
+                return slot.item || slot.resource;
+            });
+        },
+
+        encounterIcon: function (slug) {
+            return ENCOUNTER_ICONS[slug] || '👹';
+        },
+
+        getActiveEnemyEncounter: function () {
+            var slug = (this.pendingBattle && this.pendingBattle.encounter_slug) || this.selectedSlug;
+            if (!slug) return null;
+            for (var i = 0; i < this.encounters.length; i++) {
+                if (this.encounters[i].slug === slug) return this.encounters[i];
+            }
+            return null;
+        },
+
+        enemyTooltipOpts: function (enc) {
+            if (!enc) return null;
+            var s = enc.stats || {};
+            return {
+                name: enc.name || enc.slug,
+                icon: this.encounterIcon(enc.slug),
+                description: enc.description || '',
+                stats: [
+                    ['Здоровье', s.health || 0],
+                    ['Урон', s.damage || 0],
+                    ['Защита', s.defense || 0],
+                ],
+            };
+        },
+
+        playerTooltipOpts: function () {
+            var cs = StorageManager.characterStats;
+            if (!cs) return null;
+            var total = cs.total || {};
+            var name = (StorageManager.layout && StorageManager.layout.character_name) || 'Вы';
+            return {
+                name: name,
+                icon: '🛡️',
+                stats: [
+                    ['Уровень', cs.level || 1],
+                    ['Здоровье', total.health || 0],
+                    ['Урон', total.damage || 0],
+                    ['Защита', total.defense || 0],
+                ],
+            };
+        },
+
+        bindStatsTooltip: function (el, getOpts) {
+            if (!el) return;
+            el.addEventListener('mouseenter', function (e) {
+                var opts = getOpts();
+                if (opts && window.GameItemTooltip) GameItemTooltip.showStats(e, opts);
+            });
+            el.addEventListener('mousemove', function (e) {
+                if (window.GameItemTooltip) GameItemTooltip.move(e);
+            });
+            el.addEventListener('mouseleave', function () {
+                if (window.GameItemTooltip) GameItemTooltip.hide();
+            });
+        },
+
+        bindCombatantTooltips: function () {
+            var self = this;
+            var enemyIcon = document.getElementById('encounterEnemyIcon');
+            var playerIcon = document.getElementById('encounterPlayerIcon');
+            if (enemyIcon && !enemyIcon.dataset.tooltipBound) {
+                enemyIcon.dataset.tooltipBound = '1';
+                self.bindStatsTooltip(enemyIcon, function () {
+                    return self.enemyTooltipOpts(self.getActiveEnemyEncounter());
+                });
+            }
+            if (playerIcon && !playerIcon.dataset.tooltipBound) {
+                playerIcon.dataset.tooltipBound = '1';
+                self.bindStatsTooltip(playerIcon, function () {
+                    return self.playerTooltipOpts();
+                });
+            }
+        },
+
+        resetCombatants: function () {
+            var wrap = document.getElementById('encounterCombatants');
+            if (wrap) wrap.classList.add('encounter-combatants--idle');
+            this.updateHpBars(null, null, null);
+            var enemyName = document.getElementById('encounterEnemyName');
+            var playerName = document.getElementById('encounterPlayerName');
+            if (enemyName) enemyName.textContent = 'Противник';
+            if (playerName) playerName.textContent = 'Вы';
+            var enemyIcon = document.getElementById('encounterEnemyIcon');
+            var playerIcon = document.getElementById('encounterPlayerIcon');
+            if (enemyIcon) enemyIcon.textContent = '👹';
+            if (playerIcon) playerIcon.textContent = '🛡️';
+        },
+
+        setupCombatants: function (battle) {
+            var wrap = document.getElementById('encounterCombatants');
+            if (!wrap || !battle || !battle.combat_ui) return;
+
+            wrap.classList.remove('encounter-combatants--idle');
+            this.combatUi = battle.combat_ui;
+
+            var enemy = battle.combat_ui.enemy || {};
+            var player = battle.combat_ui.player || {};
+            var enemyName = document.getElementById('encounterEnemyName');
+            var playerName = document.getElementById('encounterPlayerName');
+            var enemyIcon = document.getElementById('encounterEnemyIcon');
+            var playerIcon = document.getElementById('encounterPlayerIcon');
+
+            if (enemyName) enemyName.textContent = enemy.name || battle.encounter_name || 'Противник';
+            if (playerName) {
+                playerName.textContent = player.name
+                    || (StorageManager.layout && StorageManager.layout.character_name)
+                    || 'Вы';
+            }
+            if (enemyIcon) {
+                enemyIcon.textContent = battle.mode === 'duel'
+                    ? '🧙'
+                    : this.encounterIcon(battle.encounter_slug);
+            }
+            if (playerIcon) playerIcon.textContent = '🛡️';
+
+            this.updateHpBars(player.hp_max, enemy.hp_max, player.hp_max, enemy.hp_max);
+        },
+
+        updateHpBars: function (playerHp, enemyHp, playerMax, enemyMax) {
+            var playerFill = document.getElementById('encounterPlayerHpFill');
+            var enemyFill = document.getElementById('encounterEnemyHpFill');
+            var playerText = document.getElementById('encounterPlayerHpText');
+            var enemyText = document.getElementById('encounterEnemyHpText');
+
+            if (playerHp == null || enemyHp == null || playerMax == null || enemyMax == null) {
+                if (playerFill) playerFill.style.width = '100%';
+                if (enemyFill) enemyFill.style.width = '100%';
+                if (playerText) playerText.textContent = '— / —';
+                if (enemyText) enemyText.textContent = '— / —';
+                return;
+            }
+
+            var playerPct = playerMax > 0 ? Math.max(0, Math.min(100, (playerHp / playerMax) * 100)) : 0;
+            var enemyPct = enemyMax > 0 ? Math.max(0, Math.min(100, (enemyHp / enemyMax) * 100)) : 0;
+
+            if (playerFill) playerFill.style.width = playerPct + '%';
+            if (enemyFill) enemyFill.style.width = enemyPct + '%';
+            if (playerText) playerText.textContent = playerHp + ' / ' + playerMax;
+            if (enemyText) enemyText.textContent = enemyHp + ' / ' + enemyMax;
+        },
+
+        applyLogHp: function (line) {
+            if (!this.combatUi || line.player_hp == null || line.enemy_hp == null) return;
+            this.updateHpBars(
+                line.player_hp,
+                line.enemy_hp,
+                this.combatUi.player.hp_max,
+                this.combatUi.enemy.hp_max
+            );
         },
 
         setStatus: function (text) {
@@ -2486,10 +2761,11 @@
         playCombatLog: function (battle) {
             EncounterPanel.clearPlayback();
             EncounterPanel.isPlaying = true;
+            EncounterPanel.setupCombatants(battle);
             var logEl = document.getElementById('encounterCombatLog');
             if (logEl) logEl.innerHTML = '';
             var lines = battle.combat_log || [];
-            var lineMs = battle.combat_log_line_ms || EncounterPanel.timing.combat_log_line_ms || 800;
+            var lineMs = battle.combat_log_line_ms || EncounterPanel.timing.combat_log_line_ms || 500;
             var index = 0;
 
             function step() {
@@ -2499,6 +2775,7 @@
                     return;
                 }
                 var line = lines[index++];
+                EncounterPanel.applyLogHp(line);
                 var div = document.createElement('div');
                 div.className = 'encounter-log-line encounter-log-line--' + (line.actor || 'system');
                 div.textContent = line.message || '';
@@ -2513,24 +2790,33 @@
         },
 
         onPlaybackComplete: function (battle) {
-            var claimBtn = document.getElementById('btnEncounterClaim');
             var fightBtn = document.getElementById('btnEncounterFight');
             if (fightBtn) fightBtn.disabled = false;
+
+            if (battle.mode === 'duel') {
+                EncounterPanel.setLootButtons(false, false);
+                EncounterPanel.setStatus(
+                    battle.outcome === 'won' ? 'Победа в дуэли!' : 'Поражение в дуэли.'
+                );
+                return;
+            }
+
             if (battle.outcome === 'won') {
-                if (claimBtn) claimBtn.disabled = false;
-                EncounterPanel.setStatus('Победа! Заберите добычу.');
+                var hasLoot = !!(battle.corpse_uuid && battle.loot && Object.keys(battle.loot).length);
+                EncounterPanel.setLootButtons(hasLoot, hasLoot);
+                EncounterPanel.setStatus(hasLoot ? 'Победа! Заберите добычу или откажитесь.' : 'Победа!');
             } else {
-                if (claimBtn) claimBtn.disabled = true;
+                EncounterPanel.setLootButtons(false);
                 EncounterPanel.setStatus('Поражение.');
             }
         },
 
         fight: function () {
             if (!EncounterPanel.selectedSlug || !GameState.characterUuid || EncounterPanel.isPlaying) return;
+            EncounterPanel.exitDuelMode();
             var fightBtn = document.getElementById('btnEncounterFight');
-            var claimBtn = document.getElementById('btnEncounterClaim');
             if (fightBtn) fightBtn.disabled = true;
-            if (claimBtn) claimBtn.disabled = true;
+            EncounterPanel.setLootButtons(false);
             EncounterPanel.setStatus('Бой...');
 
             GameApi.fetch('/api/encounter/' + GameState.characterUuid + '/resolve', {
@@ -2540,12 +2826,13 @@
             }).then(function (r) { return r.json(); }).then(function (data) {
                 if (!data.success) throw new Error(data.error || 'Ошибка боя');
                 EncounterPanel.pendingBattle = data;
-                return StorageManager.load(GameState.characterUuid, ENCOUNTER_STORAGE_INCLUDE);
+                return EncounterPanel.loadStorage();
             }).then(function () {
                 EncounterPanel.renderLoot();
                 EncounterPanel.playCombatLog(EncounterPanel.pendingBattle);
             }).catch(function (e) {
                 EncounterPanel.setStatus('');
+                EncounterPanel.resetCombatants();
                 if (fightBtn) fightBtn.disabled = false;
                 if (typeof showMsg === 'function') showMsg(e.message, 'error');
             });
@@ -2563,16 +2850,45 @@
             }).then(function (r) { return r.json(); }).then(function (data) {
                 if (!data.success) throw new Error(data.error || 'Ошибка получения добычи');
                 EncounterPanel.pendingBattle = null;
+                EncounterPanel.setLootButtons(false);
                 if (typeof showMsg === 'function') {
                     showMsg('Добыча получена' + (data.experience_reward ? ' (+' + data.experience_reward + ' опыта)' : ''), 'success');
                 }
                 if (typeof loadPlayerData === 'function') loadPlayerData();
-                return StorageManager.load(GameState.characterUuid, ENCOUNTER_STORAGE_INCLUDE);
+                return EncounterPanel.loadStorage();
             }).then(function () {
                 EncounterPanel.renderLoot();
                 EncounterPanel.setStatus('');
             }).catch(function (e) {
                 if (claimBtn) claimBtn.disabled = false;
+                if (typeof showMsg === 'function') showMsg(e.message, 'error');
+            });
+        },
+
+        refuse: function () {
+            if (!EncounterPanel.pendingBattle || !GameState.characterUuid) return;
+            var refuseBtn = document.getElementById('btnEncounterRefuse');
+            if (refuseBtn) refuseBtn.disabled = true;
+
+            GameApi.fetch('/api/encounter/' + GameState.characterUuid + '/refuse', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ correlation_uuid: EncounterPanel.pendingBattle.correlation_uuid }),
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                if (!data.success) throw new Error(data.error || 'Ошибка отказа от добычи');
+                if (typeof showMsg === 'function') showMsg('Добыча оставлена на трупе', 'success');
+                return EncounterPanel.loadStorage();
+            }).then(function () {
+                EncounterPanel.renderLoot();
+                var hasLoot = EncounterPanel.hasCorpseLoot();
+                EncounterPanel.setLootButtons(hasLoot, false);
+                EncounterPanel.setStatus(
+                    hasLoot
+                        ? 'Добыча общедоступна. Можете забрать её сами или оставить другим.'
+                        : 'Добыча на трупе закончилась.'
+                );
+            }).catch(function (e) {
+                if (refuseBtn) refuseBtn.disabled = false;
                 if (typeof showMsg === 'function') showMsg(e.message, 'error');
             });
         },
@@ -2584,8 +2900,9 @@
 
         load: function () {
             if (!GameState.characterUuid) return Promise.resolve();
+            EncounterPanel.exitDuelMode();
             return EncounterPanel.loadCatalog().then(function () {
-                return StorageManager.load(GameState.characterUuid, ENCOUNTER_STORAGE_INCLUDE);
+                return EncounterPanel.loadStorage();
             }).then(function () {
                 EncounterPanel.render();
             });
@@ -2595,16 +2912,21 @@
     function initEncounterPanel() {
         if (window._encounterPanelInitialized) return;
         window._encounterPanelInitialized = true;
+        EncounterPanel.resetCombatants();
+        EncounterPanel.bindCombatantTooltips();
         var fightBtn = document.getElementById('btnEncounterFight');
         var claimBtn = document.getElementById('btnEncounterClaim');
+        var refuseBtn = document.getElementById('btnEncounterRefuse');
         if (fightBtn) fightBtn.addEventListener('click', function () { EncounterPanel.fight(); });
         if (claimBtn) claimBtn.addEventListener('click', function () { EncounterPanel.claim(); });
+        if (refuseBtn) refuseBtn.addEventListener('click', function () { EncounterPanel.refuse(); });
     }
 
     window.EncounterPanel = EncounterPanel;
     window.initEncounterPanel = initEncounterPanel;
     window.renderEncounterPanel = function () { EncounterPanel.render(); };
     window.loadEncounterPanel = function () { return EncounterPanel.load(); };
+    window.playEncounterBattle = function (battle) { return EncounterPanel.playExternalBattle(battle); };
 
     document.addEventListener('DOMContentLoaded', function () {
         initCraftStation();
