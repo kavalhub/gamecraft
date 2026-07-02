@@ -81,7 +81,7 @@ class AuctionServiceTest extends TestCase
         $this->assertEquals(150, $lot->price);
 
         $item->refresh();
-        $this->assertNull($item->temporary_slot_uuid);
+        $this->assertNull($item->buffer_slot_uuid);
     }
 
     public function test_prepare_lot_creates_temporary_slot(): void
@@ -96,7 +96,7 @@ class AuctionServiceTest extends TestCase
         $this->assertEquals($this->seller->uuid, $temporarySlot->character_uuid);
 
         $item->refresh();
-        $this->assertEquals($temporarySlot->uuid, $item->temporary_slot_uuid);
+        $this->assertEquals($temporarySlot->uuid, $item->buffer_slot_uuid);
     }
 
     public function test_confirm_lot_moves_item_to_auction(): void
@@ -112,7 +112,7 @@ class AuctionServiceTest extends TestCase
         $this->assertEquals($this->seller->uuid, $lot->seller_uuid);
 
         $item->refresh();
-        $this->assertNull($item->temporary_slot_uuid);
+        $this->assertNull($item->buffer_slot_uuid);
         $temporarySlot->refresh();
         $this->assertFalse($temporarySlot->active);
     }

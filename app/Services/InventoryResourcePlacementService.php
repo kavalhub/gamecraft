@@ -137,7 +137,7 @@ class InventoryResourcePlacementService
             $slotUuids = $storage->slots()->pluck('uuid');
             $exists = Resources::whereIn('slot_uuid', $slotUuids)
                 ->where('template_slug', $templateSlug)
-                ->whereNull('temporary_slot_uuid')
+                ->whereNull('buffer_slot_uuid')
                 ->exists();
 
             if ($exists) {
@@ -192,7 +192,7 @@ class InventoryResourcePlacementService
         $slotUuids = $storage->slots()->pluck('uuid');
 
         $query = Resources::whereIn('slot_uuid', $slotUuids)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->where('template_slug', $templateSlug);
 
         if ($maxStack !== null) {

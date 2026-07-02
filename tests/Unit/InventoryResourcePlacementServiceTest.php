@@ -166,7 +166,7 @@ class InventoryResourcePlacementServiceTest extends TestCase
         $blueprint = app(\App\Services\CraftingService::class)->createBlueprint($this->character, 'craft_wooden_sword');
         $blueprint->update([
             'slot_uuid' => $gridSlot->uuid,
-            'temporary_slot_uuid' => app(\App\Services\CraftStationService::class)
+            'buffer_slot_uuid' => app(\App\Services\CraftStationService::class)
                 ->getCenterTemporarySlot($this->character)->uuid,
         ]);
 

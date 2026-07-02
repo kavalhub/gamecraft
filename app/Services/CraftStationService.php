@@ -75,8 +75,8 @@ class CraftStationService
             return;
         }
 
-        $hasCenterOccupant = Item::where('temporary_slot_uuid', $center->uuid)->exists()
-            || Resources::where('temporary_slot_uuid', $center->uuid)->exists();
+        $hasCenterOccupant = Item::where('buffer_slot_uuid', $center->uuid)->exists()
+            || Resources::where('buffer_slot_uuid', $center->uuid)->exists();
 
         if ($hasCenterOccupant) {
             return;
@@ -183,7 +183,7 @@ class CraftStationService
         StorageMoveService $moveService,
         InventoryService $inventoryService,
     ): void {
-        $item = Item::where('temporary_slot_uuid', $tempSlot->uuid)->first();
+        $item = Item::where('buffer_slot_uuid', $tempSlot->uuid)->first();
         if ($item) {
             $backingSlot = Slot::where('uuid', $item->slot_uuid)->first();
             $backingStorage = $backingSlot
@@ -208,7 +208,7 @@ class CraftStationService
             return;
         }
 
-        $resource = Resources::where('temporary_slot_uuid', $tempSlot->uuid)->first();
+        $resource = Resources::where('buffer_slot_uuid', $tempSlot->uuid)->first();
         if (!$resource) {
             return;
         }
@@ -231,11 +231,11 @@ class CraftStationService
     {
         $tempUuids = $this->getTemporarySlots($character)->pluck('uuid');
 
-        $itemsCleared = Item::whereIn('temporary_slot_uuid', $tempUuids)
-            ->update(['temporary_slot_uuid' => null]);
+        $itemsCleared = Item::whereIn('buffer_slot_uuid', $tempUuids)
+            ->update(['buffer_slot_uuid' => null]);
 
-        $resourcesCleared = Resources::whereIn('temporary_slot_uuid', $tempUuids)
-            ->update(['temporary_slot_uuid' => null]);
+        $resourcesCleared = Resources::whereIn('buffer_slot_uuid', $tempUuids)
+            ->update(['buffer_slot_uuid' => null]);
 
         return $itemsCleared + $resourcesCleared;
     }
@@ -248,7 +248,7 @@ class CraftStationService
         $quantities = [];
 
         foreach ($this->getMaterialTemporarySlots($character) as $slot) {
-            $resource = Resources::where('temporary_slot_uuid', $slot->uuid)->first();
+            $resource = Resources::where('buffer_slot_uuid', $slot->uuid)->first();
             if (!$resource) {
                 continue;
             }
@@ -264,14 +264,14 @@ class CraftStationService
     {
         $center = $this->getCenterTemporarySlot($character);
 
-        return Resources::where('temporary_slot_uuid', $center->uuid)->first();
+        return Resources::where('buffer_slot_uuid', $center->uuid)->first();
     }
 
     public function getCenterItem(Character $character): ?Item
     {
         $center = $this->getCenterTemporarySlot($character);
 
-        return Item::where('temporary_slot_uuid', $center->uuid)->first();
+        return Item::where('buffer_slot_uuid', $center->uuid)->first();
     }
 
     /**
@@ -299,7 +299,7 @@ class CraftStationService
         $remaining = $quantity;
 
         $center = $this->getCenterTemporarySlot($character);
-        $centerResource = Resources::where('temporary_slot_uuid', $center->uuid)
+        $centerResource = Resources::where('buffer_slot_uuid', $center->uuid)
             ->where('template_slug', $templateSlug)
             ->first();
 
@@ -323,7 +323,7 @@ class CraftStationService
         $remaining = $quantity;
 
         foreach ($this->getMaterialTemporarySlots($character) as $slot) {
-            $resource = Resources::where('temporary_slot_uuid', $slot->uuid)
+            $resource = Resources::where('buffer_slot_uuid', $slot->uuid)
                 ->where('template_slug', $templateSlug)
                 ->first();
 
@@ -351,12 +351,12 @@ class CraftStationService
 
     public function assertBlueprintOnStation(Item $item, Character $character): void
     {
-        if (!$item->temporary_slot_uuid) {
+        if (!$item->buffer_slot_uuid) {
             throw new \RuntimeException('Чертёж должен быть на станции создания');
         }
 
         $centerSlot = $this->getCenterTemporarySlot($character);
-        if ($item->temporary_slot_uuid !== $centerSlot->uuid) {
+        if ($item->buffer_slot_uuid !== $centerSlot->uuid) {
             throw new \RuntimeException('Чертёж должен быть в центральном слоте станции создания');
         }
     }

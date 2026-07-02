@@ -81,12 +81,12 @@ class StorageQuickMoveService
             return $this->provisioningService->getOccupantForTemporarySlot($tempSlot);
         }
 
-        $item = Item::where('slot_uuid', $slotUuid)->whereNull('temporary_slot_uuid')->first();
+        $item = Item::where('slot_uuid', $slotUuid)->whereNull('buffer_slot_uuid')->first();
         if ($item) {
             return $item;
         }
 
-        return Resources::where('slot_uuid', $slotUuid)->whereNull('temporary_slot_uuid')->first();
+        return Resources::where('slot_uuid', $slotUuid)->whereNull('buffer_slot_uuid')->first();
     }
 
     private function resolveEquipTarget(Character $character, Item|Resources $occupant): ?string
@@ -136,7 +136,7 @@ class StorageQuickMoveService
                 continue;
             }
 
-            if (Resources::where('slot_uuid', $slot->uuid)->whereNull('temporary_slot_uuid')->exists()) {
+            if (Resources::where('slot_uuid', $slot->uuid)->whereNull('buffer_slot_uuid')->exists()) {
                 continue;
             }
 
@@ -202,7 +202,7 @@ class StorageQuickMoveService
                 continue;
             }
 
-            $existing = Resources::where('temporary_slot_uuid', $tempSlot->uuid)
+            $existing = Resources::where('buffer_slot_uuid', $tempSlot->uuid)
                 ->where('template_slug', $occupant->template_slug)
                 ->first();
 

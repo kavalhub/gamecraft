@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\InventoryController;
 use App\Http\Controllers\Api\ChatController;
 use App\Http\Controllers\Api\CraftingController;
+use App\Http\Controllers\Api\EncounterController;
 use App\Http\Controllers\Api\AuctionController;
 use App\Http\Controllers\Api\TradeController;
 use App\Http\Controllers\Api\SettingsController;
@@ -38,6 +39,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/crafting/{characterUuid}/create-blueprint', [CraftingController::class, 'createBlueprint']);
         Route::post('/crafting/{characterUuid}/craft-item', [CraftingController::class, 'craftItem']);
         Route::post('/crafting/{characterUuid}/disassemble', [CraftingController::class, 'disassemble']);
+
+        Route::get('/encounter/{characterUuid}/catalog', [EncounterController::class, 'catalog']);
+        Route::post('/encounter/{characterUuid}/resolve', [EncounterController::class, 'resolve']);
+        Route::post('/encounter/{characterUuid}/claim', [EncounterController::class, 'claim']);
 
         Route::get('/quests/{characterUuid}', [QuestController::class, 'index']);
         Route::get('/quests/{characterUuid}/{questSlug}', [QuestController::class, 'show']);

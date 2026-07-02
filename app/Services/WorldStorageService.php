@@ -35,14 +35,14 @@ class WorldStorageService
         DB::transaction(function () use ($item) {
             $item = Item::where('uuid', $item->uuid)->lockForUpdate()->firstOrFail();
 
-            if ($item->temporary_slot_uuid !== null) {
+            if ($item->buffer_slot_uuid !== null) {
                 throw new \RuntimeException('Предмет занят и не может быть выброшен в мир');
             }
 
             $worldSlot = $this->allocateWorldSlot();
             $item->update([
                 'slot_uuid' => $worldSlot->uuid,
-                'temporary_slot_uuid' => null,
+                'buffer_slot_uuid' => null,
             ]);
 
             $this->eventStore->record(
@@ -69,7 +69,7 @@ class WorldStorageService
                 ->whereIn('slot_uuid', $worldSlotUuids)
                 ->where('template_slug', $templateSlug)
                 ->where('stage', $stage)
-                ->whereNull('temporary_slot_uuid')
+                ->whereNull('buffer_slot_uuid')
                 ->lockForUpdate()
                 ->first();
 
@@ -112,7 +112,7 @@ class WorldStorageService
             ->whereIn('slot_uuid', $worldSlotUuids)
             ->where('template_slug', $templateSlug)
             ->where('stage', $stage)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->first();
     }
 
@@ -121,7 +121,7 @@ class WorldStorageService
         return DB::transaction(function () use ($character, $itemUuid) {
             $item = Item::where('uuid', $itemUuid)->lockForUpdate()->firstOrFail();
 
-            if ($item->temporary_slot_uuid !== null) {
+            if ($item->buffer_slot_uuid !== null) {
                 throw new \RuntimeException('Предмет занят и не может быть выброшен');
             }
 

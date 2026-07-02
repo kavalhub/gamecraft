@@ -87,7 +87,7 @@ class TradeServiceTest extends TestCase
         $item->refresh();
         $player1Trade = $this->player1->storages()->where('storage_type', 'trade')->first();
         $this->assertEquals($player1Trade->uuid, $item->slot->storage_uuid);
-        $this->assertNull($item->temporary_slot_uuid);
+        $this->assertNull($item->buffer_slot_uuid);
         $this->assertNotNull($tradeItem->origin_slot_uuid);
     }
 

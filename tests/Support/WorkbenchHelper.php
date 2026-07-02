@@ -68,8 +68,8 @@ final class WorkbenchHelper
             throw new \RuntimeException('No free inventory slot');
         }
 
-        if ($item->temporary_slot_uuid) {
-            app(StorageMoveService::class)->move($character, $item->temporary_slot_uuid, $emptySlot->uuid);
+        if ($item->buffer_slot_uuid) {
+            app(StorageMoveService::class)->move($character, $item->buffer_slot_uuid, $emptySlot->uuid);
         } else {
             app(StorageMoveService::class)->move($character, $item->slot_uuid, $emptySlot->uuid);
         }

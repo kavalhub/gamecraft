@@ -78,7 +78,7 @@ class StorageMoveServiceTest extends TestCase
 
         $item->refresh();
         $this->assertEquals($tradeSlot->uuid, $item->slot_uuid);
-        $this->assertNull($item->temporary_slot_uuid);
+        $this->assertNull($item->buffer_slot_uuid);
     }
 
     public function test_clear_item_from_trade_slot(): void
@@ -104,7 +104,7 @@ class StorageMoveServiceTest extends TestCase
         $this->moveService->move($this->player, $tradeSlot->uuid, $targetSlot->uuid);
 
         $item->refresh();
-        $this->assertNull($item->temporary_slot_uuid);
+        $this->assertNull($item->buffer_slot_uuid);
         $this->assertEquals($targetSlot->uuid, $item->slot_uuid);
     }
 
@@ -161,7 +161,7 @@ class StorageMoveServiceTest extends TestCase
 
         CraftStationHelper::ensureCraftStation($this->player);
         $tempSlot = app(\App\Services\CraftStationService::class)->getCenterTemporarySlot($this->player);
-        $item->update(['temporary_slot_uuid' => $tempSlot->uuid]);
+        $item->update(['buffer_slot_uuid' => $tempSlot->uuid]);
 
         $inventory = $this->player->storages()->where('storage_type', 'inventory')->firstOrFail();
         $targetSlot = $inventory->slots()->whereNull('slot_type')->orderBy('id')->get()
@@ -252,7 +252,7 @@ class StorageMoveServiceTest extends TestCase
         $this->moveService->move($this->player, $wood->slot_uuid, $centerSlot->uuid);
 
         $wood->refresh();
-        $this->assertEquals($centerSlot->uuid, $wood->temporary_slot_uuid);
+        $this->assertEquals($centerSlot->uuid, $wood->buffer_slot_uuid);
     }
 
     public function test_cannot_move_wood_to_craft_center_without_craft_formula(): void
@@ -272,7 +272,7 @@ class StorageMoveServiceTest extends TestCase
         $this->assertTrue($result['noop'] ?? false);
         $wood->refresh();
         $this->assertEquals($fromSlotUuid, $wood->slot_uuid);
-        $this->assertNull($wood->temporary_slot_uuid);
+        $this->assertNull($wood->buffer_slot_uuid);
     }
 
     public function test_can_move_wood_to_craft_material_slot(): void
@@ -290,7 +290,7 @@ class StorageMoveServiceTest extends TestCase
 
         $this->assertTrue($result['noop'] ?? false);
         $wood->refresh();
-        $this->assertNull($wood->temporary_slot_uuid);
+        $this->assertNull($wood->buffer_slot_uuid);
     }
 
     public function test_cannot_move_planks_to_disassemble_center_slot(): void
@@ -310,7 +310,7 @@ class StorageMoveServiceTest extends TestCase
         $this->assertTrue($result['noop'] ?? false);
         $planks->refresh();
         $this->assertEquals($fromSlotUuid, $planks->slot_uuid);
-        $this->assertNull($planks->temporary_slot_uuid);
+        $this->assertNull($planks->buffer_slot_uuid);
     }
 
     public function test_cannot_move_blueprint_to_craft_material_slot(): void
@@ -323,7 +323,7 @@ class StorageMoveServiceTest extends TestCase
 
         $this->assertTrue($result['noop'] ?? false);
         $blueprint->refresh();
-        $this->assertNull($blueprint->temporary_slot_uuid);
+        $this->assertNull($blueprint->buffer_slot_uuid);
     }
 
     public function test_craft_material_slots_typed_when_blueprint_in_center(): void
@@ -343,12 +343,12 @@ class StorageMoveServiceTest extends TestCase
         $inventory = $this->player->storages()->where('storage_type', 'inventory')->firstOrFail();
         $wood = Resources::whereIn('slot_uuid', $inventory->slots()->pluck('uuid'))
             ->where('template_slug', 'wood')
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->firstOrFail();
 
         $this->moveService->move($this->player, $wood->slot_uuid, $materialSlot->uuid);
         $wood->refresh();
-        $this->assertEquals($materialSlot->uuid, $wood->temporary_slot_uuid);
+        $this->assertEquals($materialSlot->uuid, $wood->buffer_slot_uuid);
     }
 
     public function test_cannot_move_to_craft_regular_slot(): void

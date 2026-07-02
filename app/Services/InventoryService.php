@@ -124,7 +124,7 @@ class InventoryService
 
         return (int) Resources::whereIn('slot_uuid', $slotUuids)
             ->where('template_slug', $templateSlug)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->sum('quantity');
     }
 
@@ -237,7 +237,7 @@ class InventoryService
         return $this->getCharacterItems($character, $storageType)
             ->filter(fn (Item $item) => $item->template_slug === $templateSlug
                 && $item->stage === $stage
-                && $item->temporary_slot_uuid === null)
+                && $item->buffer_slot_uuid === null)
             ->count();
     }
 

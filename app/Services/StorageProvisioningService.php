@@ -19,7 +19,8 @@ class StorageProvisioningService
 
     public function __construct(
         private EventStore $eventStore,
-        private SpecialSlotService $specialSlotService
+        private SpecialSlotService $specialSlotService,
+        private SlotCellResolver $slotCellResolver,
     ) {}
 
     public function provisionDefaults(Character $character): void
@@ -46,7 +47,7 @@ class StorageProvisioningService
 
         foreach ($inventory->slots as $slot) {
             $resources = \App\Models\Resources::where('slot_uuid', $slot->uuid)
-                ->whereNull('temporary_slot_uuid')
+                ->whereNull('buffer_slot_uuid')
                 ->orderBy('id')
                 ->get();
 
@@ -252,31 +253,17 @@ class StorageProvisioningService
 
     public function getOccupantForRegularSlot(Slot $slot): ?object
     {
-        $item = \App\Models\Item::where('slot_uuid', $slot->uuid)
-            ->whereNull('temporary_slot_uuid')
-            ->first();
-        if ($item) {
-            return $item;
-        }
-
-        return \App\Models\Resources::where('slot_uuid', $slot->uuid)
-            ->whereNull('temporary_slot_uuid')
-            ->first();
+        return $this->slotCellResolver->getOccupantForRegularSlot($slot);
     }
 
     public function isTemporarySlotEmpty(TemporarySlot $temporarySlot): bool
     {
-        return !$this->getOccupantForTemporarySlot($temporarySlot);
+        return $this->slotCellResolver->isTemporarySlotEmpty($temporarySlot);
     }
 
     public function getOccupantForTemporarySlot(TemporarySlot $temporarySlot): ?object
     {
-        $item = \App\Models\Item::where('temporary_slot_uuid', $temporarySlot->uuid)->first();
-        if ($item) {
-            return $item;
-        }
-
-        return \App\Models\Resources::where('temporary_slot_uuid', $temporarySlot->uuid)->first();
+        return $this->slotCellResolver->getOccupantForTemporarySlot($temporarySlot);
     }
 
     public function getGridCols(string $storageType): int

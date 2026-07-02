@@ -93,7 +93,7 @@ class TradeService
                 throw new \RuntimeException('Этот предмет нельзя обменять');
             }
 
-            if ($item->temporary_slot_uuid) {
+            if ($item->buffer_slot_uuid) {
                 throw new \RuntimeException('Предмет уже участвует в другом обмене или аукционе');
             }
 
@@ -555,7 +555,7 @@ class TradeService
         }
 
         $originOccupant = Resources::where('slot_uuid', $tradeItem->origin_slot_uuid)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->first();
 
         if ($originOccupant && $originOccupant->template_slug === $resource->template_slug) {
@@ -598,7 +598,7 @@ class TradeService
         $tradeSlotUuids = $this->provisioningService->getTradeSlots($character)->pluck('uuid');
         $query = Resources::whereIn('slot_uuid', $tradeSlotUuids)
             ->where('template_slug', $templateSlug)
-            ->whereNull('temporary_slot_uuid');
+            ->whereNull('buffer_slot_uuid');
 
         if ($maxStack !== null) {
             $query->where('quantity', '<', $maxStack);
@@ -615,7 +615,7 @@ class TradeService
 
         $resources = Resources::whereIn('slot_uuid', $slotUuids)
             ->where('template_slug', $templateSlug)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->orderBy('quantity', 'asc')
             ->get();
 

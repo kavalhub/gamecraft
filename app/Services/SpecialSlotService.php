@@ -96,7 +96,7 @@ class SpecialSlotService
 
         return (int) Resources::where('slot_uuid', $xpSlot->uuid)
             ->where('template_slug', 'experience')
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->sum('quantity');
     }
 
@@ -120,7 +120,7 @@ class SpecialSlotService
         $gridUuids = $this->getGridSlots($storage)->pluck('uuid');
         $gridRows = Resources::whereIn('slot_uuid', $gridUuids)
             ->where('template_slug', $templateSlug)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->get();
 
         if ($gridRows->isEmpty()) {
@@ -134,7 +134,7 @@ class SpecialSlotService
 
         $keeper = Resources::where('slot_uuid', $specialSlot->uuid)
             ->where('template_slug', $templateSlug)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->first();
 
         if ($keeper) {
@@ -166,7 +166,7 @@ class SpecialSlotService
 
         return (int) Resources::where('slot_uuid', $goldSlot->uuid)
             ->where('template_slug', 'gold')
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->sum('quantity');
     }
 
@@ -185,7 +185,7 @@ class SpecialSlotService
         $gridUuids = $this->getGridSlots($storage)->pluck('uuid');
         $gridGold = Resources::whereIn('slot_uuid', $gridUuids)
             ->where('template_slug', 'gold')
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->get();
 
         if ($gridGold->isEmpty()) {
@@ -199,7 +199,7 @@ class SpecialSlotService
 
         $keeper = Resources::where('slot_uuid', $goldSlot->uuid)
             ->where('template_slug', 'gold')
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->first();
 
         if ($keeper) {
@@ -232,7 +232,7 @@ class SpecialSlotService
 
         return (int) Resources::whereIn('slot_uuid', $slotUuids)
             ->where('template_slug', $templateSlug)
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->sum('quantity');
     }
 }

@@ -98,7 +98,7 @@ class CraftingServiceTest extends TestCase
         $this->service->disassembleResource($this->character, 'wood');
 
         $outputSlots = app(DisassembleStationService::class)->getOutputTemporarySlots($this->character);
-        $stacks = \App\Models\Resources::whereIn('temporary_slot_uuid', $outputSlots->pluck('uuid'))
+        $stacks = \App\Models\Resources::whereIn('buffer_slot_uuid', $outputSlots->pluck('uuid'))
             ->where('template_slug', 'wooden_plank')
             ->get();
 
@@ -130,7 +130,7 @@ class CraftingServiceTest extends TestCase
         $inventory = $this->character->storages()->where('storage_type', 'inventory')->firstOrFail();
         $ore = \App\Models\Resources::whereIn('slot_uuid', $inventory->slots()->pluck('uuid'))
             ->where('template_slug', 'iron_ore')
-            ->whereNull('temporary_slot_uuid')
+            ->whereNull('buffer_slot_uuid')
             ->firstOrFail();
         $center = app(CraftStationService::class)->getCenterTemporarySlot($this->character);
         app(\App\Services\StorageMoveService::class)->move($this->character, $ore->slot_uuid, $center->uuid, 20);
@@ -139,7 +139,7 @@ class CraftingServiceTest extends TestCase
 
         $this->assertEquals('iron_ingot', $result['result_template_slug']);
         $this->assertEquals(2, $result['result_quantity']);
-        $this->assertNull(\App\Models\Resources::where('temporary_slot_uuid', $center->uuid)->first());
+        $this->assertNull(\App\Models\Resources::where('buffer_slot_uuid', $center->uuid)->first());
         $this->assertEquals(10, $this->inventoryService->getResourceQuantity($this->character, 'iron_ore'));
         $this->assertEquals(2, $this->inventoryService->getResourceQuantity($this->character, 'iron_ingot'));
     }
@@ -168,7 +168,7 @@ class CraftingServiceTest extends TestCase
         $this->assertEquals('item', $item->stage);
         $this->assertEquals('wooden_sword', $item->template_slug);
         $this->assertEquals('Мой первый меч', $item->custom_name);
-        $this->assertNull($item->temporary_slot_uuid);
+        $this->assertNull($item->buffer_slot_uuid);
         $this->assertEquals(['wood' => 5], \App\Support\ItemMaterialsUsed::resources($item->materials_used));
         $this->assertEquals($this->character->uuid, $item->materials_used['crafter']['character_uuid'] ?? null);
         $this->assertNotNull($item->stats);
@@ -299,7 +299,7 @@ class CraftingServiceTest extends TestCase
     {
         $outputSlots = app(DisassembleStationService::class)->getOutputTemporarySlots($this->character);
 
-        return (int) \App\Models\Resources::whereIn('temporary_slot_uuid', $outputSlots->pluck('uuid'))
+        return (int) \App\Models\Resources::whereIn('buffer_slot_uuid', $outputSlots->pluck('uuid'))
             ->where('template_slug', $templateSlug)
             ->sum('quantity');
     }
