@@ -14,6 +14,14 @@ class GameMetaController extends Controller
         return response()->json([
             'avatars' => config('game.avatars', []),
             'guild_emblems' => config('game.guild_emblems', []),
+            'world' => [
+                'max_speed' => config('game.world_max_speed'),
+                'max_step' => config('game.world_max_step'),
+                'step_size' => config('game.world_step_size'),
+                'interact_radius' => config('game.world_interact_radius'),
+                'portal_radius' => config('game.world_portal_radius'),
+                'nearby_radius' => config('game.world_nearby_radius'),
+            ],
         ]);
     }
 }

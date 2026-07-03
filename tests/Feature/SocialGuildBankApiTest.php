@@ -22,7 +22,7 @@ class SocialGuildBankApiTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
 
         $regA = $this->postJson('/api/register', [
             'username' => 'hero_a',

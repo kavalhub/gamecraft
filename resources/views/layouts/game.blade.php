@@ -14,21 +14,48 @@
 
         :root {
             --slot-size: 44px;
+            --play-panel-height: 64px;
         }
 
         .game-canvas {
             position: fixed;
-            top: 0; left: 0; right: 0; bottom: 60px;
+            top: 0; left: 0; right: 0; bottom: 0;
             overflow: hidden;
         }
 
         .game-background {
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
-            background: 
-                radial-gradient(circle at 20% 30%, rgba(102,126,234,0.1) 0%, transparent 50%),
-                radial-gradient(circle at 80% 70%, rgba(168,85,247,0.1) 0%, transparent 50%),
-                linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background:
+                radial-gradient(circle at 20% 30%, rgba(102,126,234,0.08) 0%, transparent 50%),
+                radial-gradient(circle at 80% 70%, rgba(168,85,247,0.08) 0%, transparent 50%),
+                linear-gradient(135deg, #142018 0%, #0f1a12 100%);
+        }
+
+        .world-iso-canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+            z-index: 0;
+            cursor: crosshair;
+        }
+
+        .world-iso-hint {
+            position: absolute;
+            left: 50%;
+            bottom: calc(var(--play-panel-height) + 14px);
+            transform: translateX(-50%);
+            z-index: 1;
+            pointer-events: none;
+            padding: 6px 14px;
+            border-radius: 999px;
+            background: rgba(0, 0, 0, 0.45);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: rgba(255, 255, 255, 0.75);
+            font-size: 12px;
+            white-space: nowrap;
         }
 
         .window {
@@ -124,8 +151,214 @@
         }
 
         #window-journal {
-            width: 340px;
-            height: calc(100% - 40px);
+            width: 453px;
+            height: calc((100% - var(--play-panel-height)) / 3);
+            min-height: 180px;
+            max-height: 280px;
+        }
+
+        #window-journal .chat-message {
+            font-size: 11px;
+            padding: 3px 0;
+        }
+
+        #window-journal .chat-compose {
+            padding: 6px 10px;
+        }
+
+        #window-journal .chat-compose input {
+            padding: 6px 8px;
+            font-size: 12px;
+        }
+
+        #window-journal .chat-compose button {
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+
+        #window-journal #generalChatList,
+        #window-journal #guildChatList,
+        #window-journal #eventsList {
+            padding: 8px 10px;
+        }
+
+        .hud-layer {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        .unit-frame {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 6px 15px 6px 6px;
+            min-width: 300px;
+            max-width: 390px;
+            background: linear-gradient(180deg, rgba(12, 12, 22, 0.92) 0%, rgba(8, 8, 16, 0.88) 100%);
+            border: 2px solid rgba(212, 165, 116, 0.45);
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            pointer-events: auto;
+            cursor: pointer;
+            user-select: none;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+
+        .unit-frame:hover {
+            border-color: rgba(212, 165, 116, 0.75);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55), 0 0 12px rgba(212, 165, 116, 0.15);
+        }
+
+        .unit-frame-portrait {
+            width: 66px;
+            height: 66px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 42px;
+            line-height: 1;
+            background: rgba(0, 0, 0, 0.35);
+            border: 2px solid rgba(255, 255, 255, 0.12);
+            border-radius: 6px;
+        }
+
+        .unit-frame-body {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .unit-frame-name-row {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            line-height: 1.2;
+        }
+
+        .unit-frame-name {
+            font-size: 20px;
+            font-weight: 700;
+            color: #f5f5f5;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .unit-frame-level {
+            font-size: 17px;
+            font-weight: 600;
+            color: #d4a574;
+            flex-shrink: 0;
+        }
+
+        .unit-frame-hp-bar {
+            width: 100%;
+            height: 18px;
+            border-radius: 3px;
+            background: rgba(0, 0, 0, 0.45);
+            border: 1px solid rgba(0, 0, 0, 0.6);
+            overflow: hidden;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+        }
+
+        .unit-frame-hp-fill {
+            height: 100%;
+            width: 100%;
+            border-radius: 2px;
+            background: linear-gradient(180deg, #4ade80 0%, #16a34a 55%, #15803d 100%);
+            transition: width 0.35s ease;
+        }
+
+        .unit-frame-hp-text {
+            font-size: 15px;
+            color: #9ca3af;
+            text-align: right;
+        }
+
+        .minimap-wrap {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 240px;
+            height: 240px;
+            pointer-events: none;
+        }
+
+        .minimap {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            pointer-events: auto;
+            overflow: hidden;
+            border: 3px solid rgba(212, 165, 116, 0.5);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), inset 0 0 24px rgba(0, 0, 0, 0.4);
+            background: #0f1419;
+        }
+
+        .minimap-canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .minimap-label {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 9px 12px;
+            text-align: center;
+            font-size: 15px;
+            font-weight: 600;
+            color: rgba(212, 165, 116, 0.9);
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+            letter-spacing: 0.03em;
+            pointer-events: none;
+        }
+
+        .hud-settings-btn {
+            position: absolute;
+            top: 0;
+            right: 0;
+            z-index: 2;
+            width: 40px;
+            height: 40px;
+            border: 2px solid rgba(212, 165, 116, 0.5);
+            border-radius: 8px;
+            background: linear-gradient(180deg, rgba(12, 12, 22, 0.95) 0%, rgba(8, 8, 16, 0.9) 100%);
+            color: #d4a574;
+            font-size: 20px;
+            line-height: 1;
+            cursor: pointer;
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+            transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+        }
+
+        .hud-settings-btn:hover {
+            border-color: rgba(212, 165, 116, 0.85);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.55), 0 0 10px rgba(212, 165, 116, 0.15);
+        }
+
+        .hud-settings-btn.active {
+            border-color: rgba(102, 126, 234, 0.75);
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.35), rgba(118, 75, 162, 0.35));
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.35);
         }
 
         #window-journal .window-body {
@@ -430,9 +663,15 @@
             margin-top: 10px;
         }
 
-        #window-quests, #window-quest {
+        #window-quest {
             width: 360px;
             max-height: 70vh;
+        }
+
+        #window-quests {
+            width: 360px;
+            height: 1280px;
+            max-height: 90vh;
         }
 
         #window-quests .window-body, #window-quest .window-body {
@@ -440,7 +679,7 @@
             overflow-y: auto;
         }
 
-        .quests-list { display: flex; flex-direction: column; gap: 6px; max-height: 400px; overflow-y: auto; }
+        .quests-list { display: flex; flex-direction: column; gap: 6px; max-height: 1200px; overflow-y: auto; }
         .quest-list-item {
             padding: 8px 10px;
             border: 1px solid #333;
@@ -1000,20 +1239,31 @@
         .play-panel {
             position: fixed;
             bottom: 0;
-            left: 0;
-            right: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: max-content;
+            max-width: calc(100% - 24px);
             z-index: 10000;
             display: flex;
             justify-content: center;
-            align-items: center;
-            padding: 8px 12px;
+            align-items: flex-end;
+            padding: 0;
             pointer-events: none;
+            background: none;
+            border: none;
+            box-shadow: none;
         }
 
         .play-panel-grid {
             display: grid;
             gap: 5px;
             pointer-events: auto;
+            padding: 8px 10px;
+            background: linear-gradient(180deg, rgba(12, 12, 22, 0.92) 0%, rgba(8, 8, 16, 0.88) 100%);
+            border: 2px solid rgba(212, 165, 116, 0.35);
+            border-bottom: none;
+            border-radius: 10px 10px 0 0;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.35);
         }
 
         .play-panel-slot.storage-slot--empty {
@@ -1217,9 +1467,6 @@
 
         /* Mobile adaptation */
         @media (max-width: 768px) {
-            .game-canvas {
-                bottom: 60px;
-            }
             .toolbar {
                 height: 60px;
                 gap: 8px;
@@ -1235,7 +1482,7 @@
 
             .window {
                 width: 100% !important;
-                height: calc(100% - 60px) !important;
+                height: calc(100% - var(--play-panel-height)) !important;
                 left: 0 !important;
                 top: 0 !important;
                 right: 0 !important;
@@ -1246,7 +1493,28 @@
             }
             #window-journal, #window-inventory {
                 width: 100% !important;
-                height: calc(100% - 60px) !important;
+                height: calc(100% - var(--play-panel-height)) !important;
+            }
+            .hud-layer .minimap-wrap {
+                width: 150px;
+                height: 150px;
+                top: 8px;
+                right: 8px;
+            }
+            .hud-settings-btn {
+                width: 32px;
+                height: 32px;
+                font-size: 16px;
+            }
+            .unit-frame {
+                top: 8px;
+                left: 8px;
+                min-width: 240px;
+            }
+            .unit-frame-portrait {
+                width: 54px;
+                height: 54px;
+                font-size: 33px;
             }
         }
     </style>
@@ -1256,6 +1524,29 @@
 
 <div class="game-canvas" id="gameCanvas">
     <div class="game-background"></div>
+
+    <div id="hudLayer" class="hud-layer">
+        <div id="unitFrame" class="unit-frame" title="Открыть / закрыть персонажа">
+            <div id="unitFramePortrait" class="unit-frame-portrait">🧙</div>
+            <div class="unit-frame-body">
+                <div class="unit-frame-name-row">
+                    <span id="unitFrameName" class="unit-frame-name">...</span>
+                    <span id="unitFrameLevel" class="unit-frame-level">Ур. 1</span>
+                </div>
+                <div class="unit-frame-hp-bar">
+                    <div id="unitFrameHpFill" class="unit-frame-hp-fill" style="width:100%"></div>
+                </div>
+                <div id="unitFrameHpText" class="unit-frame-hp-text">— / —</div>
+            </div>
+        </div>
+        <div class="minimap-wrap">
+            <button type="button" id="hudSettingsBtn" class="hud-settings-btn" title="Настройки">⚙️</button>
+            <div id="minimap" class="minimap" aria-hidden="true">
+                <canvas id="minimapCanvas" class="minimap-canvas" width="240" height="240"></canvas>
+                <span class="minimap-label">Крафт-Сити</span>
+            </div>
+        </div>
+    </div>
 
     <div class="window" id="window-journal" data-window="journal">
         <div class="window-header">
@@ -1537,7 +1828,10 @@
 <div id="msg" class="msg"></div>
 <div id="itemTooltip" class="tooltip"></div>
 @include('partials.resource-quantity-modal')
-<script src="{{ asset('js/game/game.bundle.js') }}?v=20260703e"></script>
+<script src="{{ asset('js/game/game.bundle.js') }}?v=20260703i"></script>
+<script src="{{ asset('js/game/iso-tile-render.js') }}?v=20260704j"></script>
+<script src="{{ asset('js/game/iso-character.js') }}?v=20260704a"></script>
+<script src="{{ asset('js/game/isometric-world.js') }}?v=20260704m"></script>
 
 <script>
     window.GameApi = {
@@ -1647,8 +1941,8 @@
         positions: {},
 
         defaults: {
-            journal:    { x: 20,  y: 20 },
-            inventory:  { x: null, y: 20, right: 20 },
+            journal:    { x: 20, bottomFromPanel: true },
+            inventory:  { x: null, y: 270, right: 20 },
             character:  { center: true, verticalCenter: true },
             craft:      { center: true, verticalCenter: true },
             disassemble: { center: true, verticalCenter: true },
@@ -1715,7 +2009,11 @@
                 } else if (defaults.x !== null && defaults.x !== undefined) {
                     win.style.left = defaults.x + 'px';
                 }
-                if (defaults.bottom !== undefined) {
+                if (defaults.bottomFromPanel) {
+                    const panelH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--play-panel-height'), 10) || 64;
+                    win.style.bottom = (panelH + 8) + 'px';
+                    win.style.top = '';
+                } else if (defaults.bottom !== undefined) {
                     win.style.bottom = defaults.bottom + 'px';
                     win.style.top = '';
                 } else if (defaults.y !== null && defaults.y !== undefined) {
@@ -1751,9 +2049,11 @@
                 startLeft = rect.left - canvasRect.left;
                 startTop = rect.top - canvasRect.top;
 
-                if (win.style.right) {
+                if (win.style.right || win.style.bottom) {
                     win.style.left = startLeft + 'px';
+                    win.style.top = startTop + 'px';
                     win.style.right = '';
+                    win.style.bottom = '';
                 }
 
                 console.log('Drag start:', winName, 'at', startLeft, startTop);
@@ -1773,6 +2073,8 @@
 
                 win.style.left = newX + 'px';
                 win.style.top = newY + 'px';
+                win.style.right = '';
+                win.style.bottom = '';
             });
 
             document.addEventListener('mouseup', () => {
@@ -1781,6 +2083,12 @@
                 isDragging = false;
                 win.classList.remove('dragging');
                 console.log('Drag end:', winName, '- saving positions');
+
+                const left = parseInt(win.style.left, 10);
+                const top = parseInt(win.style.top, 10);
+                if (!isNaN(left) && !isNaN(top)) {
+                    window.WindowManager.positions[winName] = { left, top };
+                }
                 
                 setTimeout(() => {
                     console.log('Calling savePositions for', winName);
@@ -1823,6 +2131,7 @@
                 win.style.left = pos.left + 'px';
                 win.style.top = pos.top + 'px';
                 win.style.right = '';
+                win.style.bottom = '';
             }
 
             if (name === 'auction' && typeof window.initAuction === 'function') {
@@ -1946,6 +2255,10 @@
             if (window.PlayPanelManager && typeof PlayPanelManager.refreshActiveState === 'function') {
                 PlayPanelManager.refreshActiveState();
             }
+            var settingsBtn = document.getElementById('hudSettingsBtn');
+            if (settingsBtn) {
+                settingsBtn.classList.toggle('active', this.isOpen('settings'));
+            }
         },
 
         isOpen(name) {
@@ -2001,8 +2314,8 @@
                     if (pos && typeof pos.left === 'number' && typeof pos.top === 'number') {
                         win.style.left = pos.left + 'px';
                         win.style.top = pos.top + 'px';
-                        // Убираем right если он был установлен
                         win.style.right = '';
+                        win.style.bottom = '';
                     }
                 });
             } catch (e) {
@@ -2040,6 +2353,8 @@
             });
 
             console.log('Saving positions:', positions);
+
+            Object.assign(this.positions, positions);
 
             try {
                 const res = await GameApi.fetch(`/api/settings/${GameState.characterUuid}/multiple`, {
@@ -2149,6 +2464,214 @@
 
     window.loadBankData = loadBankData;
 
+    window.WorldPanel = {
+        _busy: false,
+        _initialized: false,
+        _stepQueue: [],
+
+        init() {
+            if (this._initialized) return;
+            this._initialized = true;
+
+            if (window.EventPoller && typeof EventPoller.on === 'function') {
+                EventPoller.on(function (events) {
+                    events.forEach(function (event) {
+                        if (!event || !event.type) return;
+                        if (event.type === 'world.moved' || event.type === 'world.entered_zone' || event.type === 'world.interacted') {
+                            WorldPanel.refresh(false);
+                        }
+                    });
+                });
+            }
+
+            this.refresh(true);
+        },
+
+        refresh: function (force) {
+            if (!GameState.characterUuid || !window.GameApi) return Promise.resolve();
+            if (this._busy && !force) return Promise.resolve();
+            this._busy = true;
+
+            return GameApi.fetch('/api/world/' + GameState.characterUuid + '/context')
+                .then(function (res) { return res.json(); })
+                .then(function (data) { WorldPanel.render(data); })
+                .catch(function (e) { console.error('WorldPanel refresh error:', e); })
+                .finally(function () { WorldPanel._busy = false; });
+        },
+
+        render: function (data) {
+            var state = data.state || {};
+            var labelEl = document.querySelector('.minimap-label');
+            if (labelEl && state.zone_name) labelEl.textContent = state.zone_name;
+            if (window.MinimapView) MinimapView.onContext(data);
+            if (window.WorldView && typeof WorldView.onContext === 'function') {
+                WorldView.onContext(data);
+            }
+        },
+
+        queueStep: function (direction) {
+            var q = this._stepQueue;
+            if (q.length && q[q.length - 1] === direction) return;
+            if (q.length >= 3) q.shift();
+            q.push(direction);
+        },
+
+        step: function (direction, opts) {
+            opts = opts || {};
+            if (!GameState.characterUuid) return;
+            if (this._busy) {
+                this.queueStep(direction);
+                return;
+            }
+            this._busy = true;
+            var predicted = opts.predicted === true;
+            GameApi.fetch('/api/world/' + GameState.characterUuid + '/step', {
+                method: 'POST',
+                body: JSON.stringify({ direction: direction }),
+            })
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    if (!data.success) throw new Error(data.error || 'step failed');
+                    if (data.portal_used && typeof showMsg === 'function') {
+                        showMsg('Портал: ' + data.portal_used.id, 'success');
+                    }
+                    if (window.WorldView && data.state) {
+                        WorldView.onStepResult(data.state, data.portal_used);
+                    }
+                    if (data.portal_used) {
+                        return WorldPanel.refresh(true);
+                    }
+                })
+                .catch(function (e) {
+                    if (predicted && window.WorldView && opts.direction) {
+                        WorldView.revertStep(opts.direction);
+                    }
+                    if (window.WorldView) WorldView.syncDisplayToState();
+                    if (typeof showMsg === 'function') showMsg(e.message || 'Шаг не выполнен', 'error');
+                    return WorldPanel.refresh(true);
+                })
+                .finally(function () {
+                    WorldPanel._busy = false;
+                    var next = WorldPanel._stepQueue.shift();
+                    if (next && window.WorldView) {
+                        WorldView.doStep(next);
+                    }
+                });
+        },
+
+        interact: function (targetId) {
+            if (!GameState.characterUuid) return;
+
+            var interactable = null;
+            if (window.WorldView && WorldView.zone && WorldView.zone.interactables) {
+                WorldView.zone.interactables.forEach(function (it) {
+                    if (it.id === targetId) interactable = it;
+                });
+            }
+            if (interactable && interactable.window && window.WindowManager && WindowManager.isOpen(interactable.window)) {
+                WindowManager.close(interactable.window);
+                return;
+            }
+
+            if (this._busy) return;
+            this._busy = true;
+            GameApi.fetch('/api/world/' + GameState.characterUuid + '/interact', {
+                method: 'POST',
+                body: JSON.stringify({ target_id: targetId }),
+            })
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    if (!data.success) throw new Error(data.error || 'interact failed');
+                    if (data.action === 'open_window' && data.window && window.WindowManager) {
+                        WindowManager.open(data.window);
+                    }
+                    return WorldPanel.refresh(true);
+                })
+                .catch(function (e) {
+                    if (typeof showMsg === 'function') showMsg(e.message || 'Нельзя взаимодействовать', 'error');
+                })
+                .finally(function () { WorldPanel._busy = false; });
+        },
+
+        usePortal: function (portalId) {
+            if (!GameState.characterUuid || this._busy) return;
+            this._busy = true;
+            GameApi.fetch('/api/world/' + GameState.characterUuid + '/use-portal', {
+                method: 'POST',
+                body: JSON.stringify({ portal_id: portalId }),
+            })
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    if (!data.success) throw new Error(data.error || 'portal failed');
+                    if (typeof showMsg === 'function' && data.portal_used) {
+                        showMsg('Переход: ' + data.portal_used.to_zone, 'success');
+                    }
+                    return WorldPanel.refresh(true);
+                })
+                .catch(function (e) {
+                    if (typeof showMsg === 'function') showMsg(e.message || 'Портал недоступен', 'error');
+                })
+                .finally(function () { WorldPanel._busy = false; });
+        },
+    };
+
+    window.UnitFrame = {
+        currentHp: null,
+        maxHp: null,
+
+        init() {
+            var el = document.getElementById('unitFrame');
+            if (!el || el.dataset.bound) return;
+            el.dataset.bound = '1';
+            el.addEventListener('click', function () {
+                if (window.WindowManager) WindowManager.toggle('character');
+            });
+        },
+
+        updateFromLayout(data) {
+            if (!data) return;
+            var nameEl = document.getElementById('unitFrameName');
+            var levelEl = document.getElementById('unitFrameLevel');
+            var portraitEl = document.getElementById('unitFramePortrait');
+            var fillEl = document.getElementById('unitFrameHpFill');
+            var textEl = document.getElementById('unitFrameHpText');
+
+            if (nameEl) nameEl.textContent = data.character_name || 'Игрок';
+            if (portraitEl) portraitEl.textContent = data.character_avatar_icon || '🧙';
+
+            var stats = data.character_stats || {};
+            var level = stats.level != null ? stats.level : 1;
+            if (levelEl) levelEl.textContent = 'Ур. ' + level;
+
+            var maxHp = (stats.total && stats.total.health) ? stats.total.health : 50;
+            var current = this.currentHp != null ? this.currentHp : maxHp;
+            if (current > maxHp) current = maxHp;
+
+            this.maxHp = maxHp;
+            if (this.currentHp == null) this.currentHp = maxHp;
+
+            var pct = maxHp > 0 ? Math.max(0, Math.min(100, (current / maxHp) * 100)) : 100;
+            if (fillEl) fillEl.style.width = pct + '%';
+            if (textEl) textEl.textContent = current + ' / ' + maxHp;
+        },
+
+        setHp(current, max) {
+            if (max != null) this.maxHp = max;
+            if (current != null) this.currentHp = current;
+            var maxHp = this.maxHp || 1;
+            var cur = this.currentHp != null ? this.currentHp : maxHp;
+            var fillEl = document.getElementById('unitFrameHpFill');
+            var textEl = document.getElementById('unitFrameHpText');
+            var pct = maxHp > 0 ? Math.max(0, Math.min(100, (cur / maxHp) * 100)) : 100;
+            if (fillEl) fillEl.style.width = pct + '%';
+            if (textEl) textEl.textContent = cur + ' / ' + maxHp;
+        },
+
+        resetHp() {
+            this.currentHp = null;
+        },
+    };
+
     async function loadPlayerData() {
         try {
             if (window.StorageManager) {
@@ -2167,6 +2690,9 @@
                 document.getElementById('playerName').textContent = data.character_name || 'Игрок';
                 const avatarEl = document.getElementById('playerAvatar');
                 if (avatarEl) avatarEl.textContent = data.character_avatar_icon || '🧙';
+                if (window.WorldView && data.character_avatar) {
+                    WorldView.avatarKey = data.character_avatar;
+                }
                 const gold = data.gold != null ? data.gold : StorageManager.getGold();
                 if (window.GoldChip && StorageManager.inventoryStorage) {
                     const goldEl = document.getElementById('playerGold');
@@ -2199,6 +2725,7 @@
                 if (WindowManager.isOpen('mail') && typeof window.refreshMailGrids === 'function') {
                     window.refreshMailGrids(data);
                 }
+                if (window.UnitFrame) UnitFrame.updateFromLayout(data);
                 return;
             }
 
@@ -2221,7 +2748,7 @@
     function resizeInventoryWindow() {
         const win = document.getElementById('window-inventory');
         if (!win || !window.StorageManager?.inventoryStorage) return;
-        const cols = StorageManager.inventoryStorage.cols || 4;
+        const cols = StorageManager.inventoryStorage.cols || 6;
         const slots = StorageManager.inventoryStorage.grid_slots || StorageManager.inventoryStorage.slots || [];
         const rows = Math.ceil(slots.length / cols) || 9;
         const slotSize = (window.GameSettings ? GameSettings.getSlotSize() : 44);
@@ -3114,6 +3641,13 @@
         GameState.characterUuid = characterUuid;
 
         WindowManager.init();
+        if (window.UnitFrame) UnitFrame.init();
+        var hudSettingsBtn = document.getElementById('hudSettingsBtn');
+        if (hudSettingsBtn) {
+            hudSettingsBtn.addEventListener('click', function () {
+                if (window.WindowManager) WindowManager.toggle('settings');
+            });
+        }
         await WindowManager.loadPositions();
 
         await Promise.all([
@@ -3129,7 +3663,6 @@
         }
 
         WindowManager.open('journal');
-        WindowManager.open('inventory');
 
         // Запускаем polling событий
         window.characterUuid = characterUuid;
@@ -3145,6 +3678,8 @@
         await ChatPanel.loadInitial();
         await ChatPanel.announceConnection();
         EventPoller.start(characterUuid);
+        if (window.WorldView) WorldView.init();
+        if (window.WorldPanel) WorldPanel.init();
         UIUpdater.init();
         if (typeof window.hookMailRealtimeEvents === 'function') {
             window.hookMailRealtimeEvents();

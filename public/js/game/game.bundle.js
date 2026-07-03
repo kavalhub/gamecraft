@@ -1285,14 +1285,12 @@
     var PLAY_PANEL_ACTIONS = {
         journal: { window: 'journal', icon: '💬', label: 'Чат' },
         inventory: { window: 'inventory', icon: '🎒', label: 'Инвентарь' },
-        character: { window: 'character', icon: '🛡️', label: 'Персонаж' },
         quests: { window: 'quests', icon: '📜', label: 'Квесты' },
         auction: { window: 'auction', icon: '🏪', label: 'Аукцион' },
         mail: { window: 'mail', icon: '📬', label: 'Почта' },
         players: { window: 'players', icon: '👥', label: 'Общение' },
         encounter: { window: 'encounter', icon: '⚔️', label: 'Бой' },
         bank: { window: 'bank', icon: '🏦', label: 'Банк' },
-        settings: { window: 'settings', icon: '⚙️', label: 'Настройки' },
     };
 
     var WindowResizer = {
@@ -1316,17 +1314,21 @@
         _saveTimer: null,
         _drag: null,
 
-        getHeight: function () {
+        getPlayPanelHeight: function () {
+            var panel = document.getElementById('playPanel');
+            if (panel && panel.offsetHeight > 0) {
+                return panel.offsetHeight;
+            }
             var slot = (window.GameSettings && GameSettings.getSlotSize()) || 44;
-            return slot + 16;
+            return slot + 26;
         },
 
         updateCanvasInset: function () {
-            var h = this.getHeight();
-            var canvas = document.getElementById('gameCanvas');
-            if (canvas) canvas.style.bottom = h + 'px';
+            var h = this.getPlayPanelHeight();
+            document.documentElement.style.setProperty('--play-panel-height', h + 'px');
+            var reserve = h + 8;
             document.querySelectorAll('#window-journal, #window-inventory, #window-trade, #window-players').forEach(function (el) {
-                el.style.maxHeight = 'calc(100% - ' + Math.max(8, h - 60) + 'px)';
+                el.style.maxHeight = 'calc(100% - ' + reserve + 'px)';
             });
         },
 
@@ -1367,7 +1369,7 @@
         },
 
         renderSkeleton: function () {
-            var defaults = ['journal', 'inventory', 'character', 'quests', 'encounter', 'auction', 'mail', 'players', 'bank', 'settings'];
+            var defaults = ['encounter', 'players', 'inventory', 'quests', 'mail', 'bank', 'journal', 'auction'];
             this.cols = 12;
             this.slots = [];
             this.layout = {};
@@ -1386,7 +1388,7 @@
 
             function mapAction(action) {
                 if (action === 'trade') return 'players';
-                if (action === 'workbench' || action === 'craft' || action === 'disassemble') return null;
+                if (action === 'character' || action === 'settings' || action === 'workbench' || action === 'craft' || action === 'disassemble') return null;
                 return PLAY_PANEL_ACTIONS[action] ? action : null;
             }
 
@@ -1411,13 +1413,6 @@
                 var target = self.slots.find(function (s) { return !result[s.uuid]; });
                 if (target) {
                     result[target.uuid] = 'players';
-                }
-            }
-
-            if (!used.character) {
-                var charTarget = self.slots.find(function (s) { return !result[s.uuid]; });
-                if (charTarget) {
-                    result[charTarget.uuid] = 'character';
                 }
             }
 

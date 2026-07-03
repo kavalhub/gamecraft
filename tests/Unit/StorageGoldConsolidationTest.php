@@ -22,7 +22,7 @@ class StorageGoldConsolidationTest extends TestCase
 
     public function test_consolidates_duplicate_gold_in_same_slot(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
 
         $user = User::where('email', 'test@example.com')->first();
         $character = $user->characters()->where('character_type', 'player')->first();
@@ -50,7 +50,7 @@ class StorageGoldConsolidationTest extends TestCase
 
     public function test_relocates_gold_from_grid_to_special_slot(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
 
         $user = User::where('email', 'test@example.com')->first();
         $character = $user->characters()->where('character_type', 'player')->first();
@@ -136,7 +136,7 @@ class StorageGoldConsolidationTest extends TestCase
 
     public function test_cannot_drag_gold_from_special_slot_to_grid(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
 
         $user = User::where('email', 'test@example.com')->first();
         $character = $user->characters()->where('character_type', 'player')->first();
@@ -154,7 +154,7 @@ class StorageGoldConsolidationTest extends TestCase
 
     public function test_cannot_duplicate_gold_by_moving_from_special_slot_to_same_slot_via_grid(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
 
         $user = User::where('email', 'test@example.com')->first();
         $character = $user->characters()->where('character_type', 'player')->first();

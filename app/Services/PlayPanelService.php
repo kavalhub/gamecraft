@@ -16,28 +16,24 @@ class PlayPanelService
     public const VALID_ACTIONS = [
         'journal',
         'inventory',
-        'character',
         'quests',
         'encounter',
         'auction',
         'mail',
         'players',
         'bank',
-        'settings',
     ];
 
     /** @var string[] */
     public const DEFAULT_ACTION_ORDER = [
-        'journal',
-        'inventory',
-        'character',
-        'quests',
         'encounter',
-        'auction',
-        'mail',
         'players',
+        'inventory',
+        'quests',
+        'mail',
         'bank',
-        'settings',
+        'journal',
+        'auction',
     ];
 
     public function __construct(
@@ -100,7 +96,7 @@ class PlayPanelService
             if ($action === 'trade') {
                 $action = 'players';
             }
-            if ($action === 'workbench' || !isset($validActions[$action])) {
+            if ($action === 'character' || $action === 'settings' || $action === 'workbench' || !isset($validActions[$action])) {
                 continue;
             }
             $layout[$slotUuid] = $action;
@@ -120,7 +116,7 @@ class PlayPanelService
      */
     private function ensureRequiredActions($slots, array $layout): array
     {
-        foreach (['character', 'players', 'encounter'] as $action) {
+        foreach (['players', 'encounter'] as $action) {
             if (in_array($action, $layout, true)) {
                 continue;
             }

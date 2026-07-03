@@ -25,7 +25,7 @@ class EventQueryServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
 
         $user1 = User::where('email', 'test@example.com')->first();
         $this->player1 = $user1->characters()->where('character_type', 'player')->first();

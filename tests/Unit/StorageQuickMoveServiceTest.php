@@ -28,7 +28,7 @@ class StorageQuickMoveServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
 
         $user = User::where('email', 'test@example.com')->first();
         $this->character = $user->characters()->where('character_type', 'player')->first();

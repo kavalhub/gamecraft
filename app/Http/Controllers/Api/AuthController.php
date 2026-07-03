@@ -10,10 +10,12 @@ use App\Http\Requests\Api\RegisterRequest;
 use App\Models\Character;
 use App\Models\Resources;
 use App\Models\User;
+use App\Services\CharacterSettingsDefaultsService;
 use App\Services\EventStore;
 use App\Services\CharacterStatsService;
 use App\Services\CurrencyService;
 use App\Services\StorageProvisioningService;
+use App\Services\WorldService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -24,6 +26,8 @@ class AuthController extends Controller
     public function __construct(
         private StorageProvisioningService $storageProvisioning,
         private CurrencyService $currencyService,
+        private WorldService $worldService,
+        private CharacterSettingsDefaultsService $settingsDefaults,
     ) {}
 
     public function register(RegisterRequest $request): JsonResponse
@@ -49,6 +53,8 @@ class AuthController extends Controller
                 $this->storageProvisioning->provisionDefaults($character);
                 $this->currencyService->grantStartingGold($character);
                 app(CharacterStatsService::class)->ensureFor($character);
+                $this->worldService->ensureSpawn($character);
+                $this->settingsDefaults->applyForCharacter($character);
 
                 $correlationId = Str::uuid()->toString();
                 $eventStore = app(EventStore::class);

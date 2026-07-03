@@ -16,7 +16,7 @@ class AuctionBuyInfoApiTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
     }
 
     public function test_buy_info_returns_purchase_limits(): void

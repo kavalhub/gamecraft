@@ -47,7 +47,6 @@ class DatabaseSeeder extends Seeder
         $this->createAuctionCharacter();
         $this->createPostCharacter();
         $this->createSystemCharacter();
-        $this->createTestUser();
     }
 
     private function importQuests(): void
@@ -166,56 +165,5 @@ class DatabaseSeeder extends Seeder
         );
 
         $this->command->info("System character created: {$system->name} ({$system->uuid})");
-    }
-
-    private function createTestUser(): void
-    {
-        $user = User::firstOrCreate(
-            ['email' => 'test@example.com'],
-            [
-                'name' => 'Test User',
-                'password' => bcrypt('password'),
-            ]
-        );
-
-        $character = Character::firstOrCreate(
-            ['user_uuid' => $user->uuid, 'character_type' => 'player', 'name' => 'Test Character'],
-            ['active' => true]
-        );
-
-        $provisioning = app(StorageProvisioningService::class);
-
-        $inventory = Storage::firstOrCreate(
-            ['characters_uuid' => $character->uuid, 'storage_type' => 'inventory'],
-            ['name' => 'Инвентарь', 'active' => true]
-        );
-
-        $equipment = Storage::firstOrCreate(
-            ['characters_uuid' => $character->uuid, 'storage_type' => 'equipment'],
-            ['name' => 'Экипировка', 'active' => true]
-        );
-
-        $bank = Storage::firstOrCreate(
-            ['characters_uuid' => $character->uuid, 'storage_type' => 'bank'],
-            ['name' => 'Банк', 'active' => true]
-        );
-
-        if ($inventory->slots()->count() === 0) {
-            $provisioning->provisionStorageSlots($inventory);
-        }
-
-        if ($equipment->slots()->count() === 0) {
-            $provisioning->provisionStorageSlots($equipment);
-        }
-
-        if ($bank->slots()->count() === 0) {
-            $provisioning->provisionStorageSlots($bank);
-        }
-
-        app(CurrencyService::class)->grantStartingGold($character);
-
-        $this->command->info("Test user created: {$user->email} ({$user->uuid})");
-        $this->command->info("Test character created: {$character->name} ({$character->uuid})");
-        $this->command->info("Starting gold: 1000");
     }
 }

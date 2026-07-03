@@ -1,0 +1,93 @@
+{
+  "version": "1.0.0",
+  "zones": [
+    {
+      "slug": "craft_city",
+      "name": "Крафт-Сити",
+      "description": "Главный город ремесленников",
+      "bounds": {
+        "min_x": -50,
+        "max_x": 50,
+        "min_z": -50,
+        "max_z": 50
+      },
+      "spawns": {
+        "default": { "x": 0, "y": 0, "z": 0, "rotation_y": 0 },
+        "south": { "x": 0, "y": 0, "z": -45, "rotation_y": 0 }
+      },
+      "portals": [
+        {
+          "id": "gate_north",
+          "x": 0,
+          "z": 48,
+          "target_zone": "forest_edge",
+          "target_spawn": "south"
+        }
+      ],
+      "interactables": [
+        {
+          "id": "auction_npc",
+          "kind": "npc",
+          "name": "Аукционист",
+          "x": 10,
+          "z": -5,
+          "action": "open_window",
+          "window": "auction"
+        },
+        {
+          "id": "craft_station",
+          "kind": "station",
+          "name": "Верстак",
+          "x": -8,
+          "z": 3,
+          "action": "open_window",
+          "window": "craft"
+        },
+        {
+          "id": "mail_box",
+          "kind": "object",
+          "name": "Почтовый ящик",
+          "x": 5,
+          "z": 8,
+          "action": "open_window",
+          "window": "mail"
+        }
+      ]
+    },
+    {
+      "slug": "forest_edge",
+      "name": "Окраина леса",
+      "description": "Лес за северными воротами",
+      "bounds": {
+        "min_x": -40,
+        "max_x": 40,
+        "min_z": -40,
+        "max_z": 40
+      },
+      "spawns": {
+        "default": { "x": 0, "y": 0, "z": 0, "rotation_y": 180 },
+        "south": { "x": 0, "y": 0, "z": -35, "rotation_y": 180 }
+      },
+      "portals": [
+        {
+          "id": "gate_south",
+          "x": 0,
+          "z": 38,
+          "target_zone": "craft_city",
+          "target_spawn": "south"
+        }
+      ],
+      "interactables": [
+        {
+          "id": "forest_rats",
+          "kind": "encounter",
+          "name": "Пещера крыс",
+          "x": -12,
+          "z": 15,
+          "action": "open_window",
+          "window": "encounter"
+        }
+      ]
+    }
+  ]
+}
