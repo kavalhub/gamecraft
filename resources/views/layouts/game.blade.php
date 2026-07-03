@@ -1537,7 +1537,7 @@
 <div id="msg" class="msg"></div>
 <div id="itemTooltip" class="tooltip"></div>
 @include('partials.resource-quantity-modal')
-<script src="{{ asset('js/game/game.bundle.js') }}?v=20260703c"></script>
+<script src="{{ asset('js/game/game.bundle.js') }}?v=20260703e"></script>
 
 <script>
     window.GameApi = {
@@ -2871,11 +2871,15 @@
                 if (['item.received', 'item.removed', 'item.crafted', 'item.disassembled', 'resource.transferred'].includes(e.type)) {
                     needsInventoryUpdate = true;
                 }
-                if (['auction.listed',
-            'mail.received',
-            'mail.sent', 'auction.purchased', 'auction.cancelled'].includes(e.type)) {
+                if (['auction.listed', 'auction.purchased', 'auction.cancelled'].includes(e.type)) {
                     needsInventoryUpdate = true;
                     needsAuctionUpdate = true;
+                }
+                if (['mail.received', 'mail.sent'].includes(e.type)) {
+                    needsMailUpdate = true;
+                    if (e.type === 'mail.sent') {
+                        needsInventoryUpdate = true;
+                    }
                 }
                 if ([
                     'trade.created', 'trade.updated', 'trade.item_added', 'trade.resource_added',
@@ -2923,10 +2927,14 @@
             }
             if (needsMailUpdate) {
                 if (typeof window.refreshMailUnreadStatus === 'function') {
-                    setTimeout(() => window.refreshMailUnreadStatus(), 100);
+                    window.refreshMailUnreadStatus();
                 }
                 if (WindowManager.isOpen('mail') && typeof window.loadMailInbox === 'function') {
-                    setTimeout(() => window.loadMailInbox(), 150);
+                    var readEl = document.getElementById('mail-read');
+                    var reading = readEl && readEl.style.display !== 'none';
+                    if (!reading) {
+                        setTimeout(function () { window.loadMailInbox(); }, 150);
+                    }
                 }
             }
 
@@ -3138,6 +3146,9 @@
         await ChatPanel.announceConnection();
         EventPoller.start(characterUuid);
         UIUpdater.init();
+        if (typeof window.hookMailRealtimeEvents === 'function') {
+            window.hookMailRealtimeEvents();
+        }
 
         // Heartbeat каждые 30 секунд
         setInterval(() => {
