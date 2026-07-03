@@ -86,6 +86,9 @@
         } else {
             finishInit();
         }
+        if (typeof window.hookMailRealtimeEvents === 'function') {
+            window.hookMailRealtimeEvents();
+        }
     };
 
     window.switchMailTab = function (tab) {
@@ -180,6 +183,10 @@
         var read = document.getElementById('mail-read');
         if (list) list.style.display = 'flex';
         if (read) read.style.display = 'none';
+        window.mailState.selectedMessage = null;
+        if (window.mailState.tab === 'inbox') {
+            window.renderMailInbox();
+        }
     };
 
     window.syncMailUnreadUi = function (count) {
@@ -198,6 +205,18 @@
 
         document.querySelectorAll('.play-panel-chip[data-action="mail"]').forEach(function (chip) {
             chip.classList.toggle('play-panel-chip--mail-unread', count > 0);
+        });
+    };
+
+    window.hookMailRealtimeEvents = function () {
+        if (window._mailEventHooked || !window.EventPoller) return;
+        window._mailEventHooked = true;
+        EventPoller.on(function (events) {
+            var incoming = events.filter(function (e) { return e.type === 'mail.received'; });
+            if (!incoming.length) return;
+            if (typeof window.refreshMailUnreadStatus === 'function') {
+                window.refreshMailUnreadStatus();
+            }
         });
     };
 
@@ -255,7 +274,21 @@
             var data = await res.json();
             window.mailState.selectedMessage = data.message;
             if (data.layout && window.StorageManager) StorageManager.applyLayout(data.layout);
-            await GameApi.fetch('/api/mail/' + GameState.characterUuid + '/' + messageUuid + '/read', { method: 'POST' });
+
+            var readRes = await GameApi.fetch('/api/mail/' + GameState.characterUuid + '/' + messageUuid + '/read', { method: 'POST' });
+            var readData = await readRes.json();
+            if (readData.error) throw new Error(readData.error);
+            if (readData.unread_count != null) {
+                window.syncMailUnreadUi(readData.unread_count);
+            }
+            if (window.mailState.messages) {
+                window.mailState.messages.forEach(function (m) {
+                    if (m.uuid === messageUuid) m.status = 'read';
+                });
+            }
+            if (window.mailState.selectedMessage && window.mailState.selectedMessage.uuid === messageUuid) {
+                window.mailState.selectedMessage.status = 'read';
+            }
 
             document.getElementById('mailInboxList').style.display = 'none';
             document.getElementById('mail-read').style.display = 'block';
@@ -272,7 +305,6 @@
                 parcelEl.innerHTML = '';
             }
             document.getElementById('btnClaimAllMail').style.display = m.has_attachments ? 'block' : 'none';
-            window.loadMailInbox();
         } catch (e) {
             if (typeof showMsg === 'function') showMsg(e.message, 'error');
         }
