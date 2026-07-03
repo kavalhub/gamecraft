@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\CraftingController;
 use App\Http\Controllers\Api\EncounterController;
 use App\Http\Controllers\Api\DuelController;
 use App\Http\Controllers\Api\AuctionController;
+use App\Http\Controllers\Api\MailController;
 use App\Http\Controllers\Api\TradeController;
 use App\Http\Controllers\Api\SettingsController;
 use App\Http\Controllers\Api\EventsController;
@@ -68,6 +69,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/auction/{characterUuid}/list', [AuctionController::class, 'listLot']);
         Route::post('/auction/{characterUuid}/buy', [AuctionController::class, 'buyLot']);
         Route::post('/auction/{characterUuid}/cancel', [AuctionController::class, 'cancelLot']);
+
+        Route::get('/mail/{characterUuid}/inbox', [MailController::class, 'inbox']);
+        Route::get('/mail/{characterUuid}/compose-layout', [MailController::class, 'composeLayout']);
+        Route::get('/mail/{characterUuid}/recipients', [MailController::class, 'searchRecipients']);
+        Route::get('/mail/{characterUuid}/{messageUuid}', [MailController::class, 'show']);
+        Route::post('/mail/{characterUuid}/send', [MailController::class, 'send']);
+        Route::post('/mail/{characterUuid}/{messageUuid}/read', [MailController::class, 'markRead']);
+        Route::post('/mail/{characterUuid}/{messageUuid}/claim-all', [MailController::class, 'claimAll']);
+        Route::delete('/mail/{characterUuid}/{messageUuid}', [MailController::class, 'destroy']);
 
         Route::get('/trade/{characterUuid}/current', [TradeController::class, 'getCurrentTrade']);
         Route::get('/trade/{characterUuid}', [TradeController::class, 'index']);

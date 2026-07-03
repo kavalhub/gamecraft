@@ -8,7 +8,7 @@ use Illuminate\Support\Str;
 
 class TemporarySlot extends Model
 {
-    protected $fillable = ['uuid', 'storage_uuid', 'character_uuid', 'slot_index', 'slot_type', 'quest_slug', 'slot_role', 'active', 'timestamps_end'];
+    protected $fillable = ['uuid', 'storage_uuid', 'character_uuid', 'mail_message_uuid', 'slot_index', 'slot_type', 'quest_slug', 'slot_role', 'active', 'timestamps_end'];
     protected $casts = ['active' => 'boolean', 'timestamps_end' => 'datetime'];
 
     protected static function boot(): void

@@ -7,10 +7,15 @@ namespace App\Services;
 use App\Models\Character;
 use App\Models\Item;
 use App\Models\Resources;
+use App\Models\Storage;
 use App\Models\TemporarySlot;
 
 class StorageQuickMoveService
 {
+    private const GRID_STORAGE_INTENTS = ['inventory', 'bank', 'guild_bank', 'post_outbox', 'mail_claim', 'trade'];
+
+    private const ITEM_STORAGE_INTENTS = ['inventory', 'bank', 'guild_bank', 'post_outbox', 'mail_claim', 'equipment', 'trade'];
+
     public function __construct(
         private StorageMoveService $moveService,
         private SlotFitService $slotFitService,
@@ -32,6 +37,9 @@ class StorageQuickMoveService
         ?int $quantity = null,
     ): array {
         $intent = strtolower(trim($intent));
+        if ($intent === 'equip') {
+            $intent = 'equipment';
+        }
 
         if ($intent === 'station_return') {
             return $this->returnFromStation($character, $fromSlotUuid);
@@ -42,11 +50,31 @@ class StorageQuickMoveService
             return ['type' => 'quick_move', 'noop' => true];
         }
 
+        if ($occupant instanceof Resources && in_array($intent, self::GRID_STORAGE_INTENTS, true)) {
+            $targetStorage = $this->resolveTargetStorageForIntent($character, $intent);
+            if (!$targetStorage) {
+                return ['type' => 'quick_move', 'noop' => true];
+            }
+
+            return $this->moveService->transferResourceToStorageGrid(
+                $character,
+                $fromSlotUuid,
+                $targetStorage,
+                $quantity,
+            );
+        }
+
+        if ($occupant instanceof Item && in_array($intent, self::ITEM_STORAGE_INTENTS, true)) {
+            $targetStorage = $this->resolveTargetStorageForIntent($character, $intent === 'mail_claim' ? 'inventory' : $intent);
+            $toSlotUuid = $this->resolveTargetSlotInStorage($character, $occupant, $targetStorage);
+            if (!$toSlotUuid || $toSlotUuid === $fromSlotUuid) {
+                return ['type' => 'quick_move', 'noop' => true];
+            }
+
+            return $this->moveService->move($character, $fromSlotUuid, $toSlotUuid, $quantity);
+        }
+
         $toSlotUuid = match ($intent) {
-            'equip' => $this->resolveEquipTarget($character, $occupant),
-            'inventory' => $this->resolveInventoryTarget($character),
-            'bank' => $this->resolveStorageGridTarget($character, 'bank'),
-            'guild_bank' => $this->resolveGuildBankTarget($character),
             'craft' => $this->resolveCraftTarget($character, $occupant, $stationMode),
             'disassemble' => $this->resolveDisassembleTarget($character, $occupant),
             default => null,
@@ -92,81 +120,75 @@ class StorageQuickMoveService
         return Resources::where('slot_uuid', $slotUuid)->whereNull('buffer_slot_uuid')->first();
     }
 
-    private function resolveEquipTarget(Character $character, Item|Resources $occupant): ?string
+    private function resolveTargetStorageForIntent(Character $character, string $intent): ?Storage
     {
-        if (!$occupant instanceof Item) {
-            return null;
-        }
-
-        $equipment = $character->storages()->where('storage_type', 'equipment')->first();
-        if (!$equipment) {
-            return null;
-        }
-
-        $slotType = $occupant->slot_type ?? $occupant->template?->slot_type;
-        if (!$slotType || !str_starts_with($slotType, 'equipment_')) {
-            return null;
-        }
-
-        $slots = $equipment->slots()->where('slot_type', $slotType)->orderBy('id')->get();
-        if ($slotType === 'equipment_ring') {
-            $empty = $slots->first(fn ($slot) => !Item::where('slot_uuid', $slot->uuid)->exists());
-
-            return ($empty ?? $slots->first())?->uuid;
-        }
-
-        $slot = $slots->first();
-        if (!$slot) {
-            return null;
-        }
-
-        $target = ['kind' => 'regular', 'cell' => $slot];
-
-        return $this->slotFitService->occupantFitsTarget($character, $occupant, $target)
-            ? $slot->uuid
-            : null;
+        return match ($intent) {
+            'inventory', 'mail_claim' => $character->storages()->where('storage_type', 'inventory')->first(),
+            'equipment' => $character->storages()->where('storage_type', 'equipment')->first(),
+            'bank' => $character->storages()->where('storage_type', 'bank')->first(),
+            'post_outbox' => app(MailService::class)->ensureOutboxStorage($character),
+            'guild_bank' => $this->resolveGuildBankStorage($character),
+            'trade' => $this->resolveTradeStorage($character),
+            default => null,
+        };
     }
 
-    private function resolveInventoryTarget(Character $character): ?string
-    {
-        return $this->resolveStorageGridTarget($character, 'inventory');
-    }
-
-    private function resolveStorageGridTarget(Character $character, string $storageType): ?string
-    {
-        $storage = $character->storages()->where('storage_type', $storageType)->first();
-        if (!$storage) {
-            return null;
-        }
-
-        foreach ($this->specialSlotService->getGridSlots($storage) as $slot) {
-            if (Item::where('slot_uuid', $slot->uuid)->exists()) {
-                continue;
-            }
-
-            if (Resources::where('slot_uuid', $slot->uuid)->whereNull('buffer_slot_uuid')->exists()) {
-                continue;
-            }
-
-            return $slot->uuid;
-        }
-
-        return null;
-    }
-
-    private function resolveGuildBankTarget(Character $character): ?string
+    private function resolveGuildBankStorage(Character $character): ?Storage
     {
         $guild = $this->guildService->getGuildForPlayer($character);
         if (!$guild) {
             return null;
         }
 
-        $guildBank = $guild->storages()->where('storage_type', 'guild_bank')->first();
-        if (!$guildBank) {
+        return $guild->storages()->where('storage_type', 'guild_bank')->first();
+    }
+
+    private function resolveTradeStorage(Character $character): ?Storage
+    {
+        return $character->storages()->where('storage_type', 'trade')->first();
+    }
+
+    private function resolveTargetSlotInStorage(
+        Character $character,
+        Item $occupant,
+        ?Storage $storage,
+    ): ?string {
+        if (!$storage) {
             return null;
         }
 
-        foreach ($this->specialSlotService->getGridSlots($guildBank) as $slot) {
+        $slotType = $occupant->slot_type ?? $occupant->template?->slot_type;
+
+        if ($storage->storage_type === 'equipment' && $slotType && str_starts_with($slotType, 'equipment_')) {
+            $slots = $storage->slots()->where('slot_type', $slotType)->orderBy('id')->get();
+            if ($slotType === 'equipment_ring') {
+                $empty = $slots->first(fn ($slot) => !Item::where('slot_uuid', $slot->uuid)->exists());
+
+                return ($empty ?? $slots->first())?->uuid;
+            }
+
+            $slot = $slots->first();
+            if (!$slot) {
+                return null;
+            }
+
+            $target = ['kind' => 'regular', 'cell' => $slot];
+
+            return $this->slotFitService->occupantFitsTarget($character, $occupant, $target)
+                ? $slot->uuid
+                : null;
+        }
+
+        if ($storage->storage_type === 'trade') {
+            $tradeSlot = $this->provisioningService->findFreeTradeSlot($character);
+
+            return $tradeSlot?->uuid;
+        }
+
+        $slots = $this->specialSlotService->getGridSlots($storage)
+            ->concat($this->specialSlotService->getSpecialSlots($storage));
+
+        foreach ($slots as $slot) {
             if (Item::where('slot_uuid', $slot->uuid)->exists()) {
                 continue;
             }
@@ -175,7 +197,10 @@ class StorageQuickMoveService
                 continue;
             }
 
-            return $slot->uuid;
+            $target = ['kind' => 'regular', 'cell' => $slot];
+            if ($this->slotFitService->occupantFitsTarget($character, $occupant, $target)) {
+                return $slot->uuid;
+            }
         }
 
         return null;

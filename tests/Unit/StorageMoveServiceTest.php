@@ -370,6 +370,63 @@ class StorageMoveServiceTest extends TestCase
         $this->assertEquals($fromSlotUuid, $wood->slot_uuid);
     }
 
+    public function test_move_within_post_outbox_merges_resources(): void
+    {
+        $outbox = app(\App\Services\MailService::class)->ensureOutboxStorage($this->player);
+        $slots = $outbox->slots()->whereNull('slot_type')->orderBy('id')->get()->take(2);
+
+        Resources::create([
+            'slot_uuid' => $slots[0]->uuid,
+            'recipe_slug' => 'wood',
+            'template_slug' => 'wood',
+            'slot_type' => 'material',
+            'max_stack' => 20,
+            'quantity' => 5,
+        ]);
+
+        Resources::create([
+            'slot_uuid' => $slots[1]->uuid,
+            'recipe_slug' => 'wood',
+            'template_slug' => 'wood',
+            'slot_type' => 'material',
+            'max_stack' => 20,
+            'quantity' => 8,
+        ]);
+
+        $this->moveService->move($this->player, $slots[1]->uuid, $slots[0]->uuid);
+
+        $this->assertEquals(13, Resources::where('slot_uuid', $slots[0]->uuid)->value('quantity'));
+        $this->assertFalse(Resources::where('slot_uuid', $slots[1]->uuid)->exists());
+    }
+
+    public function test_transfer_resource_to_storage_grid_splits_remainder(): void
+    {
+        $outbox = app(\App\Services\MailService::class)->ensureOutboxStorage($this->player);
+        $slots = $outbox->slots()->whereNull('slot_type')->orderBy('id')->get();
+
+        Resources::create([
+            'slot_uuid' => $slots[0]->uuid,
+            'recipe_slug' => 'wood',
+            'template_slug' => 'wood',
+            'slot_type' => 'material',
+            'max_stack' => 20,
+            'quantity' => 7,
+        ]);
+
+        $this->inventoryService->addResource($this->player, 'wood', 20);
+        $wood = Resources::query()
+            ->whereIn('slot_uuid', $this->player->storages()->where('storage_type', 'inventory')->firstOrFail()->slots()->pluck('uuid'))
+            ->where('template_slug', 'wood')
+            ->whereNull('buffer_slot_uuid')
+            ->firstOrFail();
+
+        $result = $this->moveService->transferResourceToStorageGrid($this->player, $wood->slot_uuid, $outbox);
+
+        $this->assertArrayNotHasKey('noop', $result);
+        $this->assertEquals(20, Resources::where('slot_uuid', $slots[0]->uuid)->value('quantity'));
+        $this->assertEquals(7, Resources::where('slot_uuid', $slots[1]->uuid)->value('quantity'));
+    }
+
     private function createSecondPlayer(): Character
     {
         $user2 = User::create([

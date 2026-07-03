@@ -11,6 +11,7 @@ use App\Models\Slot;
 use App\Models\Storage;
 use App\Models\TemporarySlot;
 use App\Models\TradeOffer;
+use App\Models\MailMessage;
 class StorageLayoutService
 {
     public function __construct(
@@ -22,12 +23,13 @@ class StorageLayoutService
         private CorpseLootService $corpseLootService,
         private QuestStorageService $questStorageService,
         private SlotCellResolver $slotCellResolver,
+        private MailService $mailService,
     ) {}
 
     /**
      * @param  string[]|null  $include
      */
-    public function getCharacterLayout(Character $character, ?array $include = null, ?string $corpseUuid = null): array
+    public function getCharacterLayout(Character $character, ?array $include = null, ?string $corpseUuid = null, ?string $mailMessageUuid = null): array
     {
         $include = $include ?? ['inventory'];
         $this->provisioningService->consolidateInventoryResources($character);
@@ -145,6 +147,33 @@ class StorageLayoutService
         if (in_array('quest', $include, true)) {
             $questStorage = $this->questStorageService->ensureQuestStorage($character);
             $result['quest_storage'] = $this->formatQuestSlotGrid($character, $questStorage);
+        }
+
+        if (in_array('post_outbox', $include, true)) {
+            $outbox = $this->mailService->ensureOutboxStorage($character);
+            $formatted = $this->formatRegularStorage($outbox);
+            $result['post_outbox'] = $formatted;
+            $result['storages'][] = $formatted;
+        }
+
+        if (in_array('post_inbox', $include, true) && $mailMessageUuid) {
+            $message = $this->mailService->getMessageForRecipient($character, $mailMessageUuid);
+            $inboxStorage = $this->mailService->ensureInboxStorage();
+            $tempSlots = $this->mailService->getInboxTempSlots($character, $mailMessageUuid);
+            $formatted = $this->formatPostInboxGrid($inboxStorage, $tempSlots, $message);
+            $result['post_inbox'] = $formatted;
+            $result['mail_message'] = [
+                'uuid' => $message->uuid,
+                'subject' => $message->subject,
+                'body' => $message->body,
+                'sender_name' => $message->sender_name,
+                'status' => $message->status,
+                'has_attachments' => $message->attachment_count > 0,
+                'attachment_count' => $message->attachment_count,
+            ];
+            if ($message->attachment_count > 0) {
+                $result['storages'][] = $formatted;
+            }
         }
 
         if (in_array('stats', $include, true) || in_array('equipment', $include, true)) {
@@ -440,6 +469,37 @@ class StorageLayoutService
             'grant_slots' => $grantSlots,
             'turnin_slots' => $turninSlots,
             'slots' => array_merge($grantSlots, $turninSlots),
+        ];
+    }
+
+
+    private function formatPostInboxGrid(Storage $storage, $tempSlots, MailMessage $message): array
+    {
+        $cols = $this->provisioningService->getGridCols('post_inbox');
+
+        $slots = $tempSlots->map(function (TemporarySlot $tempSlot) {
+            $occ = $this->occupantPayloadForTemporarySlot($tempSlot);
+
+            return [
+                'uuid' => $tempSlot->uuid,
+                'kind' => 'temporary',
+                'slot_type' => $tempSlot->slot_type,
+                'slot_index' => $tempSlot->slot_index,
+                'index' => $tempSlot->slot_index,
+                'item' => $occ['item'],
+                'resource' => $occ['resource'],
+            ];
+        })->values()->all();
+
+        return [
+            'uuid' => $storage->uuid,
+            'storage_type' => 'post_inbox',
+            'name' => $storage->name,
+            'message_uuid' => $message->uuid,
+            'cols' => $cols,
+            'slots' => $slots,
+            'special_slots' => $slots,
+            'grid_slots' => $slots,
         ];
     }
 

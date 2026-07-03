@@ -12,6 +12,7 @@ use App\Models\Slot;
 use App\Models\Storage;
 use App\Models\TradeOffer;
 use App\Models\TradeItem;
+use App\Services\Storage\PlayerStorageAccess;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -25,6 +26,7 @@ class TradeService
         private StorageProvisioningService $provisioningService,
         private SpecialSlotService $specialSlotService,
         private InventoryResourcePlacementService $placementService,
+        private PlayerStorageAccess $playerStorageAccess,
     ) {}
 
     public function createTrade(Character $initiator, Character $partner): TradeOffer
@@ -100,7 +102,7 @@ class TradeService
             $fromSlot = Slot::where('uuid', $item->slot_uuid)->firstOrFail();
             $fromStorage = Storage::where('uuid', $fromSlot->storage_uuid)->firstOrFail();
 
-            if ($fromStorage->characters_uuid !== $character->uuid || $fromStorage->storage_type !== 'inventory') {
+            if (!$this->playerStorageAccess->isTradeableSourceStorage($character, $fromStorage)) {
                 throw new \RuntimeException('Предмет не принадлежит вам');
             }
 
@@ -142,7 +144,7 @@ class TradeService
                 throw new \RuntimeException('Количество должно быть больше 0');
             }
 
-            $available = $this->inventoryService->getResourceQuantity($character, $templateSlug);
+            $available = $this->getTradeableResourceQuantity($character, $templateSlug);
             if ($available < $quantity) {
                 throw new \RuntimeException("Недостаточно ресурса {$templateSlug}: доступно {$available}, нужно {$quantity}");
             }
@@ -164,7 +166,7 @@ class TradeService
                         break;
                     }
 
-                    $reserved = $this->reserveResourceFromInventory($character, $templateSlug, $toAdd);
+                    $reserved = $this->reserveResourceFromTradeableStorages($character, $templateSlug, $toAdd);
                     $partial->update(['quantity' => $partial->quantity + $toAdd]);
                     $reserved->delete();
 
@@ -197,7 +199,7 @@ class TradeService
                     ? $remaining
                     : min($remaining, $template->max_stack);
 
-                $reserved = $this->reserveResourceFromInventory($character, $templateSlug, $chunkQty);
+                $reserved = $this->reserveResourceFromTradeableStorages($character, $templateSlug, $chunkQty);
                 $originSlotUuid = $reserved->slot_uuid;
                 $reserved->update(['slot_uuid' => $tradeSlot->uuid]);
 
@@ -607,51 +609,75 @@ class TradeService
         return $query->first();
     }
 
-    private function reserveResourceFromInventory(Character $character, string $templateSlug, int $quantity): Resources
+    private function getTradeableResourceQuantity(Character $character, string $templateSlug): int
+    {
+        $total = 0;
+        foreach (PlayerStorageAccess::TRADEABLE_SOURCE_TYPES as $storageType) {
+            $storage = $character->storages()->where('storage_type', $storageType)->first();
+            if (!$storage) {
+                continue;
+            }
+
+            $slotUuids = $storage->slots()->pluck('uuid');
+            $total += (int) Resources::whereIn('slot_uuid', $slotUuids)
+                ->where('template_slug', $templateSlug)
+                ->whereNull('buffer_slot_uuid')
+                ->sum('quantity');
+        }
+
+        return $total;
+    }
+
+    private function reserveResourceFromTradeableStorages(Character $character, string $templateSlug, int $quantity): Resources
     {
         $remaining = $quantity;
-        $inventory = $character->storages()->where('storage_type', 'inventory')->firstOrFail();
-        $slotUuids = $inventory->slots()->pluck('uuid');
-
-        $resources = Resources::whereIn('slot_uuid', $slotUuids)
-            ->where('template_slug', $templateSlug)
-            ->whereNull('buffer_slot_uuid')
-            ->orderBy('quantity', 'asc')
-            ->get();
-
         $reservedResource = null;
 
-        foreach ($resources as $resource) {
-            if ($remaining <= 0) {
-                break;
+        foreach (PlayerStorageAccess::TRADEABLE_SOURCE_TYPES as $storageType) {
+            $storage = $character->storages()->where('storage_type', $storageType)->first();
+            if (!$storage) {
+                continue;
             }
 
-            $take = min($remaining, $resource->quantity);
+            $slotUuids = $storage->slots()->pluck('uuid');
+            $resources = Resources::whereIn('slot_uuid', $slotUuids)
+                ->where('template_slug', $templateSlug)
+                ->whereNull('buffer_slot_uuid')
+                ->orderBy('quantity', 'asc')
+                ->get();
 
-            if (!$reservedResource) {
-                if ($take === $resource->quantity) {
-                    $reservedResource = $resource;
+            foreach ($resources as $resource) {
+                if ($remaining <= 0) {
+                    break 2;
+                }
+
+                $take = min($remaining, $resource->quantity);
+
+                if (!$reservedResource) {
+                    if ($take === $resource->quantity) {
+                        $reservedResource = $resource;
+                    } else {
+                        $resource->update(['quantity' => $resource->quantity - $take]);
+                        $reservedResource = Resources::create([
+                            'uuid' => Str::uuid()->toString(),
+                            'slot_uuid' => $resource->slot_uuid,
+                            'recipe_slug' => $resource->recipe_slug,
+                            'template_slug' => $resource->template_slug,
+                            'slot_type' => $resource->slot_type,
+                            'max_stack' => $resource->max_stack,
+                            'quantity' => $take,
+                        ]);
+                    }
+                } elseif ($take === $resource->quantity) {
+                    $reservedResource->update(['quantity' => $reservedResource->quantity + $take]);
+                    $resource->delete();
                 } else {
                     $resource->update(['quantity' => $resource->quantity - $take]);
-                    $reservedResource = Resources::create([
-                        'uuid' => Str::uuid()->toString(),
-                        'slot_uuid' => $resource->slot_uuid,
-                        'recipe_slug' => $resource->recipe_slug,
-                        'template_slug' => $resource->template_slug,
-                        'slot_type' => $resource->slot_type,
-                        'max_stack' => $resource->max_stack,
-                        'quantity' => $take,
-                    ]);
+                    $reservedResource->update(['quantity' => $reservedResource->quantity + $take]);
                 }
-            } elseif ($take === $resource->quantity) {
-                $reservedResource->update(['quantity' => $reservedResource->quantity + $take]);
-                $resource->delete();
-            } else {
-                $resource->update(['quantity' => $resource->quantity - $take]);
-                $reservedResource->update(['quantity' => $reservedResource->quantity + $take]);
-            }
 
-            $remaining -= $take;
+                $remaining -= $take;
+            }
         }
 
         if ($remaining > 0 || !$reservedResource) {

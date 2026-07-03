@@ -8,6 +8,7 @@ use App\Models\Character;
 use App\Models\User;
 use App\Services\CraftingService;
 use App\Services\InventoryService;
+use App\Services\MailService;
 use App\Services\StorageQuickMoveService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -41,7 +42,7 @@ class StorageQuickMoveServiceTest extends TestCase
         $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->character);
         $item->refresh();
 
-        $result = $this->service->quickMove($this->character, $item->slot_uuid, 'equip');
+        $result = $this->service->quickMove($this->character, $item->slot_uuid, 'equipment');
 
         $this->assertArrayNotHasKey('noop', $result);
         $item->refresh();
@@ -57,7 +58,7 @@ class StorageQuickMoveServiceTest extends TestCase
     {
         $this->inventoryService->addResource($this->character, 'wood', 10);
         $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->character);
-        $this->service->quickMove($this->character, $item->slot_uuid, 'equip');
+        $this->service->quickMove($this->character, $item->slot_uuid, 'equipment');
         $item->refresh();
 
         $result = $this->service->quickMove($this->character, $item->slot_uuid, 'inventory');
@@ -164,5 +165,34 @@ class StorageQuickMoveServiceTest extends TestCase
         $wood->refresh();
         $inventory = $this->character->storages()->where('storage_type', 'inventory')->firstOrFail();
         $this->assertTrue($inventory->slots()->where('uuid', $wood->slot_uuid)->exists());
+    }
+
+    public function test_post_outbox_quick_move_stacks_partial_resource(): void
+    {
+        $outbox = app(MailService::class)->ensureOutboxStorage($this->character);
+        $slots = $outbox->slots()->whereNull('slot_type')->orderBy('id')->get();
+
+        \App\Models\Resources::create([
+            'slot_uuid' => $slots[0]->uuid,
+            'recipe_slug' => 'wood',
+            'template_slug' => 'wood',
+            'slot_type' => 'material',
+            'max_stack' => 20,
+            'quantity' => 7,
+        ]);
+
+        $this->inventoryService->addResource($this->character, 'wood', 20);
+        $wood = \App\Models\Resources::query()
+            ->whereIn('slot_uuid', $this->character->storages()->where('storage_type', 'inventory')->firstOrFail()->slots()->pluck('uuid'))
+            ->where('template_slug', 'wood')
+            ->whereNull('buffer_slot_uuid')
+            ->firstOrFail();
+
+        $result = $this->service->quickMove($this->character, $wood->slot_uuid, 'post_outbox');
+
+        $this->assertArrayNotHasKey('noop', $result);
+        $this->assertEquals(20, \App\Models\Resources::where('slot_uuid', $slots[0]->uuid)->value('quantity'));
+        $this->assertEquals(7, \App\Models\Resources::where('slot_uuid', $slots[1]->uuid)->value('quantity'));
+        $this->assertFalse(\App\Models\Resources::where('slot_uuid', $wood->slot_uuid)->exists());
     }
 }

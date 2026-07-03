@@ -271,4 +271,32 @@ class AuctionServiceTest extends TestCase
         $this->expectExceptionMessage('Можно купить только весь лот целиком');
         $this->auctionService->buyLot($this->buyer, $lot->uuid, 2);
     }
+    public function test_buy_finite_lot_sends_to_mail_when_inventory_full(): void
+    {
+        $this->inventoryService->addResource($this->seller, 'wood', 10);
+        $item = WorkbenchHelper::craftWoodenSwordFromInventory($this->seller);
+        $lot = $this->auctionService->listLot($this->seller, $item->uuid, 100);
+
+        // Fill buyer inventory completely
+        $inventory = \App\Models\Storage::where('characters_uuid', $this->buyer->uuid)
+            ->where('storage_type', 'inventory')->firstOrFail();
+        $occupied = \App\Models\Item::pluck('slot_uuid')
+            ->merge(\App\Models\Resources::pluck('slot_uuid'));
+        foreach ($inventory->slots()->whereNotIn('uuid', $occupied)->get() as $slot) {
+            \App\Models\Item::create([
+                'uuid' => \Illuminate\Support\Str::uuid()->toString(),
+                'slot_uuid' => $slot->uuid,
+                'template_slug' => 'wood',
+                'stage' => 'item',
+                'slot_type' => 'wood',
+            ]);
+        }
+
+        $result = $this->auctionService->buyLot($this->buyer, $lot->uuid);
+        $this->assertFalse($result['is_infinite']);
+
+        $mail = app(\App\Services\MailService::class)->getInbox($this->buyer);
+        $this->assertGreaterThanOrEqual(1, $mail->count());
+    }
+
 }
