@@ -31,7 +31,7 @@ class StorageTransferPolicyTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
 
         $this->moveService = app(StorageMoveService::class);
         $this->inventoryService = app(InventoryService::class);

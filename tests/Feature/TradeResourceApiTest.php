@@ -18,7 +18,7 @@ class TradeResourceApiTest extends TestCase
 
     public function test_add_resource_returns_correct_quantity_and_metadata_in_current_trade(): void
     {
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
 
         $user1 = User::where('email', 'test@example.com')->first();
         $player1 = $user1->characters()->where('character_type', 'player')->first();

@@ -20,6 +20,8 @@ use App\Http\Controllers\Api\PlayPanelController;
 use App\Http\Controllers\Api\FriendController;
 use App\Http\Controllers\Api\GuildController;
 use App\Http\Controllers\Api\GameMetaController;
+use App\Http\Controllers\Api\WorldController;
+use App\Http\Controllers\Api\ZoneEditorController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/game/meta', [GameMetaController::class, 'index']);
@@ -30,6 +32,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/online', [HeartbeatController::class, 'online']);
     Route::get('/auction/lots', [AuctionController::class, 'activeLots']);
     Route::get('/templates', [ItemTemplateController::class, 'index']);
+
+    Route::get('/world/sprites', [ZoneEditorController::class, 'sprites']);
+    Route::put('/world/zones/{zoneSlug}', [ZoneEditorController::class, 'updateZone']);
+    Route::put('/world/zones/{zoneSlug}/tiles', [ZoneEditorController::class, 'saveTiles']);
 
     Route::middleware('character.owner')->group(function () {
         Route::get('/inventory/{characterUuid}', [InventoryController::class, 'index']);
@@ -109,6 +115,18 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/guild/{characterUuid}/decline-invite', [GuildController::class, 'declineInvite']);
 
         Route::get('/play-panel/{characterUuid}', [PlayPanelController::class, 'show']);
+
+        Route::get('/world/zones', [WorldController::class, 'zones']);
+        Route::get('/world/zones/{zoneSlug}', [WorldController::class, 'zone']);
+        Route::get('/world/zones/{zoneSlug}/tiles', [WorldController::class, 'zoneTiles']);
+        Route::get('/world/{characterUuid}', [WorldController::class, 'show']);
+        Route::get('/world/{characterUuid}/context', [WorldController::class, 'context']);
+        Route::get('/world/{characterUuid}/nearby', [WorldController::class, 'nearby']);
+        Route::post('/world/{characterUuid}/move', [WorldController::class, 'move']);
+        Route::post('/world/{characterUuid}/step', [WorldController::class, 'step']);
+        Route::post('/world/{characterUuid}/interact', [WorldController::class, 'interact']);
+        Route::post('/world/{characterUuid}/use-portal', [WorldController::class, 'usePortal']);
+        Route::post('/world/{characterUuid}/enter-zone', [WorldController::class, 'enterZone']);
 
         Route::get('/settings/{characterUuid}', [SettingsController::class, 'get']);
         Route::post('/settings/{characterUuid}', [SettingsController::class, 'set']);

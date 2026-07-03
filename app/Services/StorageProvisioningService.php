@@ -276,7 +276,7 @@ class StorageProvisioningService
         }
 
         return match ($storageType) {
-            'inventory' => 4,
+            'inventory' => 6,
             'trade' => 3,
             'play_panel' => 12,
             'bank' => 15,

@@ -16,7 +16,7 @@ class AuthApiTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
     }
 
     public function test_register_returns_token_and_character(): void

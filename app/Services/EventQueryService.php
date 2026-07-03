@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\CharacterWorldState;
 use App\Models\GameEvent;
 use App\Models\TradeOffer;
 use Illuminate\Support\Collection;
@@ -13,10 +14,11 @@ class EventQueryService
     public function getEventsAfter(string $characterUuid, int $afterId, int $limit = 50): Collection
     {
         $tradeUuids = $this->activeTradeUuids($characterUuid);
+        $zoneSlug = CharacterWorldState::where('character_uuid', $characterUuid)->value('zone_slug');
 
         return GameEvent::query()
             ->where('id', '>', $afterId)
-            ->where(function ($query) use ($characterUuid, $tradeUuids) {
+            ->where(function ($query) use ($characterUuid, $tradeUuids, $zoneSlug) {
                 $query->where('actor_uuid', $characterUuid);
 
                 if ($tradeUuids->isNotEmpty()) {
@@ -27,6 +29,14 @@ class EventQueryService
                 }
 
                 $query->orWhere('aggregate_type', 'presence');
+
+                if ($zoneSlug) {
+                    $query->orWhere(function ($sub) use ($zoneSlug) {
+                        $sub->where('aggregate_type', 'world')
+                            ->where('aggregate_uuid', $zoneSlug)
+                            ->whereIn('event_type', ['world.moved', 'world.entered_zone', 'world.interacted']);
+                    });
+                }
             })
             ->orderBy('id', 'asc')
             ->limit($limit)

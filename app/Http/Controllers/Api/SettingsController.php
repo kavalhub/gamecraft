@@ -4,11 +4,16 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\CharacterSetting;
+use App\Services\CharacterSettingsDefaultsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class SettingsController extends Controller
 {
+    public function __construct(
+        private CharacterSettingsDefaultsService $settingsDefaults,
+    ) {}
+
     public function get(string $characterUuid): JsonResponse
     {
         $settings = CharacterSetting::where('character_uuid', $characterUuid)->get();
@@ -17,6 +22,8 @@ class SettingsController extends Controller
         foreach ($settings as $setting) {
             $result[$setting->key] = $setting->value;
         }
+
+        $result = $this->settingsDefaults->mergeSettings($result);
 
         return response()->json(['settings' => $result]);
     }

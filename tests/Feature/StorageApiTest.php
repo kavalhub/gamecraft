@@ -24,7 +24,7 @@ class StorageApiTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
 
         $user = User::where('email', 'test@example.com')->first();
         $this->player = $user->characters()->where('character_type', 'player')->first();
@@ -44,7 +44,7 @@ class StorageApiTest extends TestCase
 
         $this->assertNotNull($inventory);
         $this->assertEquals(36, count($inventory['grid_slots'] ?? $inventory['slots']));
-        $this->assertEquals(4, $inventory['cols']);
+        $this->assertEquals(6, $inventory['cols']);
         $goldInGrid = collect($inventory['grid_slots'] ?? $inventory['slots'])
             ->contains(fn ($s) => ($s['resource']['template_slug'] ?? null) === 'gold');
         $this->assertFalse($goldInGrid);

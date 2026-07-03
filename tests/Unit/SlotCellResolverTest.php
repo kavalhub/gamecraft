@@ -26,7 +26,7 @@ class SlotCellResolverTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->seed(DatabaseSeeder::class);
+        $this->seedGameDatabase();
         $this->resolver = app(SlotCellResolver::class);
         $user = \App\Models\User::where('email', 'test@example.com')->first();
         $this->player = $user->characters()->where('character_type', 'player')->first();
