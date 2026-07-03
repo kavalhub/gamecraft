@@ -22,6 +22,7 @@ class AuctionService
         private InventoryService $inventoryService,
         private EventStore $eventStore,
         private WorldStorageService $worldStorageService,
+        private MailService $mailService,
         private CurrencyService $currencyService,
     ) {}
 
@@ -488,17 +489,21 @@ class AuctionService
             ->whereNotIn('uuid', $occupiedSlotUuids)
             ->first();
 
-        if (!$freeSlot) {
-            $this->currencyService->credit($buyer, $lot->price, 'auction.refund', [
-                'lot_uuid' => $lot->uuid,
-                'reason' => 'no_inventory_space',
-            ]);
-            throw new \RuntimeException('У покупателя нет свободных слотов в инвентаре');
-        }
-
-        // Перемещаем предмет покупателю
         $oldSlotUuid = $item->slot_uuid;
-        $item->update(['slot_uuid' => $freeSlot->uuid]);
+        $mailed = false;
+
+        if (!$freeSlot) {
+            $this->mailService->sendSystemMail(
+                $buyer,
+                'Покупка с аукциона',
+                'Инвентарь был полон. Предмет отправлен на почту.',
+                [$item],
+                $lot->seller?->name ?? 'Аукцион',
+            );
+            $mailed = true;
+        } else {
+            $item->update(['slot_uuid' => $freeSlot->uuid]);
+        }
 
         // Вычисляем комиссию
         $commission = (int) round($lot->price * $lot->commission_percent / 100);
@@ -547,7 +552,8 @@ class AuctionService
             'commission' => $commission,
             'seller_received' => $sellerReceived,
             'from_slot_uuid' => $oldSlotUuid,
-            'to_slot_uuid' => $freeSlot->uuid,
+            'to_slot_uuid' => $mailed ? null : $freeSlot->uuid,
+            'mailed' => $mailed,
             'quantity' => 1,
             'role' => 'buyer',
         ];
@@ -650,7 +656,8 @@ class AuctionService
                     'item_uuid' => $item->uuid,
                     'template_slug' => $lot->template_slug,
                     'from_slot_uuid' => $oldSlotUuid,
-                    'to_slot_uuid' => $freeSlot->uuid,
+                    'to_slot_uuid' => $mailed ? null : $freeSlot->uuid,
+            'mailed' => $mailed,
                 ],
                 $seller->uuid,
                 $correlationUuid

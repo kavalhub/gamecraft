@@ -681,6 +681,37 @@
             height: 650px;
         }
 
+        #window-mail {
+            width: 720px;
+            height: 580px;
+        }
+
+        #window-mail .window-body {
+            padding: 16px 20px;
+            overflow-y: auto;
+        }
+
+        .mail-badge {
+            display: inline-block;
+            margin-left: 6px;
+            padding: 1px 6px;
+            border-radius: 10px;
+            background: #ef4444;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            line-height: 1.4;
+        }
+
+        .play-panel-chip--mail-unread .pp-icon {
+            animation: mail-icon-blink 1.1s ease-in-out infinite;
+        }
+
+        @keyframes mail-icon-blink {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.35; transform: scale(1.08); filter: drop-shadow(0 0 5px rgba(251, 191, 36, 0.9)); }
+        }
+
         #window-settings {
             width: 400px;
             height: auto;
@@ -1391,6 +1422,22 @@
         </div>
     </div>
 
+
+    <div class="window" id="window-mail" data-window="mail">
+        <div class="window-header">
+            <div class="window-title">
+                <span class="icon">📬</span>
+                <span>Почта</span>
+            </div>
+            <div class="window-controls">
+                <div class="window-btn" onclick="WindowManager.close('mail')">✕</div>
+            </div>
+        </div>
+        <div class="window-body">
+            @include('partials.mail')
+        </div>
+    </div>
+
     <div class="window" id="window-players" data-window="players">
         <div class="window-header">
             <div class="window-title">
@@ -1476,6 +1523,7 @@
 
 <div id="playerContextMenu" class="player-context-menu">
     <button type="button" data-action="trade">Предложить обмен</button>
+    <button type="button" data-action="mail">Отправить письмо</button>
     <button type="button" data-action="duel">Вызвать на дуэль</button>
     <button type="button" data-action="friend">Добавить друга</button>
     <button type="button" data-action="guild">Пригласить в гильдию</button>
@@ -1489,7 +1537,7 @@
 <div id="msg" class="msg"></div>
 <div id="itemTooltip" class="tooltip"></div>
 @include('partials.resource-quantity-modal')
-<script src="{{ asset('js/game/game.bundle.js') }}?v=20260702p"></script>
+<script src="{{ asset('js/game/game.bundle.js') }}?v=20260703c"></script>
 
 <script>
     window.GameApi = {
@@ -1608,6 +1656,7 @@
             quests:     { x: 20, y: 120 },
             quest:      { center: true, verticalCenter: true },
             auction:    { center: true, verticalCenter: true },
+            mail:       { center: true, verticalCenter: true },
             players:    { center: true, verticalCenter: true },
             trade:      { center: true, verticalCenter: true },
             'item-preview': { center: true, verticalCenter: true },
@@ -1778,6 +1827,9 @@
 
             if (name === 'auction' && typeof window.initAuction === 'function') {
                 setTimeout(() => window.initAuction(), 50);
+            }
+            if (name === 'mail' && typeof window.initMail === 'function') {
+                setTimeout(() => window.initMail(), 50);
             }
             if (name === 'craft' && typeof window.initCraftStation === 'function') {
                 setTimeout(function () {
@@ -2100,7 +2152,18 @@
     async function loadPlayerData() {
         try {
             if (window.StorageManager) {
-                const data = await StorageManager.load(GameState.characterUuid, 'inventory,equipment,craft,disassemble,stats');
+                var include = 'inventory,equipment,craft,disassemble,stats';
+                var extraQuery = null;
+                if (window.WindowManager && WindowManager.isOpen('mail')) {
+                    include += ',post_outbox';
+                    var readEl = document.getElementById('mail-read');
+                    if (window.mailState && window.mailState.selectedMessage
+                        && readEl && readEl.style.display !== 'none') {
+                        include += ',post_inbox';
+                        extraQuery = { message_uuid: window.mailState.selectedMessage.uuid };
+                    }
+                }
+                const data = await StorageManager.load(GameState.characterUuid, include, extraQuery);
                 document.getElementById('playerName').textContent = data.character_name || 'Игрок';
                 const avatarEl = document.getElementById('playerAvatar');
                 if (avatarEl) avatarEl.textContent = data.character_avatar_icon || '🧙';
@@ -2132,6 +2195,9 @@
                 }
                 if (WindowManager.isOpen('bank') && typeof window.loadBankData === 'function') {
                     loadBankData();
+                }
+                if (WindowManager.isOpen('mail') && typeof window.refreshMailGrids === 'function') {
+                    window.refreshMailGrids(data);
                 }
                 return;
             }
@@ -2192,8 +2258,8 @@
         if (typeof window.loadBankData === 'function' && WindowManager.isOpen('bank')) {
             loadBankData();
         }
-        if (typeof window.loadBankData === 'function' && WindowManager.isOpen('bank')) {
-            loadBankData();
+        if (typeof window.refreshMailGrids === 'function' && WindowManager.isOpen('mail')) {
+            window.refreshMailGrids();
         }
         if (typeof window.refreshTradeData === 'function' && window.tradeState?.currentTrade) {
             window.refreshTradeData().then(function() {
@@ -2390,6 +2456,8 @@
         publicTypes: [
             'user.registered',
             'auction.listed',
+            'mail.received',
+            'mail.sent',
             'auction.purchased',
             'auction.sold',
             'trade.completed',
@@ -2790,6 +2858,7 @@
         handle(events) {
             let needsInventoryUpdate = false;
             let needsAuctionUpdate = false;
+            let needsMailUpdate = false;
             let needsTradeUpdate = false;
             let needsOnlineUpdate = false;
             let tradeCompleted = false;
@@ -2802,7 +2871,9 @@
                 if (['item.received', 'item.removed', 'item.crafted', 'item.disassembled', 'resource.transferred'].includes(e.type)) {
                     needsInventoryUpdate = true;
                 }
-                if (['auction.listed', 'auction.purchased', 'auction.cancelled'].includes(e.type)) {
+                if (['auction.listed',
+            'mail.received',
+            'mail.sent', 'auction.purchased', 'auction.cancelled'].includes(e.type)) {
                     needsInventoryUpdate = true;
                     needsAuctionUpdate = true;
                 }
@@ -2850,6 +2921,15 @@
             if (needsInventoryUpdate || needsTradeUpdate) {
                 setTimeout(() => loadPlayerData(), 100);
             }
+            if (needsMailUpdate) {
+                if (typeof window.refreshMailUnreadStatus === 'function') {
+                    setTimeout(() => window.refreshMailUnreadStatus(), 100);
+                }
+                if (WindowManager.isOpen('mail') && typeof window.loadMailInbox === 'function') {
+                    setTimeout(() => window.loadMailInbox(), 150);
+                }
+            }
+
             if (needsAuctionUpdate && WindowManager.isOpen('auction')) {
                 setTimeout(() => {
                     if (typeof window.loadMarket === 'function') window.loadMarket();
@@ -2995,6 +3075,11 @@
 
         if (action === 'trade' && uuid) {
             startTrade(uuid);
+        } else if (action === 'mail' && uuid) {
+            const name = menu?.dataset.playerName || 'Игрок';
+            if (typeof window.startMailCompose === 'function') {
+                window.startMailCompose(uuid, name);
+            }
         } else if (action === 'duel' && uuid) {
             if (typeof window.startDuel === 'function') {
                 window.startDuel(uuid);
@@ -3030,6 +3115,10 @@
             window.PlayPanelManager ? PlayPanelManager.load(characterUuid) : Promise.resolve(),
             window.GameItemPresenter ? GameItemPresenter.loadTemplateCache() : Promise.resolve(),
         ]);
+
+        if (typeof window.refreshMailUnreadStatus === 'function') {
+            window.refreshMailUnreadStatus().catch(function () {});
+        }
 
         WindowManager.open('journal');
         WindowManager.open('inventory');

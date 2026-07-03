@@ -37,7 +37,10 @@ class StorageController extends Controller
         $corpseUuid = $request->query('corpse_uuid');
         $corpseUuid = is_string($corpseUuid) && $corpseUuid !== '' ? $corpseUuid : null;
 
-        $layout = $this->layoutService->getCharacterLayout($character, $includeList, $corpseUuid);
+        $mailMessageUuid = $request->query('message_uuid');
+        $mailMessageUuid = is_string($mailMessageUuid) && $mailMessageUuid !== '' ? $mailMessageUuid : null;
+
+        $layout = $this->layoutService->getCharacterLayout($character, $includeList, $corpseUuid, $mailMessageUuid);
 
         return response()->json($layout);
     }
@@ -67,7 +70,7 @@ class StorageController extends Controller
 
             $layout = $this->layoutService->getCharacterLayout(
                 $character,
-                ['inventory', 'trade', 'equipment', 'craft', 'disassemble', 'quest', 'bank', 'guild_bank', 'stats']
+                ['inventory', 'trade', 'equipment', 'craft', 'disassemble', 'quest', 'bank', 'guild_bank', 'post_outbox', 'post_inbox', 'stats']
             );
 
             return response()->json([
@@ -84,7 +87,7 @@ class StorageController extends Controller
     {
         $request->validate([
             'from_slot_uuid' => 'required|string',
-            'intent' => 'required|string|in:equip,inventory,bank,guild_bank,craft,disassemble,station_return',
+            'intent' => 'required|string|in:equip,equipment,inventory,bank,guild_bank,craft,disassemble,station_return,mail_claim,post_outbox,trade',
             'station_mode' => 'nullable|string|in:center,material',
             'quantity' => 'nullable|integer|min:1',
         ]);
@@ -107,7 +110,7 @@ class StorageController extends Controller
 
             $layout = $this->layoutService->getCharacterLayout(
                 $character,
-                ['inventory', 'trade', 'equipment', 'craft', 'disassemble', 'quest', 'bank', 'guild_bank', 'stats']
+                ['inventory', 'trade', 'equipment', 'craft', 'disassemble', 'quest', 'bank', 'guild_bank', 'post_outbox', 'post_inbox', 'stats']
             );
 
             return response()->json([

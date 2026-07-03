@@ -45,6 +45,7 @@ class DatabaseSeeder extends Seeder
         }
 
         $this->createAuctionCharacter();
+        $this->createPostCharacter();
         $this->createSystemCharacter();
         $this->createTestUser();
     }
@@ -108,7 +109,8 @@ class DatabaseSeeder extends Seeder
             ['type' => 'trade', 'name' => 'Обмен', 'allowed_types' => null],
             ['type' => 'special', 'name' => 'Специальное', 'allowed_types' => null],
             ['type' => 'world', 'name' => 'Мир', 'allowed_types' => null],
-            ['type' => 'mail', 'name' => 'Почта', 'allowed_types' => ['slots' => [['slot_type' => null, 'count' => 100]]]],
+            ['type' => 'post_outbox', 'name' => 'Исходящая почта', 'allowed_types' => ['slots' => [['slot_type' => null, 'count' => 6]]], 'metadata' => ['grid_cols' => 6]],
+            ['type' => 'post_inbox', 'name' => 'Входящая почта', 'allowed_types' => null, 'metadata' => ['grid_cols' => 6]],
         ];
 
         foreach ($types as $type) {
@@ -129,6 +131,21 @@ class DatabaseSeeder extends Seeder
         );
 
         $this->command->info("Auction character created: {$auction->name} ({$auction->uuid})");
+    }
+
+    private function createPostCharacter(): void
+    {
+        $post = Character::firstOrCreate(
+            ['character_type' => 'post', 'name' => 'Почтовая служба'],
+            ['active' => true],
+        );
+
+        Storage::firstOrCreate(
+            ['characters_uuid' => $post->uuid, 'storage_type' => 'post_inbox'],
+            ['name' => 'Входящие', 'active' => true],
+        );
+
+        $this->command->info("Post character created: {$post->name} ({$post->uuid})");
     }
 
     private function createSystemCharacter(): void

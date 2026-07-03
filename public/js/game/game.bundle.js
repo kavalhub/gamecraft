@@ -883,6 +883,8 @@
         questStorage: null,
         bankStorage: null,
         guildBankStorage: null,
+        postOutboxStorage: null,
+        postInboxStorage: null,
         characterStats: null,
         myTradeSlots: null,
         partnerTradeSlots: null,
@@ -900,6 +902,9 @@
             var url = '/api/storage/' + characterUuid + '?include=' + include;
             if (extraQuery && extraQuery.corpse_uuid) {
                 url += '&corpse_uuid=' + encodeURIComponent(extraQuery.corpse_uuid);
+            }
+            if (extraQuery && extraQuery.message_uuid) {
+                url += '&message_uuid=' + encodeURIComponent(extraQuery.message_uuid);
             }
 
             return window.GameApi.fetch(url)
@@ -923,7 +928,7 @@
             var storages = layout.storages || [];
             this.inventoryStorage = storages.find(function (s) {
                 return s.storage_type === 'inventory';
-            }) || this.inventoryStorage;
+            }) || layout.inventory || this.inventoryStorage;
             this.equipmentStorage = storages.find(function (s) {
                 return s.storage_type === 'equipment';
             }) || this.equipmentStorage;
@@ -947,6 +952,12 @@
                 this.corpseStorage = corpseStorage;
             }
             this.questStorage = layout.quest_storage || this.questStorage;
+            this.postOutboxStorage = layout.post_outbox || storages.find(function (s) {
+                return s.storage_type === 'post_outbox';
+            }) || this.postOutboxStorage;
+            this.postInboxStorage = layout.post_inbox || storages.find(function (s) {
+                return s.storage_type === 'post_inbox';
+            }) || this.postInboxStorage;
             this.characterStats = layout.character_stats || this.characterStats;
             this.myTradeSlots = layout.my_trade_slots || this.myTradeSlots;
             this.partnerTradeSlots = layout.partner_trade_slots || this.partnerTradeSlots;
@@ -999,6 +1010,9 @@
                                 xpEl.textContent = '⭐ ' + data.layout.experience;
                             }
                         }
+                        if (typeof window.refreshStorageGrids === 'function') {
+                            window.refreshStorageGrids();
+                        }
                     }
                     return data;
                 });
@@ -1040,6 +1054,9 @@
                             } else if (xpEl) {
                                 xpEl.textContent = '⭐ ' + data.layout.experience;
                             }
+                        }
+                        if (typeof window.refreshStorageGrids === 'function') {
+                            window.refreshStorageGrids();
                         }
                     }
                     return data;
@@ -1216,8 +1233,12 @@
                         defaultToMax: false,
                         onConfirm: function (q) {
                             StorageManager.move(fromUuid, toUuid, q).then(function () {
-                                if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
-                                if (typeof loadPlayerData === 'function') loadPlayerData();
+                                if (typeof window.refreshAfterStorageChange === 'function') {
+                                    window.refreshAfterStorageChange();
+                                } else {
+                                    if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
+                                    if (typeof loadPlayerData === 'function') loadPlayerData();
+                                }
                             }).catch(function (err) {
                                 if (typeof showMsg === 'function') showMsg(err.message, 'error');
                             });
@@ -1225,8 +1246,12 @@
                     });
                 } else {
                     StorageManager.move(fromUuid, toUuid, null).then(function () {
-                        if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
-                        if (typeof loadPlayerData === 'function') loadPlayerData();
+                        if (typeof window.refreshAfterStorageChange === 'function') {
+                            window.refreshAfterStorageChange();
+                        } else {
+                            if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
+                            if (typeof loadPlayerData === 'function') loadPlayerData();
+                        }
                     }).catch(function (err) {
                         if (typeof showMsg === 'function') showMsg(err.message, 'error');
                     });
@@ -1263,6 +1288,7 @@
         character: { window: 'character', icon: '🛡️', label: 'Персонаж' },
         quests: { window: 'quests', icon: '📜', label: 'Квесты' },
         auction: { window: 'auction', icon: '🏪', label: 'Аукцион' },
+        mail: { window: 'mail', icon: '📬', label: 'Почта' },
         players: { window: 'players', icon: '👥', label: 'Общение' },
         encounter: { window: 'encounter', icon: '⚔️', label: 'Бой' },
         bank: { window: 'bank', icon: '🏦', label: 'Банк' },
@@ -1341,7 +1367,7 @@
         },
 
         renderSkeleton: function () {
-            var defaults = ['journal', 'inventory', 'character', 'quests', 'encounter', 'auction', 'players', 'bank', 'settings'];
+            var defaults = ['journal', 'inventory', 'character', 'quests', 'encounter', 'auction', 'mail', 'players', 'bank', 'settings'];
             this.cols = 12;
             this.slots = [];
             this.layout = {};
@@ -1424,6 +1450,11 @@
             this.bindEvents();
             this.resize();
             if (window.WindowManager) WindowManager.updateToolbar();
+            if (window.mailState && window.mailState.unreadCount > 0) {
+                container.querySelectorAll('.play-panel-chip[data-action="mail"]').forEach(function (chip) {
+                    chip.classList.add('play-panel-chip--mail-unread');
+                });
+            }
         },
 
         bindEvents: function () {
@@ -1549,6 +1580,7 @@
     function refreshAfterStorageChange(options) {
         options = options || {};
         if (typeof window.refreshStorageGrids === 'function') window.refreshStorageGrids();
+        if (typeof window.refreshMailGrids === 'function') window.refreshMailGrids();
         if (typeof loadPlayerData === 'function') loadPlayerData();
         if (options.craft && window.CraftPanel) CraftPanel.render();
         if (options.disassemble && window.DisassemblePanel) DisassemblePanel.render();
@@ -1557,6 +1589,7 @@
             window.loadBankData();
         }
     }
+    window.refreshAfterStorageChange = refreshAfterStorageChange;
 
     function quickMoveWasNoop(data) {
         return Boolean(data && data.move && data.move.noop);
@@ -1594,7 +1627,7 @@
         },
 
         equipItem: function (item, fromSlotUuid, options) {
-            return this.quickMove(fromSlotUuid || (item && item.slot_uuid), 'equip', options);
+            return this.quickMove(fromSlotUuid || (item && item.slot_uuid), 'equipment', options);
         },
 
         unequipFromSlot: function (fromSlotUuid) {
@@ -1638,11 +1671,25 @@
                 return StorageQuickActions.quickMove(fromSlotUuid, intent, options);
             });
         },
+
+        moveToMailOutbox: function (fromSlotUuid, options) {
+            options = options || {};
+            return StorageManager.load(GameState.characterUuid, 'inventory,post_outbox').then(function () {
+                return StorageQuickActions.quickMove(fromSlotUuid, 'post_outbox', options);
+            });
+        },
+
+        moveToTrade: function (fromSlotUuid, options) {
+            options = options || {};
+            return StorageManager.load(GameState.characterUuid, 'inventory,bank,post_outbox,trade').then(function () {
+                return StorageQuickActions.quickMove(fromSlotUuid, 'trade', options);
+            });
+        },
     };
 
     var ItemDispatcher = {
-        SINK_WINDOWS: ['craft', 'disassemble', 'trade', 'auction', 'quest', 'bank'],
-        SINK_PRIORITY: ['trade', 'auction', 'bank', 'craft', 'disassemble', 'quest'],
+        SINK_WINDOWS: ['craft', 'disassemble', 'trade', 'auction', 'mail', 'quest', 'bank'],
+        SINK_PRIORITY: ['trade', 'auction', 'mail', 'bank', 'craft', 'disassemble', 'quest'],
 
         getOpenSinks: function () {
             if (!window.WindowManager) return [];
@@ -1653,8 +1700,12 @@
 
         pickOpenSink: function () {
             if (!window.WindowManager) return null;
+            if (WindowManager.isOpen('mail') && window.mailState && window.mailState.tab === 'compose') {
+                return 'mail';
+            }
             for (var i = 0; i < this.SINK_PRIORITY.length; i++) {
                 var name = this.SINK_PRIORITY[i];
+                if (name === 'mail') continue;
                 if (WindowManager.isOpen(name)) {
                     return name;
                 }
@@ -1695,7 +1746,7 @@
             }
 
             return StorageManager.load(GameState.characterUuid, 'inventory,equipment').then(function () {
-                return StorageManager.quickMove(fromUuid, 'equip').then(function (data) {
+                return StorageManager.quickMove(fromUuid, 'equipment').then(function (data) {
                     if (!quickMoveWasNoop(data)) {
                         if (window.WindowManager) WindowManager.open('character');
                         refreshAfterStorageChange();
@@ -1802,6 +1853,8 @@
                     return this.dispatchTrade(descriptor, sourceSlotUuid);
                 case 'auction':
                     return this.dispatchAuction(descriptor);
+                case 'mail':
+                    return this.dispatchMail(descriptor, sourceSlotUuid, options);
                 case 'bank':
                     return this.dispatchBank(descriptor, sourceSlotUuid, options);
                 default:
@@ -1837,18 +1890,27 @@
             return this.dispatchCraft(item, sourceSlotUuid);
         },
 
-        dispatchTrade: function (item) {
-            if (typeof window.handleTradeDrop !== 'function') return Promise.resolve();
-            var isResource = item.template_slug && !item.recipe_slug
-                && item.stage !== 'blueprint' && item.stage !== 'item';
-            window.handleTradeDrop(item, { fullStack: isResource });
-            return Promise.resolve();
+        dispatchTrade: function (item, sourceSlotUuid) {
+            var qa = window.StorageQuickActions;
+            if (!qa || !qa.moveToTrade) return Promise.resolve();
+            var fromUuid = sourceSlotUuid || (item && item.slot_uuid);
+            if (!fromUuid) return Promise.resolve();
+            return qa.moveToTrade(fromUuid, { silent: true });
         },
 
         dispatchAuction: function (item) {
             if (typeof window.handleAuctionDrop !== 'function') return Promise.resolve();
             window.handleAuctionDrop(item);
             return Promise.resolve();
+        },
+
+        dispatchMail: function (item, sourceSlotUuid, options) {
+            options = options || {};
+            var qa = window.StorageQuickActions;
+            if (!qa || !qa.moveToMailOutbox) return Promise.resolve();
+            var fromUuid = sourceSlotUuid || (item && item.slot_uuid);
+            if (!fromUuid) return Promise.resolve();
+            return qa.moveToMailOutbox(fromUuid, { silent: options.silent !== false });
         },
 
         dispatchBank: function (item, sourceSlotUuid, options) {

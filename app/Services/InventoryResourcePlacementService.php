@@ -42,7 +42,7 @@ class InventoryResourcePlacementService
         $orderedSlots = $storage->slots()->orderBy('id')->get();
         $slotOrder = $orderedSlots->pluck('id', 'uuid');
 
-        foreach ($this->findPartialStacks($storage, $templateSlug, $maxStack, $slotOrder) as $existing) {
+        foreach ($this->findPartialStacks($storage, $templateSlug, $maxStack, $slotOrder, $reservedSlotUuids) as $existing) {
             if ($remaining < 1) {
                 break;
             }
@@ -153,7 +153,8 @@ class InventoryResourcePlacementService
             $storage,
             $templateSlug,
             $maxStack,
-            $storage->slots()->orderBy('id')->pluck('id', 'uuid')
+            $storage->slots()->orderBy('id')->pluck('id', 'uuid'),
+            [],
         ) as $stack) {
             $capacity += max(0, $maxStack - $stack->quantity);
         }
@@ -184,12 +185,14 @@ class InventoryResourcePlacementService
         string $templateSlug,
         ?int $maxStack,
         Collection $slotOrder,
+        array $excludeSlotUuids = [],
     ): Collection {
         if ($maxStack !== null && $maxStack < 1) {
             return collect();
         }
 
         $slotUuids = $storage->slots()->pluck('uuid');
+        $exclude = collect($excludeSlotUuids);
 
         $query = Resources::whereIn('slot_uuid', $slotUuids)
             ->whereNull('buffer_slot_uuid')
@@ -199,7 +202,9 @@ class InventoryResourcePlacementService
             $query->where('quantity', '<', $maxStack);
         }
 
-        return $query->get()->sortBy(fn (Resources $resource) => $slotOrder->get($resource->slot_uuid, PHP_INT_MAX));
+        return $query->get()
+            ->filter(fn (Resources $resource) => !$exclude->contains($resource->slot_uuid))
+            ->sortBy(fn (Resources $resource) => $slotOrder->get($resource->slot_uuid, PHP_INT_MAX));
     }
 
     /**

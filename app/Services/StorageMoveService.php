@@ -12,6 +12,8 @@ use App\Models\Storage;
 use App\Models\TemporarySlot;
 use App\Models\TradeItem;
 use App\Models\TradeOffer;
+use App\Services\Storage\PlayerStorageAccess;
+use App\Services\Storage\StorageTransferPolicy;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -29,6 +31,9 @@ class StorageMoveService
         private SlotFitService $slotFitService,
         private SlotCellResolver $slotCellResolver,
         private CorpseLootService $corpseLootService,
+        private InventoryResourcePlacementService $placementService,
+        private StorageTransferPolicy $transferPolicy,
+        private PlayerStorageAccess $playerStorageAccess,
     ) {}
 
     public function move(
@@ -65,7 +70,10 @@ class StorageMoveService
             $this->assertQuestItemMoveAllowed($from, $to, $occupant);
 
             if ($from['kind'] === 'regular' && $to['kind'] === 'regular') {
-                return $this->moveRegularToRegular($actor, $from['cell'], $to['cell'], $occupant, $quantity);
+                $result = $this->moveRegularToRegular($actor, $from['cell'], $to['cell'], $occupant, $quantity);
+                $this->maybeMarkMailClaimed($actor, $from);
+
+                return $result;
             }
 
             if ($from['kind'] === 'regular' && $to['kind'] === 'temporary') {
@@ -73,11 +81,185 @@ class StorageMoveService
             }
 
             if ($from['kind'] === 'temporary' && $to['kind'] === 'regular') {
-                return $this->moveTemporaryToRegular($actor, $from['cell'], $to['cell'], $occupant, $quantity);
+                $result = $this->moveTemporaryToRegular($actor, $from['cell'], $to['cell'], $occupant, $quantity);
+                $this->maybeMarkMailClaimed($actor, $from);
+
+                return $result;
             }
 
-            return $this->moveTemporaryToTemporary($actor, $from['cell'], $to['cell'], $occupant);
+            $result = $this->moveTemporaryToTemporary($actor, $from['cell'], $to['cell'], $occupant);
+            $this->maybeMarkMailClaimed($actor, $from);
+
+            return $result;
         });
+    }
+
+    /**
+     * Перенос ресурса в сетку хранилища с заполнением частичных стаков и разбиением остатка.
+     *
+     * @return array<string, mixed>
+     */
+    public function transferResourceToStorageGrid(
+        Character $actor,
+        string $fromSlotUuid,
+        Storage $targetStorage,
+        ?int $quantity = null,
+    ): array {
+        return DB::transaction(function () use ($actor, $fromSlotUuid, $targetStorage, $quantity) {
+            $from = $this->resolveCell($fromSlotUuid);
+
+            if ($from['kind'] === 'temporary') {
+                return $this->transferResourceFromTemporaryToStorageGrid(
+                    $actor,
+                    $from['cell'],
+                    $targetStorage,
+                    $quantity,
+                );
+            }
+
+            if ($from['kind'] !== 'regular') {
+                return $this->noop('resource');
+            }
+
+            /** @var Slot $fromSlot */
+            $fromSlot = $from['cell'];
+            if ($this->slotCellResolver->hasBufferedOccupantOnRegularSlot($fromSlot)) {
+                throw new \RuntimeException('Предмет занят');
+            }
+
+            $occupant = $this->getOccupantFromCell($from);
+            if (!$occupant instanceof Resources) {
+                return $this->noop('resource');
+            }
+
+            $moveQty = $quantity ?? $occupant->quantity;
+            $moveQty = min($moveQty, $occupant->quantity);
+            if ($moveQty < 1) {
+                return $this->noop('resource');
+            }
+
+            $sourceStorage = Storage::where('uuid', $fromSlot->storage_uuid)->first();
+            $reservedSlotUuids = $sourceStorage?->uuid === $targetStorage->uuid
+                ? [$fromSlot->uuid]
+                : [];
+
+            try {
+                $steps = $this->placementService->plan(
+                    $targetStorage,
+                    $occupant->template_slug,
+                    $moveQty,
+                    reservedSlotUuids: $reservedSlotUuids,
+                );
+            } catch (\RuntimeException) {
+                return $this->noop('resource');
+            }
+
+            return $this->executeResourcePlacementSteps($actor, $steps, $occupant);
+        });
+    }
+
+    /**
+     * @param  list<\App\Services\Slots\ResourcePlacementStep>  $steps
+     * @return array<string, mixed>
+     */
+    private function executeResourcePlacementSteps(
+        Character $actor,
+        array $steps,
+        Resources $occupant,
+    ): array {
+        $lastResult = null;
+        foreach ($steps as $step) {
+            $occupant->refresh();
+            if (!$occupant->exists) {
+                break;
+            }
+
+            $result = $this->move($actor, $occupant->slot_uuid, $step->targetSlotUuid, $step->quantity);
+            if (($result['noop'] ?? false) === true) {
+                break;
+            }
+
+            $lastResult = $result;
+        }
+
+        return $lastResult ?? $this->noop('resource');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function transferResourceFromTemporaryToStorageGrid(
+        Character $actor,
+        TemporarySlot $fromTempSlot,
+        Storage $targetStorage,
+        ?int $quantity = null,
+    ): array {
+        $occupant = $this->slotCellResolver->getOccupantForTemporarySlot($fromTempSlot);
+        if (!$occupant instanceof Resources) {
+            return $this->noop('resource');
+        }
+
+        $moveQty = $quantity ?? $occupant->quantity;
+        $moveQty = min($moveQty, $occupant->quantity);
+        if ($moveQty < 1) {
+            return $this->noop('resource');
+        }
+
+        try {
+            $steps = $this->placementService->plan(
+                $targetStorage,
+                $occupant->template_slug,
+                $moveQty,
+            );
+        } catch (\RuntimeException) {
+            return $this->noop('resource');
+        }
+
+        $lastResult = null;
+        foreach ($steps as $step) {
+            $occupant = $this->slotCellResolver->getOccupantForTemporarySlot($fromTempSlot);
+            if (!$occupant instanceof Resources) {
+                break;
+            }
+
+            $result = $this->move($actor, $fromTempSlot->uuid, $step->targetSlotUuid, $step->quantity);
+            if (($result['noop'] ?? false) === true) {
+                break;
+            }
+
+            $lastResult = $result;
+        }
+
+        return $lastResult ?? $this->noop('resource');
+    }
+
+    private function maybeMarkMailClaimed(Character $actor, array $from): void
+    {
+        if ($from['kind'] !== 'temporary') {
+            return;
+        }
+
+        /** @var TemporarySlot $fromTemp */
+        $fromTemp = $from['cell'];
+        $storage = Storage::where('uuid', $fromTemp->storage_uuid)->first();
+        if ($storage?->storage_type !== 'post_inbox') {
+            return;
+        }
+
+        $message = app(MailService::class)->findMessageByInboxSlot($fromTemp);
+        if (!$message) {
+            return;
+        }
+
+        if ($message->status === 'unread') {
+            app(MailService::class)->markRead($actor, $message->uuid);
+        }
+
+        if (!$this->slotCellResolver->getOccupantForTemporarySlot($fromTemp)) {
+            $fromTemp->update(['active' => false]);
+        }
+
+        app(MailService::class)->markClaimedIfEmpty($message->fresh());
     }
 
     private function resolveCell(string $uuid): array
@@ -93,6 +275,8 @@ class StorageMoveService
             $fromStorage = Storage::where('uuid', $fromTemp->storage_uuid)->first();
             if ($fromStorage?->storage_type === 'corpse') {
                 $this->corpseLootService->assertCanClaimSlot($actor, $fromTemp);
+            } elseif ($fromStorage?->storage_type === 'post_inbox') {
+                app(MailService::class)->assertRecipientOwnsInboxSlot($actor, $fromTemp);
             } elseif ($fromTemp->character_uuid !== null && $fromTemp->character_uuid !== $actor->uuid) {
                 throw new \RuntimeException('Нельзя перемещать из чужого слота обмена');
             }
@@ -107,6 +291,9 @@ class StorageMoveService
             if ($toStorage?->storage_type === 'corpse') {
                 throw new \RuntimeException('Нельзя класть предметы на труп');
             }
+            if ($toStorage?->storage_type === 'post_inbox') {
+                throw new \RuntimeException('Входящие вложения создаются только при доставке письма');
+            }
             if ($toTemp->character_uuid !== null && $toTemp->character_uuid !== $actor->uuid) {
                 throw new \RuntimeException('Нельзя перемещать в чужой слот обмена');
             }
@@ -115,7 +302,7 @@ class StorageMoveService
         }
 
         $this->assertTradeStorageMoveAllowed($actor, $from, $to);
-        $this->assertPersonalBankMoveAllowed($from, $to);
+        $this->transferPolicy->assertAllowed($actor, $from, $to);
     }
 
     private function assertTradeStorageMoveAllowed(Character $actor, array $from, array $to): void
@@ -177,26 +364,6 @@ class StorageMoveService
             ->where('member_uuid', $actor->uuid)
             ->where('active', true)
             ->exists();
-    }
-
-    private function assertPersonalBankMoveAllowed(array $from, array $to): void
-    {
-        $fromType = $this->resolveRegularStorageType($from);
-        $toType = $this->resolveRegularStorageType($to);
-
-        if ($fromType === 'bank' || $toType === 'bank') {
-            $other = $fromType === 'bank' ? $toType : $fromType;
-            if ($other !== 'inventory') {
-                throw new \RuntimeException('Личный банк доступен только для инвентаря');
-            }
-        }
-
-        if ($fromType === 'guild_bank' || $toType === 'guild_bank') {
-            $other = $fromType === 'guild_bank' ? $toType : $fromType;
-            if ($other !== 'inventory') {
-                throw new \RuntimeException('Банк гильдии доступен только для инвентаря');
-            }
-        }
     }
 
     private function assertOwnsRegularSlot(Character $actor, Slot $slot): void
@@ -606,6 +773,7 @@ class StorageMoveService
         $isCorpse = $tempStorage->storage_type === 'corpse';
         $isStation = $isCraft || $isDisassemble;
         $isQuest = $tempStorage->storage_type === 'quest';
+        $isPostInbox = $tempStorage->storage_type === 'post_inbox';
         $toOccupant = $this->getTargetOccupant($toCell);
 
         if ($occupant instanceof Item) {
@@ -635,6 +803,9 @@ class StorageMoveService
             $this->maybeSyncCraftStation($actor, $fromTempSlot);
             if ($isCorpse) {
                 $this->maybeDeactivateEmptyCorpse($fromTempSlot);
+            }
+            if ($isPostInbox && !$this->slotCellResolver->getOccupantForTemporarySlot($fromTempSlot)) {
+                $fromTempSlot->update(['active' => false]);
             }
 
             return ['type' => 'item', 'uuid' => $occupant->uuid];
@@ -790,7 +961,7 @@ class StorageMoveService
             return;
         }
 
-        if ($fromStorage->storage_type === 'inventory' && $toStorage->storage_type === 'trade') {
+        if ($this->playerStorageAccess->isTradeableSourceStorage($actor, $fromStorage) && $toStorage->storage_type === 'trade') {
             $trade = $this->getActiveTrade($actor);
             if (!$trade) {
                 throw new \RuntimeException('Нет активного обмена');
@@ -831,7 +1002,7 @@ class StorageMoveService
             return;
         }
 
-        if ($fromStorage->storage_type === 'trade' && $toStorage->storage_type === 'inventory') {
+        if ($fromStorage->storage_type === 'trade' && $this->playerStorageAccess->isTradeReturnDestination($actor, $toStorage)) {
             $this->removeTradeItemForOccupant($actor, $occupant);
         }
     }
