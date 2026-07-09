@@ -6,12 +6,12 @@
 
     var token = localStorage.getItem('authToken');
     if (!token) {
-        window.location.href = '/';
+        window.location.href = gameUrl('/');
         return;
     }
 
     function apiFetch(url) {
-        return fetch(url, {
+        return fetch(gameUrl(url), {
             headers: { 'Accept': 'application/json', 'Authorization': 'Bearer ' + token },
         }).then(function (r) {
             return r.json().catch(function () { return {}; }).then(function (data) {

@@ -34,6 +34,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/templates', [ItemTemplateController::class, 'index']);
 
     Route::get('/world/sprites', [ZoneEditorController::class, 'sprites']);
+    Route::get('/world/stamps', [ZoneEditorController::class, 'listStamps']);
+    Route::get('/world/stamps/{stampId}', [ZoneEditorController::class, 'getStamp']);
+    Route::post('/world/stamps', [ZoneEditorController::class, 'createStamp']);
+    Route::put('/world/stamps/{stampId}', [ZoneEditorController::class, 'updateStamp']);
+    Route::delete('/world/stamps/{stampId}', [ZoneEditorController::class, 'deleteStamp']);
     Route::put('/world/zones/{zoneSlug}', [ZoneEditorController::class, 'updateZone']);
     Route::put('/world/zones/{zoneSlug}/tiles', [ZoneEditorController::class, 'saveTiles']);
 

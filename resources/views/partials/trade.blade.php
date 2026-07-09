@@ -14,7 +14,7 @@ function getTradeSlotSize() {
 }
 
 function tradeApiUrl(path) {
-    return `/api/trade/${tradeState.characterUuid}${path}`;
+    return gameUrl(`/api/trade/${tradeState.characterUuid}${path}`);
 }
 
 function mergeTradeSlots(trade) {

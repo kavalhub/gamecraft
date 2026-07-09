@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Services\Storage\StorageTransferPolicy;
 use App\Services\Storage\UnrestrictedTransferPolicy;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -21,6 +22,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        if ($appUrl = config('app.url')) {
+            URL::forceRootUrl(rtrim($appUrl, '/'));
+        }
     }
 }

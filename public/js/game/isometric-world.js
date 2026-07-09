@@ -143,7 +143,7 @@
                     console.warn('[WorldView] grass tile failed:', file);
                     pending -= 1;
                 };
-                img.src = '/assets/world/' + file;
+                img.src = gameUrl('/assets/world/' + file);
             });
         },
 
@@ -366,7 +366,7 @@
             if (this.tileImages[path]) return this.tileImages[path];
             var img = new Image();
             img.onload = function () { if (window.WorldView) WorldView.render(); };
-            img.src = '/assets/' + String(path).replace(/^\//, '');
+            img.src = gameUrl('/assets/' + String(path).replace(/^\//, ''));
             this.tileImages[path] = img;
             return img;
         },
