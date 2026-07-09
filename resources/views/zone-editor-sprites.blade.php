@@ -75,7 +75,7 @@
             <span id="bridgeStatus" style="font-size:12px;color:#94a3b8"><span class="status-dot"></span>Связь с редактором</span>
             <select id="folderSelect" aria-label="Папка"></select>
             <input type="search" id="spriteSearch" placeholder="Поиск по имени…">
-            <a href="/zone-editor" target="_blank">Редактор зоны ↗</a>
+            <a href="{{ url('/zone-editor') }}" target="_blank">Редактор зоны ↗</a>
         </div>
         <div class="picker-grid-wrap">
             <div id="spriteGrid" class="picker-grid"></div>
@@ -94,6 +94,8 @@
         </div>
     </aside>
 </div>
+<script>window.GAME_BASE = @json(config('game.base_path'));</script>
+<script src="{{ asset('js/game/game-paths.js') }}?v=20260709a"></script>
 <script src="{{ asset('js/game/zone-editor-bridge.js') }}?v=20260704a"></script>
 <script src="{{ asset('js/game/zone-editor-sprites.js') }}?v=20260704a"></script>
 </body>

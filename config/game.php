@@ -28,10 +28,16 @@ return [
     'world_step_size' => (float) env('GAME_WORLD_STEP_SIZE', 0.75),
 
     /*
-    | Редактор зон: /zone-editor — раскладка тайлов и проходимость.
+    | Редактор зон: /gamecraft/zone-editor — раскладка тайлов и проходимость.
     | Отключите на проде: GAME_ZONE_EDITOR_ENABLED=false
     */
     'zone_editor_enabled' => (bool) env('GAME_ZONE_EDITOR_ENABLED', true),
+
+    /*
+    | URL-префикс приложения (без завершающего слэша).
+    | Страницы: /gamecraft, /gamecraft/play; API: /gamecraft/api/...
+    */
+    'base_path' => rtrim((string) env('GAME_BASE_PATH', '/gamecraft'), '/'),
     'default_window_positions' => [
         'bank' => ['top' => 121, 'left' => 821],
         'mail' => ['top' => 141, 'left' => 509],

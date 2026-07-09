@@ -10,7 +10,7 @@
 
     var token = localStorage.getItem('authToken');
     if (!token) {
-        window.location.href = '/';
+        window.location.href = gameUrl('/');
         return;
     }
 
@@ -20,7 +20,7 @@
         if (options.body && !headers['Content-Type']) {
             headers['Content-Type'] = 'application/json';
         }
-        return fetch(url, Object.assign({}, options, { headers: headers }));
+        return fetch(gameUrl(url), Object.assign({}, options, { headers: headers }));
     }
 
     function cellKey(x, z) {
@@ -29,6 +29,23 @@
 
     function snapCell(x, z) {
         return { x: Math.floor(x), z: Math.floor(z) };
+    }
+
+    function slugifyStampId(name) {
+        return (name || 'stamp').toLowerCase()
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_|_$/g, '')
+            .slice(0, 64) || 'stamp';
+    }
+
+    function cloneCellData(cell) {
+        if (!cell) return null;
+        var copy = {};
+        var ground = cell.ground || cell.sprite || null;
+        if (ground) copy.ground = ground;
+        if (cell.overlay) copy.overlay = cell.overlay;
+        if (cell.walkable === false) copy.walkable = false;
+        return copy;
     }
 
     var Editor = {
@@ -55,6 +72,11 @@
         dirty: false,
         rafId: null,
         hoverCell: null,
+        stamps: [],
+        activeStamp: null,
+        selection: null,
+        selecting: false,
+        selectStart: null,
 
         init: function () {
             this.canvas = document.getElementById('zoneEditorCanvas');
@@ -74,7 +96,7 @@
             this._spaceDown = false;
 
             var self = this;
-            Promise.all([this.loadZones(), this.loadSprites()]).then(function () {
+            Promise.all([this.loadZones(), this.loadSprites(), this.loadStamps()]).then(function () {
                 var slug = window.ZONE_EDITOR_INITIAL_SLUG || (self.zones[0] && self.zones[0].slug) || 'craft_city';
                 var sel = document.getElementById('zoneSelect');
                 if (sel) sel.value = slug;
@@ -98,10 +120,10 @@
             });
             document.getElementById('saveBtn').addEventListener('click', function () { self.save(); });
             document.getElementById('playBtn').addEventListener('click', function () {
-                window.location.href = '/play';
+                window.location.href = gameUrl('/play');
             });
             document.getElementById('openSpritePickerBtn').addEventListener('click', function () {
-                window.open('/zone-editor/sprites', 'zoneEditorSprites', 'width=1100,height=860,menubar=no,toolbar=no,location=no,status=no');
+                window.open(gameUrl('/zone-editor/sprites'), 'zoneEditorSprites', 'width=1100,height=860,menubar=no,toolbar=no,location=no,status=no');
             });
             document.getElementById('showBlocked').addEventListener('change', function (e) {
                 self.showBlocked = e.target.checked;
@@ -111,7 +133,15 @@
                     document.querySelectorAll('.tool-btn').forEach(function (b) { b.classList.remove('active'); });
                     btn.classList.add('active');
                     self.tool = btn.dataset.tool;
+                    if (self.tool === 'stamp') {
+                        self.loadActiveStamp();
+                    }
                 });
+            });
+            document.getElementById('saveStampBtn').addEventListener('click', function () { self.saveSelectionAsStamp(); });
+            document.getElementById('deleteStampBtn').addEventListener('click', function () { self.deleteActiveStamp(); });
+            document.getElementById('stampSelect').addEventListener('change', function () {
+                self.loadActiveStamp();
             });
             document.getElementById('applyBoundsBtn').addEventListener('click', function () { self.applyBounds(); });
             ['boundMinX', 'boundMaxX', 'boundMinZ', 'boundMaxZ'].forEach(function (id) {
@@ -179,6 +209,197 @@
                 opt.textContent = folder + ' (' + count + ')';
                 sel.appendChild(opt);
             }, this);
+        },
+
+        loadStamps: function () {
+            var self = this;
+            return apiFetch('/api/world/stamps').then(function (r) { return r.json(); }).then(function (data) {
+                self.stamps = data.stamps || [];
+                self.renderStampSelect();
+            }).catch(function () {
+                self.stamps = [];
+                self.renderStampSelect();
+            });
+        },
+
+        renderStampSelect: function () {
+            var sel = document.getElementById('stampSelect');
+            if (!sel) return;
+            sel.innerHTML = '<option value="">— выберите штамп —</option>';
+            this.stamps.forEach(function (st) {
+                var opt = document.createElement('option');
+                opt.value = st.id;
+                opt.textContent = st.name + ' (' + st.cell_count + ' клеток)';
+                sel.appendChild(opt);
+            });
+            this.updateStampMeta();
+        },
+
+        updateStampMeta: function () {
+            var el = document.getElementById('stampMeta');
+            if (!el) return;
+            if (this.selection) {
+                var s = this.selection;
+                var w = s.maxX - s.minX + 1;
+                var h = s.maxZ - s.minZ + 1;
+                el.textContent = 'Выделено: ' + w + '×' + h + ' · ' + this.countSelectionCells() + ' клеток с тайлами';
+                return;
+            }
+            if (this.activeStamp) {
+                var meta = this.stamps.find(function (x) { return x.id === this.activeStamp.id; }.bind(this));
+                var size = meta ? (meta.width + '×' + meta.height) : '—';
+                el.textContent = this.activeStamp.name + ' · ' + Object.keys(this.activeStamp.cells).length + ' клеток · ' + size;
+                return;
+            }
+            el.textContent = 'Выделите область и сохраните как штамп';
+        },
+
+        loadActiveStamp: function () {
+            var self = this;
+            var id = document.getElementById('stampSelect').value;
+            if (!id) {
+                this.activeStamp = null;
+                this.updateStampMeta();
+                return Promise.resolve();
+            }
+            return apiFetch('/api/world/stamps/' + encodeURIComponent(id))
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    self.activeStamp = data.stamp || null;
+                    self.updateStampMeta();
+                    if (self.activeStamp) self.preloadStampImages(self.activeStamp.cells);
+                })
+                .catch(function (e) {
+                    self.showMsg(e.message || 'Не удалось загрузить штамп', 'err');
+                });
+        },
+
+        preloadStampImages: function (cells) {
+            var self = this;
+            Object.keys(cells || {}).forEach(function (key) {
+                var cell = cells[key];
+                [self.cellGround(cell), self.cellOverlay(cell)].forEach(function (sp) {
+                    if (sp) self.loadImage(sp);
+                });
+            });
+        },
+
+        normalizeSelection: function (a, b) {
+            return {
+                minX: Math.min(a.x, b.x),
+                maxX: Math.max(a.x, b.x),
+                minZ: Math.min(a.z, b.z),
+                maxZ: Math.max(a.z, b.z),
+            };
+        },
+
+        countSelectionCells: function () {
+            if (!this.selection) return 0;
+            var s = this.selection;
+            var count = 0;
+            for (var x = s.minX; x <= s.maxX; x++) {
+                for (var z = s.minZ; z <= s.maxZ; z++) {
+                    var cell = this.getCell(x, z);
+                    if (cell && !this.isCellEmpty(cell)) count++;
+                }
+            }
+            return count;
+        },
+
+        extractSelectionCells: function () {
+            if (!this.selection) return {};
+            var s = this.selection;
+            var cells = {};
+            for (var x = s.minX; x <= s.maxX; x++) {
+                for (var z = s.minZ; z <= s.maxZ; z++) {
+                    var cell = this.getCell(x, z);
+                    if (!cell || this.isCellEmpty(cell)) continue;
+                    cells[cellKey(x - s.minX, z - s.minZ)] = cloneCellData(cell);
+                }
+            }
+            return cells;
+        },
+
+        saveSelectionAsStamp: function () {
+            var self = this;
+            var cells = this.extractSelectionCells();
+            if (!Object.keys(cells).length) {
+                this.showMsg('Сначала выделите область с тайлами (инструмент «Выделить»)', 'err');
+                return;
+            }
+            var defaultName = 'house_' + (this.stamps.length + 1);
+            var name = window.prompt('Название группы (дом, забор…)', defaultName);
+            if (!name || !name.trim()) return;
+            name = name.trim();
+            var id = slugifyStampId(name);
+            var existing = this.stamps.find(function (s) { return s.id === id; });
+            if (existing && !window.confirm('Штамп «' + id + '» уже есть. Перезаписать?')) {
+                id = id + '_' + Date.now().toString(36).slice(-4);
+                existing = null;
+            }
+            var url = existing ? ('/api/world/stamps/' + encodeURIComponent(id)) : '/api/world/stamps';
+            var method = existing ? 'PUT' : 'POST';
+            var payload = existing ? { name: name, cells: cells } : { id: id, name: name, cells: cells };
+            apiFetch(url, { method: method, body: JSON.stringify(payload) })
+                .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+                .then(function (res) {
+                    if (!res.ok) throw new Error(res.data.error || res.data.message || 'Ошибка сохранения штампа');
+                    self.showMsg('Штамп «' + name + '» сохранён', 'ok');
+                    return self.loadStamps().then(function () {
+                        document.getElementById('stampSelect').value = id;
+                        return self.loadActiveStamp();
+                    });
+                })
+                .catch(function (e) {
+                    self.showMsg(e.message, 'err');
+                });
+        },
+
+        deleteActiveStamp: function () {
+            var self = this;
+            var id = document.getElementById('stampSelect').value;
+            if (!id) {
+                this.showMsg('Выберите штамп для удаления', 'err');
+                return;
+            }
+            if (!window.confirm('Удалить штамп «' + id + '»?')) return;
+            apiFetch('/api/world/stamps/' + encodeURIComponent(id), { method: 'DELETE' })
+                .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+                .then(function (res) {
+                    if (!res.ok) throw new Error(res.data.error || 'Ошибка удаления');
+                    self.activeStamp = null;
+                    self.showMsg('Штамп удалён', 'ok');
+                    return self.loadStamps();
+                })
+                .catch(function (e) { self.showMsg(e.message, 'err'); });
+        },
+
+        placeStampAt: function (ax, az) {
+            if (!this.activeStamp || !this.activeStamp.cells) {
+                this.showMsg('Выберите штамп в списке', 'err');
+                return;
+            }
+            var b = this.zone && this.zone.bounds;
+            var self = this;
+            Object.keys(this.activeStamp.cells).forEach(function (key) {
+                var parts = key.split(',');
+                var rx = parseInt(parts[0], 10);
+                var rz = parseInt(parts[1], 10);
+                var wx = ax + rx;
+                var wz = az + rz;
+                if (b && (wx < b.min_x || wx > b.max_x || wz < b.min_z || wz > b.max_z)) return;
+                var src = self.activeStamp.cells[key];
+                var next = cloneCellData(src);
+                if (!next) return;
+                if (next.walkable === undefined) next.walkable = true;
+                self.cells[cellKey(wx, wz)] = next;
+                [self.cellGround(next), self.cellOverlay(next)].forEach(function (sp) {
+                    if (sp) self.loadImage(sp);
+                });
+            });
+            this.dirty = true;
+            this.updateCellInfo(ax, az);
+            this.setStatus('Штамп вставлен · не забудьте сохранить тайлы');
         },
 
         bindBridge: function () {
@@ -349,7 +570,7 @@
             var self = this;
             var img = new Image();
             img.onload = function () { self.render(); };
-            img.src = '/assets/' + path.replace(/^\//, '');
+            img.src = gameUrl('/assets/' + path.replace(/^\//, ''));
             this.imageCache[path] = img;
             return img;
         },
@@ -537,8 +758,20 @@
                 return;
             }
             if (e.button === 0) {
-                this.painting = true;
                 var w2 = this.screenToWorld(e.offsetX, e.offsetY);
+                var c = snapCell(w2.x, w2.z);
+                if (this.tool === 'select') {
+                    this.selecting = true;
+                    this.selectStart = c;
+                    this.selection = this.normalizeSelection(c, c);
+                    this.updateStampMeta();
+                    return;
+                }
+                if (this.tool === 'stamp') {
+                    this.placeStampAt(c.x, c.z);
+                    return;
+                }
+                this.painting = true;
                 this.applyTool(w2.x, w2.z, false);
             }
         },
@@ -554,7 +787,12 @@
                 this.camera.y = this.panStart.camY + (e.clientY - this.panStart.y);
                 return;
             }
-            if (this.painting) {
+            if (this.selecting && this.selectStart) {
+                this.selection = this.normalizeSelection(this.selectStart, c);
+                this.updateStampMeta();
+                return;
+            }
+            if (this.painting && this.tool !== 'select' && this.tool !== 'stamp') {
                 this.applyTool(w.x, w.z, false);
             }
         },
@@ -563,6 +801,10 @@
             this.painting = false;
             this.panning = false;
             this.panStart = null;
+            if (this.selecting) {
+                this.selecting = false;
+                this.updateStampMeta();
+            }
         },
 
         onWheel: function (e) {
@@ -665,7 +907,46 @@
             }
         },
 
+        drawSelectionOverlay: function () {
+            if (!this.selection) return;
+            var s = this.selection;
+            for (var x = s.minX; x <= s.maxX; x++) {
+                for (var z = s.minZ; z <= s.maxZ; z++) {
+                    var p = this.toScreen(x, z);
+                    ISO.drawDiamond(this.ctx, p.x, p.y, this.zoom, 'rgba(250, 204, 21, 0.18)', 'rgba(250, 204, 21, 0.85)');
+                }
+            }
+        },
+
+        drawStampPreview: function () {
+            if (this.tool !== 'stamp' || !this.activeStamp || !this.hoverCell) return;
+            var self = this;
+            var ax = this.hoverCell.x;
+            var az = this.hoverCell.z;
+            var b = this.zone && this.zone.bounds;
+            Object.keys(this.activeStamp.cells).forEach(function (key) {
+                var parts = key.split(',');
+                var wx = ax + parseInt(parts[0], 10);
+                var wz = az + parseInt(parts[1], 10);
+                if (b && (wx < b.min_x || wx > b.max_x || wz < b.min_z || wz > b.max_z)) return;
+                var cell = self.activeStamp.cells[key];
+                var c = self.toScreen(wx, wz);
+                self.ctx.save();
+                self.ctx.globalAlpha = 0.5;
+                [self.cellGround(cell), self.cellOverlay(cell)].forEach(function (sp) {
+                    if (!sp) return;
+                    var img = self.loadImage(sp);
+                    if (img.complete && img.naturalWidth) {
+                        ISO.drawSprite(self.ctx, img, c.x, c.y, self.zoom);
+                    }
+                });
+                self.ctx.restore();
+                ISO.drawDiamond(self.ctx, c.x, c.y, self.zoom, 'rgba(129, 140, 248, 0.1)', 'rgba(129, 140, 248, 0.55)');
+            });
+        },
+
         drawHoverPreview: function () {
+            if (this.tool === 'stamp' || this.tool === 'select') return;
             if (!this.hoverCell || !this.selectedSprite) return;
             if (this.tool !== 'ground' && this.tool !== 'overlay') return;
             var b = this.zone && this.zone.bounds;
@@ -744,6 +1025,8 @@
             this.ctx.stroke();
             this.ctx.restore();
 
+            this.drawSelectionOverlay();
+            this.drawStampPreview();
             this.drawHoverPreview();
             this.drawMarkers();
         },

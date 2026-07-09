@@ -114,6 +114,8 @@
     </div>
 </div>
 
+<script>window.GAME_BASE = @json(config('game.base_path'));</script>
+<script src="{{ asset('js/game/game-paths.js') }}?v=20260709a"></script>
 <script>
     const registerForm = document.getElementById('registerForm');
     const loginForm = document.getElementById('loginForm');
@@ -122,7 +124,7 @@
 
     async function loadAvatars() {
         try {
-            const res = await fetch('/api/game/meta');
+            const res = await fetch(gameUrl('/api/game/meta'));
             const data = await res.json();
             const grid = document.getElementById('avatarGrid');
             if (!grid || !data.avatars) return;
@@ -159,7 +161,7 @@
             localStorage.setItem('authToken', token);
         }
         showMessage(`✅ Добро пожаловать, ${username}!`, 'success');
-        setTimeout(() => window.location.href = '/play', 1500);
+        setTimeout(() => window.location.href = gameUrl('/play'), 1500);
     }
 
     registerForm.addEventListener('submit', async (e) => {
@@ -169,7 +171,7 @@
         const avatar = document.getElementById('avatar').value || 'warrior';
 
         try {
-            const response = await fetch('/api/register', {
+            const response = await fetch(gameUrl('/api/register'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -195,7 +197,7 @@
         const password = document.getElementById('loginPassword').value;
 
         try {
-            const response = await fetch('/api/login', {
+            const response = await fetch(gameUrl('/api/login'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

@@ -76,6 +76,9 @@
             width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #334155;
             background: #1e293b; color: #e2e8f0; font-size: 13px; margin-bottom: 6px;
         }
+        .stamp-meta { font-size: 11px; color: #64748b; margin-top: 6px; line-height: 1.4; }
+        .stamp-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+        .stamp-actions button { margin-top: 0 !important; }
     </style>
 </head>
 <body>
@@ -108,6 +111,10 @@
                 <button type="button" class="tool-btn" data-tool="block">🚫 Блок</button>
                 <button type="button" class="tool-btn" data-tool="erase">🧹 Стереть</button>
             </div>
+            <div class="tool-row" style="margin-top:6px">
+                <button type="button" class="tool-btn" data-tool="select">📦 Выделить</button>
+                <button type="button" class="tool-btn" data-tool="stamp">🏘 Штамп</button>
+            </div>
             <div class="bounds-meta" style="margin-top:8px">Стереть: сначала объект, потом фон</div>
             <div class="checkbox-row">
                 <input type="checkbox" id="showBlocked" checked>
@@ -118,6 +125,15 @@
             <button type="button" class="primary" id="saveBtn">💾 Сохранить тайлы</button>
             <button type="button" id="playBtn">▶ Играть</button>
             <button type="button" id="openSpritePickerBtn" style="margin-top:6px">🎨 Палитра (большие превью)</button>
+        </div>
+        <div class="editor-section">
+            <label for="stampSelect">Группы (штампы)</label>
+            <select id="stampSelect"></select>
+            <div class="stamp-meta" id="stampMeta">Выделите область и сохраните как штамп</div>
+            <div class="stamp-actions">
+                <button type="button" id="saveStampBtn">💾 Сохранить выделение</button>
+                <button type="button" id="deleteStampBtn" class="danger">🗑 Удалить штамп</button>
+            </div>
         </div>
         <div class="editor-section" style="padding-bottom:0;border-bottom:none;">
             <label for="folderSelect">Папка спрайтов</label>
@@ -130,20 +146,22 @@
         <div class="editor-toolbar">
             <span id="zoneTitle">—</span>
             <span id="cellInfo">Клетка: —</span>
-            <a href="/play">← В игру</a>
+            <a href="{{ url('/play') }}">← В игру</a>
         </div>
         <div class="editor-canvas-wrap">
             <canvas id="zoneEditorCanvas"></canvas>
-            <div class="editor-hint">Фон (dirt_*) + Объект (забор, дом) в одной клетке · ПКМ — проходимость · двойной клик — сброс вида</div>
+            <div class="editor-hint">Штамп: сохраните группу спрайтов и вставляйте целиком · после вставки можно править клетки · ПКМ — проходимость · Space+ЛКМ — панорама</div>
             <div class="editor-status" id="editorStatus">Загрузка…</div>
         </div>
     </main>
 </div>
 <script>
     window.ZONE_EDITOR_INITIAL_SLUG = @json($slug ?? null);
+    window.GAME_BASE = @json(config('game.base_path'));
 </script>
 <script src="{{ asset('js/game/iso-tile-render.js') }}?v=20260704f"></script>
+<script src="{{ asset('js/game/game-paths.js') }}?v=20260709a"></script>
 <script src="{{ asset('js/game/zone-editor-bridge.js') }}?v=20260704a"></script>
-<script src="{{ asset('js/game/zone-editor.js') }}?v=20260704m"></script>
+<script src="{{ asset('js/game/zone-editor.js') }}?v=20260704n"></script>
 </body>
 </html>

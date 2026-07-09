@@ -1828,6 +1828,8 @@
 <div id="msg" class="msg"></div>
 <div id="itemTooltip" class="tooltip"></div>
 @include('partials.resource-quantity-modal')
+<script>window.GAME_BASE = @json(config('game.base_path'));</script>
+<script src="{{ asset('js/game/game-paths.js') }}?v=20260709a"></script>
 <script src="{{ asset('js/game/game.bundle.js') }}?v=20260703i"></script>
 <script src="{{ asset('js/game/iso-tile-render.js') }}?v=20260704j"></script>
 <script src="{{ asset('js/game/iso-character.js') }}?v=20260704a"></script>
@@ -1850,7 +1852,7 @@
             return headers;
         },
         async fetch(url, options = {}) {
-            const response = await fetch(url, {
+            const response = await fetch(gameUrl(url), {
                 ...options,
                 headers: this.headers(options.headers || {}),
             });
@@ -1858,7 +1860,7 @@
                 localStorage.removeItem('authToken');
                 localStorage.removeItem('characterUuid');
                 localStorage.removeItem('username');
-                window.location.href = '/';
+                window.location.href = gameUrl('/');
             }
             return response;
         },
@@ -3634,7 +3636,7 @@
         const characterUuid = localStorage.getItem('characterUuid');
         const authToken = localStorage.getItem('authToken');
         if (!characterUuid || !authToken) {
-            window.location.href = '/';
+            window.location.href = gameUrl('/');
             return;
         }
 
